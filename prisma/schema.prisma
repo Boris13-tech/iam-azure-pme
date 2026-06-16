@@ -1,0 +1,86 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String     @id @default(uuid())
+  email     String     @unique
+  name      String
+  azureId   String?    @unique
+  status    String     @default("ACTIVE")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  roles     UserRole[]
+  auditLogs AuditLog[]
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isCustom    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  action      String
+  resource    String
+  scope       String?
+  createdAt   DateTime @default(now())
+
+  roles       RolePermission[]
+
+  @@unique([action, resource])
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  action    String
+  target    String?
+  ip        String?
+  result    String?
+  timestamp DateTime @default(now())
+
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+}
+
+model AccessPolicy {
+  id               String   @id @default("global")
+  mfa              Boolean  @default(true)
+  geoBlock         Boolean  @default(false)
+  sessionTimeout   Boolean  @default(true)
+  passwordRotation Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+}
