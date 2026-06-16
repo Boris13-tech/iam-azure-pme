@@ -2,11 +2,10 @@ import { ConfidentialClientApplication, Configuration, LogLevel } from "@azure/m
 
 
 export const msalConfig: Configuration = {
-  auth: {
-    clientId: process.env.NEXT_PUBLIC_AZURE_AD_B2C_CLIENT_ID || "",
-    authority: process.env.NEXT_PUBLIC_AZURE_AD_B2C_AUTHORITY || "",
-    knownAuthorities: [process.env.NEXT_PUBLIC_AZURE_AD_B2C_TENANT_NAME + ".b2clogin.com"],
-    clientSecret: process.env.AZURE_AD_B2C_CLIENT_SECRET || "",
+    auth: {
+    clientId: process.env.GRAPH_CLIENT_ID || "",
+    authority: "https://login.microsoftonline.com/" + process.env.GRAPH_TENANT_ID,
+    clientSecret: process.env.GRAPH_CLIENT_SECRET || "",
   },
   system: {
     loggerOptions: {
