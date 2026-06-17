@@ -40,7 +40,7 @@ export async function middleware(req: NextRequest) {
 
     // Set user claims in headers for downstream API routes
     const requestHeaders = new Headers(req.headers);
-    requestHeaders.set("x-user-id", decoded.sub || "");
+    requestHeaders.set("x-user-id", (decoded.oid || decoded.sub || "") as string);
     requestHeaders.set("x-user-email", (decoded as any).emails?.length ? (decoded as any).emails[0] : "");
     
     // Simple Rate Limiting Simulation per IP
