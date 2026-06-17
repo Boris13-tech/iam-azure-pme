@@ -2,18 +2,27 @@ import * as jose from "jose";
 
 /**
  * Server-side token validation (Edge-compatible with jose)
+ * Compatible avec Microsoft Entra ID (anciennement Azure AD)
  */
 export const verifyToken = async (token: string) => {
   try {
+    const tenantId = process.env.GRAPH_TENANT_ID;
+    const clientId = process.env.GRAPH_CLIENT_ID;
+
+    if (!tenantId || !clientId) {
+      console.error("Missing GRAPH_TENANT_ID or GRAPH_CLIENT_ID env variables");
+      return null;
+    }
+
     const JWKS = jose.createRemoteJWKSet(
       new URL(
-        `https://${process.env.NEXT_PUBLIC_AZURE_AD_B2C_TENANT_NAME}.b2clogin.com/${process.env.NEXT_PUBLIC_AZURE_AD_B2C_TENANT_NAME}.onmicrosoft.com/${process.env.NEXT_PUBLIC_AZURE_AD_B2C_PRIMARY_USER_FLOW}/discovery/v2.0/keys`
+        `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`
       )
     );
 
     const { payload } = await jose.jwtVerify(token, JWKS, {
-      audience: process.env.NEXT_PUBLIC_AZURE_AD_B2C_CLIENT_ID,
-      issuer: `https://${process.env.NEXT_PUBLIC_AZURE_AD_B2C_TENANT_NAME}.b2clogin.com/${process.env.GRAPH_TENANT_ID}/v2.0/`, // Replace GRAPH_TENANT_ID with the exact issuer tenant ID if different
+      audience: clientId,
+      issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
     });
 
     return payload;
