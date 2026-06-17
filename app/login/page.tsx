@@ -22,22 +22,33 @@ export default function LoginPage() {
 
   // Initialisation de MSAL au chargement de la page
   useEffect(() => {
+    let isMounted = true;
+    
     msalInstance.initialize().then(() => {
-      // Gère le retour de Microsoft après la redirection
       return msalInstance.handleRedirectPromise();
     }).then((response) => {
+      if (!isMounted) return;
       if (response) {
-        // Succès ! Microsoft nous a renvoyé ici avec le token
         document.cookie = `access_token=${response.accessToken}; path=/; max-age=3600`;
         router.push('/dashboard/audit');
       } else {
-        // Pas de réponse = on affiche la page de login normale
         setIsLoading(false);
       }
     }).catch(e => {
-      console.error("Erreur d'initialisation MSAL", e);
-      setIsLoading(false);
+      if (isMounted) setIsLoading(false);
     });
+
+    // SÉCURITÉ ANTI-BLOCAGE :
+    // Si MSAL (Microsoft) reste silencieux ou bug à cause du cache,
+    // on force le déblocage des boutons après 1,5 seconde.
+    const fallbackTimer = setTimeout(() => {
+      if (isMounted) setIsLoading(false);
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(fallbackTimer);
+    };
   }, [router]);
 
   const handleMicrosoftLogin = async () => {
@@ -115,3 +126,4 @@ export default function LoginPage() {
     </div>
   );
 }
+
