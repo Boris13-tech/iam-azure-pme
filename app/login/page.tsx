@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Lock, User, ArrowRight, Loader2 } from 'lucide-react';
+import { ShieldCheck, Lock, User, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { PublicClientApplication } from '@azure/msal-browser';
 
@@ -17,7 +17,8 @@ const msalConfig = {
 const msalInstance = new PublicClientApplication(msalConfig);
 
 export default function LoginPage() {
-  const [isLoading, setIsLoading] = useState(true); // Démarre en chargement le temps de vérifier MSAL
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(""); // Pour afficher l'erreur visiblement
   const router = useRouter();
 
   // Initialisation de MSAL au chargement de la page
@@ -25,22 +26,26 @@ export default function LoginPage() {
     let isMounted = true;
     
     msalInstance.initialize().then(() => {
+      // Gère le retour de Microsoft après la redirection
       return msalInstance.handleRedirectPromise();
     }).then((response) => {
       if (!isMounted) return;
       if (response) {
+        // Succès ! Microsoft nous a renvoyé ici avec le token
         document.cookie = `access_token=${response.accessToken}; path=/; max-age=3600`;
-        router.push('/dashboard/audit');
+        window.location.href = '/dashboard/audit'; // Force le rechargement complet pour s'assurer que le middleware voit le cookie
       } else {
+        // Pas de réponse = on affiche la page de login normale
         setIsLoading(false);
       }
     }).catch(e => {
-      if (isMounted) setIsLoading(false);
+      if (!isMounted) return;
+      console.error("Erreur MSAL", e);
+      setErrorMsg(e.message || JSON.stringify(e));
+      setIsLoading(false);
     });
 
-    // SÉCURITÉ ANTI-BLOCAGE :
-    // Si MSAL (Microsoft) reste silencieux ou bug à cause du cache,
-    // on force le déblocage des boutons après 1,5 seconde.
+    // SÉCURITÉ ANTI-BLOCAGE
     const fallbackTimer = setTimeout(() => {
       if (isMounted) setIsLoading(false);
     }, 1500);
@@ -49,27 +54,25 @@ export default function LoginPage() {
       isMounted = false;
       clearTimeout(fallbackTimer);
     };
-  }, [router]);
+  }, []);
 
   const handleMicrosoftLogin = async () => {
     setIsLoading(true);
+    setErrorMsg("");
     try {
-      // Utilise la redirection complète plutôt que la popup (100% fiable, pas de blocage)
       await msalInstance.loginRedirect({
         scopes: ["user.read"]
       });
-      // Le code s'arrête ici car le navigateur redirige vers Microsoft
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erreur de connexion:", error);
       setIsLoading(false);
-      alert("La redirection a échoué. Vérifiez vos clés dans Vercel.");
+      setErrorMsg(error.message || "La redirection a échoué. Vérifiez vos clés dans Vercel.");
     }
   };
 
   const handleFallbackLogin = () => {
-    // Mode de secours (Bypass local)
     document.cookie = "access_token=mock_dev_token; path=/; max-age=3600";
-    router.push('/dashboard/audit');
+    window.location.href = '/dashboard/audit'; // Force reload
   };
 
   return (
@@ -87,6 +90,13 @@ export default function LoginPage() {
           <h1 className="text-3xl font-extrabold text-white tracking-tight">LUXIA Secure Access</h1>
           <p className="text-slate-400 mt-2 text-center text-sm font-medium">Authentification PME via Microsoft Entra ID.</p>
         </div>
+
+        {errorMsg && (
+          <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-xl text-red-200 text-sm flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <p className="break-words font-medium">{errorMsg}</p>
+          </div>
+        )}
 
         <div className="space-y-6">
           <div className="space-y-4">
@@ -126,4 +136,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
