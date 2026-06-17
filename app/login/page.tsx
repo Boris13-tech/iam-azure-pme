@@ -32,7 +32,7 @@ export default function LoginPage() {
       if (!isMounted) return;
       if (response) {
         // Succès ! Microsoft nous a renvoyé ici avec le token
-        document.cookie = `access_token=${response.accessToken}; path=/; max-age=3600`;
+        document.cookie = `access_token=${response.idToken}; path=/; max-age=3600`;
         window.location.href = '/dashboard/audit'; // Force le rechargement complet pour s'assurer que le middleware voit le cookie
       } else {
         // Pas de réponse = on affiche la page de login normale

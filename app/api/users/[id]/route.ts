@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/permissions";
+import { updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const userId = req.headers.get("x-user-id");
@@ -27,11 +28,24 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       }
     });
 
+    // Update in Azure AD
+    if (updatedUser.azureId && process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+      if (body.status !== undefined) {
+        await updateAzureUserStatus(updatedUser.azureId, body.status === "ACTIVE");
+      }
+      if (body.name !== undefined) {
+        await updateAzureUser(updatedUser.azureId, body.name);
+      }
+    }
+
     if (body.roleId) {
-      await prisma.userRole.upsert({
-        where: { userId_roleId: { userId: params.id, roleId: body.roleId } },
-        create: { userId: params.id, roleId: body.roleId },
-        update: {},
+      // Clean up other roles first or upsert
+      await prisma.userRole.deleteMany({
+        where: { userId: params.id }
+      });
+      
+      await prisma.userRole.create({
+        data: { userId: params.id, roleId: body.roleId },
       });
     }
 
@@ -67,6 +81,11 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
       where: { id: params.id },
       data: { status: "INACTIVE" }
     });
+
+    // Update in Azure AD (deactivate account)
+    if (deletedUser.azureId && process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+      await updateAzureUserStatus(deletedUser.azureId, false);
+    }
 
     await prisma.auditLog.create({
       data: {

@@ -1,7 +1,15 @@
+"use client";
 import React from "react";
 import Link from "next/link";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const handleLogout = () => {
+    // Clear access token cookie
+    document.cookie = "access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    // Redirect to login page
+    window.location.href = "/login";
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans">
       <aside className="w-64 bg-[#0f172a] text-slate-300 flex-col hidden md:flex shadow-xl z-10">
@@ -16,7 +24,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <Link href="/dashboard/settings" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Politiques d'Accès</Link>
         </nav>
         <div className="p-5 border-t border-white/10">
-          <button className="w-full bg-indigo-600/90 hover:bg-indigo-500 py-2.5 rounded-xl transition-colors font-bold text-white shadow-lg text-sm">
+          <button 
+            onClick={handleLogout}
+            className="w-full bg-indigo-600/90 hover:bg-indigo-500 py-2.5 rounded-xl transition-colors font-bold text-white shadow-lg text-sm"
+          >
             Déconnexion
           </button>
         </div>

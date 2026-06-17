@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/permissions";
+import { syncAzureUsers, createAzureUser } from "@/lib/graph";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,10 @@ export async function GET(req: Request) {
   const allowed = await hasPermission(userId, "read", "users");
   if (!allowed) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  if (process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+    await syncAzureUsers();
   }
 
   const { searchParams } = new URL(req.url);
@@ -39,17 +44,28 @@ export async function POST(req: Request) {
   const body = await req.json();
   
   try {
+    let azureId = body.azureId || null;
+
+    if (process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+      try {
+        const azureUser = await createAzureUser(body.name, body.email);
+        azureId = azureUser.azureId;
+      } catch (graphError: any) {
+        console.error("Failed to create user in Azure AD:", graphError);
+        return NextResponse.json({ error: `Erreur Azure AD Graph: ${graphError.message || graphError}` }, { status: 400 });
+      }
+    }
+
     const newUser = await prisma.user.create({
       data: {
         email: body.email,
         name: body.name,
-        azureId: body.azureId,
+        azureId: azureId,
         status: "ACTIVE",
       }
     });
 
     if (body.roleId) {
-      // In a real app, verify role exists
       try {
         await prisma.userRole.create({
           data: {
