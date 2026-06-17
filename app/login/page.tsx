@@ -37,7 +37,7 @@ export default function LoginPage() {
       document.cookie = `access_token=${loginResponse.accessToken}; path=/; max-age=3600`;
       
       // Redirection vers le tableau d'audit
-      router.push('/audit');
+      router.push('/dashboard/audit');
     } catch (error) {
       console.error("Erreur de connexion:", error);
       setIsLoading(false);
@@ -48,7 +48,7 @@ export default function LoginPage() {
   const handleFallbackLogin = () => {
     // Mode de secours (Bypass local)
     document.cookie = "access_token=mock_dev_token; path=/; max-age=3600";
-    router.push('/audit');
+    router.push('/dashboard/audit');
   };
 
   return (
