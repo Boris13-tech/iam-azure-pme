@@ -9,11 +9,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           LUXIA
         </div>
         <nav className="flex-1 px-4 py-6 space-y-2.5">
-          <Link href="/" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Dashboard</Link>
-          <Link href="/users" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Utilisateurs</Link>
-          <Link href="/roles" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Rôles & Permissions</Link>
-          <Link href="/audit" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Journal d'Audit</Link>
-          <Link href="/settings" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Politiques d'Accès</Link>
+          <Link href="/dashboard" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Dashboard</Link>
+          <Link href="/dashboard/users" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Utilisateurs</Link>
+          <Link href="/dashboard/roles" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Rôles & Permissions</Link>
+          <Link href="/dashboard/audit" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Journal d'Audit</Link>
+          <Link href="/dashboard/settings" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Politiques d'Accès</Link>
         </nav>
         <div className="p-5 border-t border-white/10">
           <button className="w-full bg-indigo-600/90 hover:bg-indigo-500 py-2.5 rounded-xl transition-colors font-bold text-white shadow-lg text-sm">
