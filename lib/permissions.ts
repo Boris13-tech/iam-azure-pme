@@ -29,7 +29,12 @@ async function getOrCreateUser(userId: string) {
   });
 
   // Onboard user if they exist in Azure AD but not in our local DB
-  if (!user && userId !== "mock-admin-id" && process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+  const hasGraphConfig = 
+    (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
+    process.env.GRAPH_CLIENT_SECRET && 
+    process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+
+  if (!user && userId !== "mock-admin-id" && hasGraphConfig) {
     try {
       const client = await getGraphClient();
       const graphUser = await client.api(`/users/${userId}`)

@@ -29,7 +29,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     });
 
     // Update in Azure AD
-    if (updatedUser.azureId && process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+    const hasGraphConfig = 
+      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
+      process.env.GRAPH_CLIENT_SECRET && 
+      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+
+    if (updatedUser.azureId && hasGraphConfig) {
       if (body.status !== undefined) {
         await updateAzureUserStatus(updatedUser.azureId, body.status === "ACTIVE");
       }
@@ -83,7 +88,12 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     });
 
     // Update in Azure AD (deactivate account)
-    if (deletedUser.azureId && process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+    const hasGraphConfig = 
+      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
+      process.env.GRAPH_CLIENT_SECRET && 
+      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+
+    if (deletedUser.azureId && hasGraphConfig) {
       await updateAzureUserStatus(deletedUser.azureId, false);
     }
 

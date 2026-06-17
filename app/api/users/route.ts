@@ -14,7 +14,12 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+  const hasGraphConfig = 
+    (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
+    process.env.GRAPH_CLIENT_SECRET && 
+    process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+
+  if (hasGraphConfig) {
     await syncAzureUsers();
   }
 
@@ -46,7 +51,12 @@ export async function POST(req: Request) {
   try {
     let azureId = body.azureId || null;
 
-    if (process.env.GRAPH_CLIENT_ID && process.env.GRAPH_CLIENT_ID !== "dummy_client_id") {
+    const hasGraphConfig = 
+    (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
+    process.env.GRAPH_CLIENT_SECRET && 
+    process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+
+  if (hasGraphConfig) {
       try {
         const azureUser = await createAzureUser(body.name, body.email);
         azureId = azureUser.azureId;
