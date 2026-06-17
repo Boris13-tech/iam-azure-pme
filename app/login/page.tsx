@@ -17,31 +17,41 @@ const msalConfig = {
 const msalInstance = new PublicClientApplication(msalConfig);
 
 export default function LoginPage() {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // DÈmarre en chargement le temps de vÈrifier MSAL
   const router = useRouter();
 
   // Initialisation de MSAL au chargement de la page
   useEffect(() => {
-    msalInstance.initialize().catch(e => console.error("Erreur d'initialisation MSAL", e));
-  }, []);
+    msalInstance.initialize().then(() => {
+      // GËre le retour de Microsoft aprËs la redirection
+      return msalInstance.handleRedirectPromise();
+    }).then((response) => {
+      if (response) {
+        // SuccËs ! Microsoft nous a renvoyÈ ici avec le token
+        document.cookie = `access_token=${response.accessToken}; path=/; max-age=3600`;
+        router.push('/dashboard/audit');
+      } else {
+        // Pas de rÈponse = on affiche la page de login normale
+        setIsLoading(false);
+      }
+    }).catch(e => {
+      console.error("Erreur d'initialisation MSAL", e);
+      setIsLoading(false);
+    });
+  }, [router]);
 
   const handleMicrosoftLogin = async () => {
     setIsLoading(true);
     try {
-      // Ouvre la popup bleue officielle de Microsoft
-      const loginResponse = await msalInstance.loginPopup({
-        scopes: ["user.read"] // Demande l'acc√®s au profil basique
+      // Utilise la redirection complËte plutÙt que la popup (100% fiable, pas de blocage)
+      await msalInstance.loginRedirect({
+        scopes: ["user.read"]
       });
-      
-      // Succ√®s ! On sauvegarde le vrai jeton d'acc√®s
-      document.cookie = `access_token=${loginResponse.accessToken}; path=/; max-age=3600`;
-      
-      // Redirection vers le tableau d'audit
-      router.push('/dashboard/audit');
+      // Le code s'arrÍte ici car le navigateur redirige vers Microsoft
     } catch (error) {
       console.error("Erreur de connexion:", error);
       setIsLoading(false);
-      alert("La connexion a √©chou√© ou a √©t√© annul√©e. V√©rifiez vos cl√©s dans Vercel.");
+      alert("La redirection a ÈchouÈ. VÈrifiez vos clÈs dans Vercel.");
     }
   };
 
@@ -79,7 +89,7 @@ export default function LoginPage() {
               ) : (
                 <Lock className="w-5 h-5 group-hover:scale-110 transition-transform" />
               )}
-              {isLoading ? "Connexion en cours..." : "Connexion avec Microsoft"}
+              {isLoading ? "Chargement Microsoft..." : "Connexion avec Microsoft"}
             </button>
             
             <div className="relative flex items-center py-2">
@@ -95,7 +105,7 @@ export default function LoginPage() {
             >
               <div className="flex items-center gap-3">
                 <User className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" />
-                <span>Acc√®s Secours</span>
+                <span>AccËs Secours</span>
               </div>
               <ArrowRight className="w-5 h-5 text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-all" />
             </button>
