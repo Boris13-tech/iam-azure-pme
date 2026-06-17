@@ -1,4 +1,4 @@
-"use client";
+ï»¿"use client";
 
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Lock, User, ArrowRight, Loader2 } from 'lucide-react';
@@ -17,21 +17,21 @@ const msalConfig = {
 const msalInstance = new PublicClientApplication(msalConfig);
 
 export default function LoginPage() {
-  const [isLoading, setIsLoading] = useState(true); // Démarre en chargement le temps de vérifier MSAL
+  const [isLoading, setIsLoading] = useState(true); // DÃ©marre en chargement le temps de vÃ©rifier MSAL
   const router = useRouter();
 
   // Initialisation de MSAL au chargement de la page
   useEffect(() => {
     msalInstance.initialize().then(() => {
-      // Gère le retour de Microsoft après la redirection
+      // GÃ¨re le retour de Microsoft aprÃ¨s la redirection
       return msalInstance.handleRedirectPromise();
     }).then((response) => {
       if (response) {
-        // Succès ! Microsoft nous a renvoyé ici avec le token
+        // SuccÃ¨s ! Microsoft nous a renvoyÃ© ici avec le token
         document.cookie = `access_token=${response.accessToken}; path=/; max-age=3600`;
         router.push('/dashboard/audit');
       } else {
-        // Pas de réponse = on affiche la page de login normale
+        // Pas de rÃ©ponse = on affiche la page de login normale
         setIsLoading(false);
       }
     }).catch(e => {
@@ -43,15 +43,15 @@ export default function LoginPage() {
   const handleMicrosoftLogin = async () => {
     setIsLoading(true);
     try {
-      // Utilise la redirection complète plutôt que la popup (100% fiable, pas de blocage)
+      // Utilise la redirection complÃ¨te plutÃ´t que la popup (100% fiable, pas de blocage)
       await msalInstance.loginRedirect({
         scopes: ["user.read"]
       });
-      // Le code s'arrête ici car le navigateur redirige vers Microsoft
+      // Le code s'arrÃªte ici car le navigateur redirige vers Microsoft
     } catch (error) {
       console.error("Erreur de connexion:", error);
       setIsLoading(false);
-      alert("La redirection a échoué. Vérifiez vos clés dans Vercel.");
+      alert("La redirection a Ã©chouÃ©. VÃ©rifiez vos clÃ©s dans Vercel.");
     }
   };
 
@@ -105,7 +105,7 @@ export default function LoginPage() {
             >
               <div className="flex items-center gap-3">
                 <User className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" />
-                <span>Accès Secours</span>
+                <span>AccÃ¨s Secours</span>
               </div>
               <ArrowRight className="w-5 h-5 text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-all" />
             </button>
