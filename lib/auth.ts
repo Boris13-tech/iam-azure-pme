@@ -1,11 +1,11 @@
 import { ConfidentialClientApplication, Configuration, LogLevel } from "@azure/msal-node";
 
-
 export const msalConfig: Configuration = {
     auth: {
-    clientId: process.env.GRAPH_CLIENT_ID || "",
-    authority: "https://login.microsoftonline.com/" + process.env.GRAPH_TENANT_ID,
-    clientSecret: process.env.GRAPH_CLIENT_SECRET || "",
+    clientId: process.env.GRAPH_CLIENT_ID || "dummy_client_id",
+    authority: "https://login.microsoftonline.com/" + (process.env.GRAPH_TENANT_ID || "dummy_tenant_id"),
+    // Evite le crash au moment du build sur Vercel si la variable est manquante
+    clientSecret: process.env.GRAPH_CLIENT_SECRET || "dummy_secret_to_prevent_build_crash",
   },
   system: {
     loggerOptions: {
@@ -31,4 +31,3 @@ export const getAccessTokenPushed = async (scopes: string[]) => {
     return null;
   }
 };
-
