@@ -362,3 +362,38 @@ model Assignment {
   @@index([organizationId, tenantId, subjectId, status])
   @@index([organizationId, tenantId, entitlementId])
 }
+
+enum AuthorizationShadowStatus {
+  PARITY
+  DIVERGENCE
+  NATIVE_ERROR
+  LEGACY_ERROR
+}
+
+model AuthorizationShadowObservation {
+  id             String @id @default(uuid())
+
+  organizationId String
+  tenantId       String
+  subjectId      String
+
+  action         String
+  resource       String
+
+  legacyAllowed  Boolean?
+  nativeAllowed  Boolean?
+
+  nativeReasonCode String?
+
+  status AuthorizationShadowStatus
+
+  nativeAssignmentIds Json?
+  nativeEntitlementIds Json?
+
+  errorCode String?
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, tenantId, createdAt])
+  @@index([status, createdAt])
+}

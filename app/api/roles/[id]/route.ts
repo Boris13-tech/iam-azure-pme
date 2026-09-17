@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { hasLegacyPermission } from "@/lib/auth/legacy-auth-adapter";
+import { checkPermission } from "@/lib/auth/authorization-gateway";
+
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "manage", "roles");
+    const allowed = await checkPermission(auth, { action: "manage", resource: "roles" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const body = await req.json();
@@ -57,7 +58,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "manage", "roles");
+    const allowed = await checkPermission(auth, { action: "manage", resource: "roles" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const role = await rawPrisma.role.findUnique({ where: { id: params.id } });

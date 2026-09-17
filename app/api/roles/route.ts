@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { hasLegacyPermission } from "@/lib/auth/legacy-auth-adapter";
+import { checkPermission } from "@/lib/auth/authorization-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "read", "roles");
+    const allowed = await checkPermission(auth, { action: "read", resource: "roles" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const roles = await rawPrisma.role.findMany({
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "manage", "roles");
+    const allowed = await checkPermission(auth, { action: "manage", resource: "roles" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const body = await req.json();

@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { hasLegacyPermission, resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
+import { checkPermission } from "@/lib/auth/authorization-gateway";
+import { resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
+
 import { updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "update", "users");
+    const allowed = await checkPermission(auth, { action: "update", resource: "users" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const legacyUser = await resolveLegacyUser(auth);
@@ -85,7 +87,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "delete", "users");
+    const allowed = await checkPermission(auth, { action: "delete", resource: "users" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const legacyUser = await resolveLegacyUser(auth);
