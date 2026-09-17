@@ -127,22 +127,27 @@ model Tenant {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   subjects     Subject[]
   resources    Resource[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
 }
 
 model ProviderConnection {
-  id               String       @id @default(uuid())
-  organizationId   String
-  providerType     ProviderType
-  externalTenantId String // e.g., Entra Tenant ID (tid)
-  name             String
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  id              String       @id @default(uuid())
+  organizationId  String
+  providerType    ProviderType
+  externalScopeId String // e.g., Entra Tenant ID, AWS Account ID
+  name            String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   identityAccounts IdentityAccount[]
   resources        Resource[]
 
-  @@unique([organizationId, providerType, externalTenantId])
+  @@unique([organizationId, id])
+  @@unique([organizationId, providerType, externalScopeId])
+  @@index([organizationId])
 }
 
 model Subject {
@@ -155,22 +160,29 @@ model Subject {
   updatedAt      DateTime    @updatedAt
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant       Tenant            @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   identities   IdentityAccount[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, tenantId])
 }
 
 model IdentityAccount {
   id                   String   @id @default(uuid())
+  organizationId       String
   subjectId            String
   providerConnectionId String
   externalObjectId     String // e.g., Entra User OID
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  subject            Subject            @relation(fields: [subjectId], references: [id], onDelete: Restrict)
-  providerConnection ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Restrict)
+  subject            Subject            @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
+  providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
 
-  @@unique([providerConnectionId, externalObjectId])
+  @@unique([organizationId, providerConnectionId, externalObjectId])
+  @@index([organizationId])
+  @@index([organizationId, subjectId])
+  @@index([organizationId, providerConnectionId])
 }
 
 enum ResourceType {
@@ -203,12 +215,11 @@ model Resource {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  providerConnection ProviderConnection? @relation(fields: [providerConnectionId], references: [id], onDelete: SetNull)
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant             Tenant              @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  providerConnection ProviderConnection? @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
 
-  @@index([organizationId])
-  @@index([tenantId])
-  @@index([providerConnectionId])
+  @@unique([organizationId, id])
   @@index([organizationId, tenantId])
+  @@index([organizationId, providerConnectionId])
 }
