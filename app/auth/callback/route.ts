@@ -90,6 +90,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "IDENTITY_NOT_ONBOARDED" }, { status: 403 });
     }
 
+    // Assert Tenant Boundary
+    if (identityAccount.tenantId !== transaction.expectedTenantId) {
+      console.error(`TENANT_BOUNDARY_VIOLATION: expected ${transaction.expectedTenantId}, got ${identityAccount.tenantId}`);
+      return NextResponse.json({ error: "TENANT_BOUNDARY_VIOLATION" }, { status: 403 });
+    }
+
     const subject = identityAccount.subject;
 
     // 9. Create Session
@@ -98,7 +104,7 @@ export async function GET(request: Request) {
 
     const { session, rawToken } = await SessionStore.createSession({
       organizationId: transaction.expectedOrganizationId,
-      tenantId: subject.tenantId,
+      tenantId: transaction.expectedTenantId,
       subjectId: subject.id,
       identityAccountId: identityAccount.id
     }, ip, userAgent);

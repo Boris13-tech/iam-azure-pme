@@ -10,19 +10,28 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const returnTo = searchParams.get("returnTo") || "/dashboard";
+    const tenantId = searchParams.get("tenant");
     const connectionId = searchParams.get("connection");
 
-    if (!connectionId) {
-      return NextResponse.json({ error: "Missing connection parameter" }, { status: 400 });
+    if (!tenantId || !connectionId) {
+      return NextResponse.json({ error: "Missing tenant or connection parameter" }, { status: 400 });
     }
 
-    // 1. Lookup ProviderConnection
+    // 1. Lookup Tenant and ProviderConnection
+    const tenant = await rawPrisma.tenant.findUnique({
+      where: { id: tenantId }
+    });
+    
+    if (!tenant) {
+      return NextResponse.json({ error: "Invalid tenant" }, { status: 400 });
+    }
+
     const provider = await rawPrisma.providerConnection.findUnique({
       where: { id: connectionId }
     });
 
-    if (!provider) {
-      return NextResponse.json({ error: "Invalid connection" }, { status: 400 });
+    if (!provider || provider.organizationId !== tenant.organizationId) {
+      return NextResponse.json({ error: "Invalid connection for this tenant" }, { status: 400 });
     }
 
     if (provider.providerType !== "MICROSOFT_ENTRA") {
@@ -45,6 +54,7 @@ export async function GET(request: Request) {
       nonce,
       codeVerifier: code_verifier,
       expectedOrganizationId: provider.organizationId,
+      expectedTenantId: tenant.id,
       expectedProviderConnectionId: provider.id,
       returnTo,
       expiresInMinutes: 10

@@ -26,7 +26,8 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
+      DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public
+      DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
 
     steps:
@@ -46,6 +47,8 @@ jobs:
 
     - name: Deploy Prisma Migrations
       run: npx prisma migrate deploy
+      env:
+        DATABASE_URL: ${{ env.DATABASE_MIGRATION_URL }}
 
     - name: Run Security Tests
       run: npm run test:security

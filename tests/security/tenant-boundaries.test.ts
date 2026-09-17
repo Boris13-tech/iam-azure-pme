@@ -89,4 +89,52 @@ describe("Tenant Boundaries Security", () => {
       })
     ).rejects.toThrow();
   });
+
+  describe("Composite Key Relational Boundaries", () => {
+    it("Session with tenantA but Subject from tenantB should throw DB DENY", async () => {
+      // Prisma itself shouldn't even allow this if composite fields are correct, but if bypassed, DB denies
+      await expect(
+        rawPrisma.session.create({
+          data: {
+            id: "fake-session",
+            organizationId: orgA,
+            tenantId: tenantA, 
+            subjectId: "subject-from-tenant-b", // Mismatch
+            identityAccountId: "dummy-id",
+            expiresAt: new Date()
+          }
+        })
+      ).rejects.toThrow();
+    });
+
+    it("Session with SubjectA but IdentityAccount from SubjectB should throw DB DENY", async () => {
+      await expect(
+        rawPrisma.session.create({
+          data: {
+            id: "fake-session-2",
+            organizationId: orgA,
+            tenantId: tenantA, 
+            subjectId: subjectA, 
+            identityAccountId: "identity-from-subject-b", // Mismatch
+            expiresAt: new Date()
+          }
+        })
+      ).rejects.toThrow();
+    });
+
+    it("IdentityAccount with tenantA but Subject from tenantB should throw DB DENY", async () => {
+      await expect(
+        rawPrisma.identityAccount.create({
+          data: {
+            id: "fake-identity",
+            organizationId: orgA,
+            tenantId: tenantA,
+            subjectId: "subject-from-tenant-b", // Mismatch
+            providerConnectionId: "dummy-provider",
+            externalObjectId: "ext-oid"
+          }
+        })
+      ).rejects.toThrow();
+    });
+  });
 });

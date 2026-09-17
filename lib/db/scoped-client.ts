@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { rawPrisma } from "./raw-prisma";
 
 export type DataScope = {
@@ -7,6 +8,7 @@ export type DataScope = {
 
 /**
  * Creates a Tenant-aware Prisma client that automatically injects data boundaries.
+ * This is an ergonomic application boundary, NOT the strict RLS boundary.
  */
 export function createScopedDb(scope: DataScope) {
   if (!scope.organizationId) {
@@ -17,7 +19,8 @@ export function createScopedDb(scope: DataScope) {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          const modelsWithOrg = ['Tenant', 'ProviderConnection', 'Subject', 'IdentityAccount', 'Resource'];
+          const modelsWithTenant = ['Subject', 'IdentityAccount', 'Resource', 'Session'];
+          const modelsWithOrg = ['Tenant', 'ProviderConnection', ...modelsWithTenant];
           
           if (!modelsWithOrg.includes(model)) {
             return query(args);
@@ -31,7 +34,7 @@ export function createScopedDb(scope: DataScope) {
             if (data.organizationId && data.organizationId !== scope.organizationId) {
               throw new Error("CROSS_ORGANIZATION_WRITE_DENIED");
             }
-            if (scope.tenantId && ['Subject', 'Resource'].includes(model) && data.tenantId && data.tenantId !== scope.tenantId) {
+            if (scope.tenantId && modelsWithTenant.includes(model) && data.tenantId && data.tenantId !== scope.tenantId) {
               throw new Error("CROSS_TENANT_WRITE_DENIED");
             }
           };
@@ -40,7 +43,7 @@ export function createScopedDb(scope: DataScope) {
             if (!data) return;
             checkDataScope(data);
             data.organizationId = scope.organizationId;
-            if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
+            if (scope.tenantId && modelsWithTenant.includes(model)) {
               data.tenantId = scope.tenantId;
             }
           };
@@ -48,7 +51,7 @@ export function createScopedDb(scope: DataScope) {
           const applyScopeToWhere = (where: any) => {
             if (!where) return;
             where.organizationId = scope.organizationId;
-            if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
+            if (scope.tenantId && modelsWithTenant.includes(model)) {
               where.tenantId = scope.tenantId;
             }
           };
@@ -94,5 +97,21 @@ export function createScopedDb(scope: DataScope) {
         },
       },
     },
+  });
+}
+
+/**
+ * Creates a transactional boundary that enforces PostgreSQL Row-Level Security (RLS)
+ * through local configuration parameters (`app.organization_id`, `app.tenant_id`).
+ * This is the ultimate security layer ensuring isolated queries.
+ */
+export async function withTenantDb<T>(
+  scope: { organizationId: string; tenantId: string },
+  work: (tx: Prisma.TransactionClient) => Promise<T>
+): Promise<T> {
+  return rawPrisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT set_config('app.organization_id', ${scope.organizationId}, true)`;
+    await tx.$queryRaw`SELECT set_config('app.tenant_id', ${scope.tenantId}, true)`;
+    return work(tx);
   });
 }

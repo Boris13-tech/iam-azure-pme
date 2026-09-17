@@ -168,29 +168,26 @@ model Subject {
   Session      Session[]
 
   @@unique([organizationId, id])
-  @@unique([organizationId, tenantId, id])
   @@index([organizationId, tenantId])
 }
 
 model IdentityAccount {
   id                   String   @id @default(uuid())
   organizationId       String
-  tenantId             String
   subjectId            String
   providerConnectionId String
   externalObjectId     String // e.g., Entra User OID
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  subject            Subject            @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  subject            Subject            @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
   providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
   Session            Session[]
 
   @@unique([organizationId, id])
-  @@unique([organizationId, tenantId, subjectId, id])
   @@unique([organizationId, providerConnectionId, externalObjectId])
   @@index([organizationId])
-  @@index([organizationId, tenantId, subjectId])
+  @@index([organizationId, subjectId])
   @@index([organizationId, providerConnectionId])
 }
 
@@ -285,8 +282,8 @@ model Session {
   userAgentHash String?
 
   tenant          Tenant          @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
-  subject         Subject         @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
-  identityAccount IdentityAccount @relation(fields: [organizationId, tenantId, subjectId, identityAccountId], references: [organizationId, tenantId, subjectId, id], onDelete: Restrict)
+  subject         Subject         @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
+  identityAccount IdentityAccount @relation(fields: [organizationId, identityAccountId], references: [organizationId, id], onDelete: Restrict)
 
   @@index([organizationId])
   @@index([subjectId])
@@ -298,7 +295,6 @@ model AuthTransaction {
   nonce                        String
   codeVerifier                 String
   expectedOrganizationId       String
-  expectedTenantId             String
   expectedProviderConnectionId String
   returnTo                     String?
   expiresAt                    DateTime

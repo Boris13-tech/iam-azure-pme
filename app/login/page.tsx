@@ -8,8 +8,19 @@ export const dynamic = 'force-dynamic';
 export default async function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
   // For the mono-tenant prototype, fetch the first available Entra ID connection
   const provider = await rawPrisma.providerConnection.findFirst({
-    where: { providerType: 'MICROSOFT_ENTRA' }
+    where: { providerType: 'MICROSOFT_ENTRA' },
+    include: {
+      organization: {
+        include: {
+          tenants: {
+            take: 1
+          }
+        }
+      }
+    }
   });
+
+  const defaultTenantId = provider?.organization?.tenants?.[0]?.id;
 
   const errorMsg = searchParams?.error || "";
 
@@ -38,9 +49,9 @@ export default async function LoginPage({ searchParams }: { searchParams: { erro
 
         <div className="space-y-6">
           <div className="space-y-4">
-            {provider ? (
+            {provider && defaultTenantId ? (
               <Link 
-                href={`/auth/login?connection=${provider.id}`}
+                href={`/auth/login?tenant=${defaultTenantId}&connection=${provider.id}`}
                 className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-300 shadow-lg shadow-blue-600/20 hover:shadow-blue-500/40 group"
               >
                 <Lock className="w-5 h-5 group-hover:scale-110 transition-transform" />
