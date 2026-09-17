@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+      - architecture/phase-5-legacy-cutover
   pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
   test-and-build:
@@ -50,8 +53,33 @@ jobs:
       env:
         DATABASE_URL: ${{ env.DATABASE_MIGRATION_URL }}
 
+    - name: Bootstrap RLS runtime role
+      run: |
+        cat << 'EOF' > bootstrap.sql
+        DO
+        $do$
+        BEGIN
+           IF NOT EXISTS (
+              SELECT FROM pg_catalog.pg_roles
+              WHERE  rolname = 'app_user') THEN
+              CREATE ROLE app_user LOGIN PASSWORD 'app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+           END IF;
+        END
+        $do$;
+        GRANT CONNECT ON DATABASE luxia_db TO app_user;
+        GRANT USAGE ON SCHEMA public TO app_user;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
+        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
+        EOF
+        psql $DATABASE_MIGRATION_URL -f bootstrap.sql
+
     - name: Run Security Tests
       run: npm run test:security
 
     - name: Build
       run: npm run build
+
+    - name: Run Cutover Readiness Report
+      run: npx tsx scripts/generate-cutover-report.ts
+      env:
+        DATABASE_URL: ${{ env.DATABASE_URL }}
