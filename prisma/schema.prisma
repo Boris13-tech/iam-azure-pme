@@ -8,13 +8,13 @@ generator client {
 }
 
 model User {
-  id        String     @id @default(uuid())
-  email     String     @unique
+  id        String   @id @default(uuid())
+  email     String   @unique
   name      String
-  azureId   String?    @unique
-  status    String     @default("ACTIVE")
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  azureId   String?  @unique
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   roles     UserRole[]
   auditLogs AuditLog[]
@@ -33,13 +33,13 @@ model Role {
 }
 
 model Permission {
-  id          String   @id @default(uuid())
-  action      String
-  resource    String
-  scope       String?
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  action    String
+  resource  String
+  scope     String?
+  createdAt DateTime @default(now())
 
-  roles       RolePermission[]
+  roles RolePermission[]
 
   @@unique([action, resource])
 }
@@ -73,7 +73,7 @@ model AuditLog {
   result    String?
   timestamp DateTime @default(now())
 
-  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
 }
 
 model AccessPolicy {
@@ -106,66 +106,109 @@ enum ProviderType {
 }
 
 model Organization {
-  id                  String               @id @default(uuid())
-  name                String
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tenants             Tenant[]
   providerConnections ProviderConnection[]
   subjects            Subject[]
+  resources           Resource[]
 }
 
 model Tenant {
-  id             String       @id @default(uuid())
+  id             String   @id @default(uuid())
   organizationId String
   name           String
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  subjects       Subject[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subjects     Subject[]
+  resources    Resource[]
 }
 
 model ProviderConnection {
   id               String       @id @default(uuid())
   organizationId   String
   providerType     ProviderType
-  externalTenantId String       // e.g., Entra Tenant ID (tid)
+  externalTenantId String // e.g., Entra Tenant ID (tid)
   name             String
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   identityAccounts IdentityAccount[]
+  resources        Resource[]
 
   @@unique([organizationId, providerType, externalTenantId])
 }
 
 model Subject {
-  id             String            @id @default(uuid())
+  id             String      @id @default(uuid())
   organizationId String
   tenantId       String
   type           SubjectType
   name           String
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  identities     IdentityAccount[]
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  identities   IdentityAccount[]
 }
 
 model IdentityAccount {
-  id                   String             @id @default(uuid())
+  id                   String   @id @default(uuid())
   subjectId            String
   providerConnectionId String
-  externalObjectId     String             // e.g., Entra User OID
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  externalObjectId     String // e.g., Entra User OID
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  subject              Subject            @relation(fields: [subjectId], references: [id], onDelete: Restrict)
-  providerConnection   ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Restrict)
+  subject            Subject            @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  providerConnection ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Restrict)
 
   @@unique([providerConnectionId, externalObjectId])
+}
+
+enum ResourceType {
+  APPLICATION
+  API
+  DATASET
+  DATABASE
+  REPOSITORY
+  CLOUD_RESOURCE
+  SAAS
+  STORAGE
+  SECRET
+  AI_TOOL
+  OTHER
+}
+
+model Resource {
+  id                   String  @id @default(uuid())
+  organizationId       String
+  tenantId             String
+  providerConnectionId String?
+
+  name String
+  type ResourceType
+
+  externalId  String?
+  description String?
+  metadata    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  providerConnection ProviderConnection? @relation(fields: [providerConnectionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([tenantId])
+  @@index([providerConnectionId])
+  @@index([organizationId, tenantId])
 }
