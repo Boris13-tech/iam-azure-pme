@@ -106,6 +106,7 @@ export default function LoginPage() {
                 <Lock className="w-5 h-5 group-hover:scale-110 transition-transform" />
               )}
               {isLoading ? "Chargement Microsoft..." : "Connexion avec Microsoft"}
+            </button>
           </div>
         </div>
       </div>
