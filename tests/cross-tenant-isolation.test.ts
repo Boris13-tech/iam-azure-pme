@@ -1,4 +1,4 @@
-import { adminPrisma } from "../helpers/admin-prisma";
+import { adminPrisma } from "./helpers/admin-prisma";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -17,7 +17,7 @@ async function main() {
   // 3. Create ProviderConnection B
   const providerB = await prisma.providerConnection.create({
     data: {
-      name: "Entra B",
+      name: "Entra B", providerType: "MICROSOFT_ENTRA", externalScopeId: "scope_b",
       organizationId: orgB.id,
       }
   });

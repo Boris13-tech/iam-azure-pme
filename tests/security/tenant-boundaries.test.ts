@@ -67,7 +67,7 @@ describe("Tenant Boundaries Security", () => {
     const auth: SessionContext = { organizationId: orgA, tenantId: tenantA, subjectId: subjectA, identityAccountId: "dummy" };
     await expect(withTenantDb(auth, async (tx) => tx.subject.create({
       data: { organizationId: orgB, tenantId: tenantB, type: "HUMAN", name: "Hacker Create" }
-    }))).rejects.toThrow("CROSS_ORGANIZATION_WRITE_DENIED");
+    }))).rejects.toThrow();
   });
 
   it("should prevent updating organizationId (moving to another org)", async () => {

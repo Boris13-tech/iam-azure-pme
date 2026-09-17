@@ -96,7 +96,7 @@ describe("Phase 5A - Native Entitlement and Assignment Foundation", () => {
     // A test verifying it doesn't throw a unique constraint error if properly inserted
     const createInputA: Prisma.EntitlementCreateInput = {
       id: randomUUID(),
-      organization: { connect: { id: orgA } },
+      
       tenant: { connect: { organizationId_id: { organizationId: orgA, id: tenantA } } },
       key: "users.read",
       action: "read",
@@ -105,7 +105,7 @@ describe("Phase 5A - Native Entitlement and Assignment Foundation", () => {
 
     const createInputB: Prisma.EntitlementCreateInput = {
       id: randomUUID(),
-      organization: { connect: { id: orgA } },
+      
       tenant: { connect: { organizationId_id: { organizationId: orgA, id: tenantB } } },
       key: "users.read",
       action: "read",
@@ -114,6 +114,7 @@ describe("Phase 5A - Native Entitlement and Assignment Foundation", () => {
     
     // We expect the Prisma schema structure to permit this.
     expect(createInputA.key).toEqual(createInputB.key);
-    expect(createInputA.tenant.connect?.organizationId_id.id).not.toEqual(createInputB.tenant.connect?.organizationId_id.id);
+    expect(createInputA.tenant.connect!.organizationId_id!).toEqual({ organizationId: orgA, id: tenantA });
+    expect(createInputB.tenant.connect!.organizationId_id!).toEqual({ organizationId: orgA, id: tenantB });
   });
 });

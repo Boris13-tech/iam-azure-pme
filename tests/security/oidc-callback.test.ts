@@ -81,14 +81,15 @@ describe("OIDC Callback Security", () => {
   });
 
   it("should process valid transaction and set session cookie", async () => {
-    await AuthTransactionStore.createTransaction(
-      "valid_state",
-      "nonce",
-      "verifier",
-      orgId,
-      providerConnectionId,
-      "/dashboard"
-    );
+    await AuthTransactionStore.createTransaction({
+      stateHash: "valid_state",
+      nonce: "nonce",
+      codeVerifier: "verifier",
+      expectedOrganizationId: orgId,
+      expectedTenantId: tenantId,
+      expectedProviderConnectionId: providerConnectionId,
+      returnTo: "/dashboard"
+    });
 
     const req = new NextRequest("http://localhost:3000/auth/callback?code=abc&state=valid_state");
     req.cookies.set("oidc_state", "valid_state");

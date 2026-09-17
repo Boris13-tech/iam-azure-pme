@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { checkPermission } from "../../lib/auth/authorization-gateway";
 import { hasLegacyPermission } from "../../lib/auth/legacy-auth-adapter";
 import { authorize } from "../../lib/auth/authorization-engine";
-import { recordObservation } from "../../lib/auth/authorization-gateway"; // Note: this is not exported currently, but it's internal.
+import { recordObservation } from "../../lib/auth/shadow-observer"; // Note: this is not exported currently, but it's internal.
 import { randomUUID } from "crypto";
 
 vi.mock("../../lib/auth/legacy-auth-adapter");

@@ -1,4 +1,5 @@
 import { rawPrisma } from "../db/raw-prisma";
+import { withTenantDb } from "../db/scoped-client";
 import { ENTITLEMENT_CATALOG_V1, CatalogEntitlement } from "./entitlements-catalog";
 import { mapLegacyPermission } from "./legacy-permission-map";
 
@@ -31,37 +32,7 @@ export async function runAuthorizationReconciliation(organizationId: string, ten
   };
 
   // 1. Fetch all subjects in the given tenant
-  const subjects = await withTenantDb({ organizationId, tenantId, subjectId: "system", type: "SYSTEM" as any }, async (tx) => tx.subject.findMany({
-    where: { organizationId, tenantId },
-    include: {
-      legacyBridge: {
-        include: {
-          legacyUser: {
-            include: {
-              roles: {
-                include: {
-                  role: {
-                    include: {
-                      permissions: {
-                        include: {
-                          permission: true
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      Assignment: {
-        include: {
-          entitlement: true
-        }
-      }
-    }
-  }));
+  const subjects = (await withTenantDb({ organizationId, tenantId }, async (tx) => tx.subject.findMany({ where: { organizationId, type: "HUMAN" }, include: { legacyBridge: true, Assignment: { include: { entitlement: true } } } }))) as any[];
 
   if (subjects.length === 0) { report.scopeResolved = true; return report; }
 
@@ -104,8 +75,8 @@ export async function runAuthorizationReconciliation(organizationId: string, ten
     }
 
     // B. Analyze Actual Native Assignments
-    const activeAssignments = subject.Assignment.filter(a => a.status === "ACTIVE");
-    const nonActiveAssignments = subject.Assignment.filter(a => a.status !== "ACTIVE");
+    const activeAssignments = subject.Assignment.filter((a: any) => a.status === "ACTIVE");
+    const nonActiveAssignments = subject.Assignment.filter((a: any) => a.status !== "ACTIVE");
     
     report.nativeActiveGrants += activeAssignments.length;
 
@@ -121,7 +92,7 @@ export async function runAuthorizationReconciliation(organizationId: string, ten
           report.orphanLegacyRoleAssignments++;
         } else {
           // Is this role actually held by the user?
-          const userHasRole = legacyUser.roles.some(ur => ur.roleId === a.sourceRef);
+          const userHasRole = legacyUser.roles.some((ur: any) => ur.roleId === a.sourceRef);
           if (!userHasRole) {
             report.orphanLegacyRoleAssignments++;
           }

@@ -37,7 +37,7 @@ export async function checkPermission(
 
   if (mode === "legacy") {
     try {
-      const legacyAllowed = await hasLegacyPermission(auth, request.action, request.resource);
+      const legacyAllowed = await hasLegacyPermission(auth as any, request.action, request.resource);
       return legacyAllowed;
     } catch (err) {
       return false; // safe fail closed
@@ -47,7 +47,7 @@ export async function checkPermission(
   // Shadow or Native mode: we run both
   try {
     const [legacyAllowed, nativeRes] = await Promise.allSettled([
-      hasLegacyPermission(auth, request.action, request.resource),
+      hasLegacyPermission(auth as any, request.action, request.resource),
       authorize(auth, request)
     ]);
 
