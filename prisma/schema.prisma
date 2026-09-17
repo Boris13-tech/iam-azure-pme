@@ -84,3 +84,88 @@ model AccessPolicy {
   passwordRotation Boolean  @default(true)
   updatedAt        DateTime @updatedAt
 }
+
+// ----------------------------------------------------------------------
+// NEW LUXIA IDENTITY CORE MODELS (PHASE 2 - IDENTITY FOUNDATION)
+// ----------------------------------------------------------------------
+
+enum SubjectType {
+  HUMAN
+  WORKLOAD
+  SERVICE
+  DEVICE
+  AI_AGENT
+}
+
+enum ProviderType {
+  MICROSOFT_ENTRA
+  AWS
+  GOOGLE_WORKSPACE
+  GITHUB
+  CUSTOM
+}
+
+model Organization {
+  id                  String               @id @default(uuid())
+  name                String
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  tenants             Tenant[]
+  providerConnections ProviderConnection[]
+  subjects            Subject[]
+}
+
+model Tenant {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subjects       Subject[]
+}
+
+model ProviderConnection {
+  id               String       @id @default(uuid())
+  organizationId   String
+  providerType     ProviderType
+  externalTenantId String       // e.g., Entra Tenant ID (tid)
+  name             String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  identityAccounts IdentityAccount[]
+
+  @@unique([organizationId, providerType, externalTenantId])
+}
+
+model Subject {
+  id             String            @id @default(uuid())
+  organizationId String
+  tenantId       String
+  type           SubjectType
+  name           String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  identities     IdentityAccount[]
+}
+
+model IdentityAccount {
+  id                   String             @id @default(uuid())
+  subjectId            String
+  providerConnectionId String
+  externalObjectId     String             // e.g., Entra User OID
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  subject              Subject            @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  providerConnection   ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Restrict)
+
+  @@unique([providerConnectionId, externalObjectId])
+}
