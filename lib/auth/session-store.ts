@@ -65,14 +65,32 @@ export class SessionStore {
   }
 
   /**
-   * Revokes a specific session.
+   * Revokes a specific session securely (idempotent).
+   * Returns the revoked session if it existed, otherwise null.
    */
-  static async revokeSession(rawToken: string) {
+  static async revokeByToken(rawToken: string) {
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-    await rawPrisma.session.update({
+    
+    // We fetch it first to return it (useful for federated logout)
+    const session = await rawPrisma.session.findUnique({
       where: { id: hashedToken },
-      data: { revokedAt: new Date() }
+      include: {
+        identityAccount: {
+          include: {
+            providerConnection: true
+          }
+        }
+      }
     });
+
+    if (session && !session.revokedAt) {
+      await rawPrisma.session.update({
+        where: { id: hashedToken },
+        data: { revokedAt: new Date() }
+      });
+    }
+
+    return session;
   }
 
   /**
