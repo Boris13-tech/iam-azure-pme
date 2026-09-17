@@ -27,12 +27,7 @@ export async function middleware(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     
-    let decoded;
-    if (token === "mock_dev_token") {
-      decoded = { sub: "mock-admin-id", emails: ["admin@pme.com"] };
-    } else {
-      decoded = await verifyToken(token);
-    }
+    const decoded = await verifyToken(token);
     
     if (!decoded) {
       return NextResponse.json({ error: "Invalid Token" }, { status: 401 });
@@ -58,12 +53,7 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
     
-    let decoded;
-    if (token === "mock_dev_token") {
-      decoded = { sub: "mock-admin-id", emails: ["admin@pme.com"] };
-    } else {
-      decoded = await verifyToken(token);
-    }
+    const decoded = await verifyToken(token);
     
     if (!decoded) {
       return NextResponse.redirect(new URL("/login", req.url));

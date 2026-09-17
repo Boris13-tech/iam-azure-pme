@@ -9,7 +9,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const allowed = await hasPermission(userId, "manage", "roles");
-  if (!allowed && userId !== "mock-admin-id") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
   const { name, description, permissions } = body;
@@ -55,7 +55,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const allowed = await hasPermission(userId, "manage", "roles");
-  if (!allowed && userId !== "mock-admin-id") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const role = await prisma.role.findUnique({ where: { id: params.id } });

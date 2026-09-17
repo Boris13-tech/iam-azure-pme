@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const allowed = await hasPermission(userId, "manage", "roles");
-  if (!allowed && userId !== "mock-admin-id") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
   const { name, description, permissions } = body;

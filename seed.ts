@@ -22,22 +22,7 @@ async function main() {
     create: { id: 'hr-id', name: 'Ressources Humaines', description: 'Gestion RH' },
   });
 
-  const adminUser = await prisma.user.upsert({
-    where: { id: 'mock-admin-id' },
-    update: {},
-    create: {
-      id: 'mock-admin-id',
-      name: 'Admin Demo',
-      email: 'admin@demo.com',
-      status: 'ACTIVE',
-    },
-  });
-
-  await prisma.userRole.upsert({
-    where: { userId_roleId: { userId: 'mock-admin-id', roleId: 'admin-id' } },
-    update: {},
-    create: { userId: 'mock-admin-id', roleId: 'admin-id' },
-  });
+  console.log("Roles created.");
 
   console.log("Seed complete.");
 }

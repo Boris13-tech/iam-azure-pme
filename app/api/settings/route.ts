@@ -31,7 +31,7 @@ export async function POST(req: Request) {
 
   // Only admins can change policies (or mock admin)
   const allowed = await hasPermission(userId, "manage", "settings");
-  if (!allowed && userId !== "mock-admin-id") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
   const { mfa, geoBlock, sessionTimeout, passwordRotation } = body;

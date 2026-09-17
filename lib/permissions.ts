@@ -34,7 +34,7 @@ async function getOrCreateUser(userId: string) {
     process.env.GRAPH_CLIENT_SECRET && 
     process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
 
-  if (!user && userId !== "mock-admin-id" && hasGraphConfig) {
+  if (!user && hasGraphConfig) {
     try {
       const client = await getGraphClient();
       const graphUser = await client.api(`/users/${userId}`)
@@ -91,7 +91,6 @@ async function getOrCreateUser(userId: string) {
 
 export async function hasPermission(userId: string, action: string, resource: string): Promise<boolean> {
   if (!userId) return false;
-  if (userId === "mock-admin-id") return true;
 
   const user = await getOrCreateUser(userId);
   if (!user) return false;
@@ -108,7 +107,6 @@ export async function hasPermission(userId: string, action: string, resource: st
 
 export async function checkRole(userId: string, roleName: string): Promise<boolean> {
   if (!userId) return false;
-  if (userId === "mock-admin-id") return roleName === "Administrateur";
   
   const user = await getOrCreateUser(userId);
   if (!user) return false;

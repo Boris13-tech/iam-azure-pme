@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Lock, User, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
@@ -70,11 +70,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleFallbackLogin = () => {
-    document.cookie = "access_token=mock_dev_token; path=/; max-age=3600";
-    window.location.href = '/dashboard/audit'; // Force reload
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
@@ -111,25 +106,6 @@ export default function LoginPage() {
                 <Lock className="w-5 h-5 group-hover:scale-110 transition-transform" />
               )}
               {isLoading ? "Chargement Microsoft..." : "Connexion avec Microsoft"}
-            </button>
-            
-            <div className="relative flex items-center py-2">
-              <div className="flex-grow border-t border-slate-700"></div>
-              <span className="flex-shrink-0 mx-4 text-slate-500 text-xs uppercase tracking-wider font-semibold">ou administrateur local</span>
-              <div className="flex-grow border-t border-slate-700"></div>
-            </div>
-
-            <button 
-              onClick={handleFallbackLogin}
-              disabled={isLoading}
-              className="w-full flex items-center justify-between bg-slate-700/50 hover:bg-slate-700 text-slate-200 font-semibold py-3.5 px-6 rounded-xl transition-all duration-300 border border-slate-600 hover:border-slate-500 group"
-            >
-              <div className="flex items-center gap-3">
-                <User className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" />
-                <span>Accès Secours</span>
-              </div>
-              <ArrowRight className="w-5 h-5 text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-all" />
-            </button>
           </div>
         </div>
       </div>
