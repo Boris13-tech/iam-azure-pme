@@ -21,8 +21,8 @@ describe("Global Role Safety", () => {
 
   afterAll(async () => {
     await adminPrisma.userRole.deleteMany({ where: { roleId } });
-    await adminPrisma.user.delete({ where: { id: userId } });
-    await adminPrisma.role.delete({ where: { id: roleId } });
+    await adminPrisma.user.deleteMany({ where: { id: userId } });
+    await adminPrisma.role.deleteMany({ where: { id: roleId } });
   });
 
   it("should allow assigning a user to a global role", async () => {

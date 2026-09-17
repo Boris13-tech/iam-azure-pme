@@ -131,23 +131,16 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     expect(revoked.some(r => r.sourceRef === roleAId)).toBe(true);
   });
 
-  it("should dynamically revoke assignments when role permissions are removed", async () => {
+  it("should reject global role permission mutation during Phase 5E/5F", async () => {
     if (!orgId) return;
     const auth = { organizationId: orgId, tenantId: tenantId, subjectId: "admin", type: "HUMAN" } as any;
 
-    // Update Role B to have NO permissions
-    await dualWriteUpdateRolePermissions(auth, roleBId, "Role B empty", "", []);
+    await expect(
+      dualWriteUpdateRolePermissions(auth, roleBId, "Role B empty", "", [])
+    ).rejects.toThrow(/Global role definitions are frozen/);
 
-    const report = await runAuthorizationReconciliation(orgId, tenantId);
-    expect(report.missingNativeGrants).toBe(0);
-    expect(report.unexpectedNativeGrants).toBe(0);
-    expect(report.orphanLegacyRoleAssignments).toBe(0);
-    expect(report.expectedNativeGrants).toBe(0);
-    expect(report.nativeActiveGrants).toBe(0);
 
-    // Everything should be revoked
-    const active = await adminPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
-    expect(active.length).toBe(0);
+
   });
 
   it("should handle deterministic reconciliation (running twice yields same result)", async () => {

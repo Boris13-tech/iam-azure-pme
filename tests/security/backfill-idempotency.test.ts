@@ -77,7 +77,7 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
         }
       });
 
-      await rawPrisma.rolePermission.create({
+      await adminPrisma.rolePermission.create({
         data: { roleId, permissionId: permId }
       });
 
