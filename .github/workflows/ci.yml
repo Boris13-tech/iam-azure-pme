@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - architecture/phase-5-legacy-cutover
+      - security/phase-5e3-dependency-hardening
   pull_request:
     branches:
       - main
@@ -82,9 +83,10 @@ jobs:
               SELECT FROM pg_catalog.pg_roles
               WHERE  rolname = 'app_user') THEN
               CREATE ROLE app_user LOGIN PASSWORD 'app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-              GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
            END IF;
         END
+        $do$;
+        GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
         $do$;
         GRANT CONNECT ON DATABASE luxia_db TO app_user;
         GRANT USAGE ON SCHEMA public TO app_user;
