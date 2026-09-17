@@ -33,14 +33,7 @@ describe("Logout Security", () => {
   });
 
   afterAll(async () => {
-    await adminPrisma.assignment.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.legacyUserBridge.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.organization.deleteMany({ where: { id: orgId } });
-  });
     await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.tenant.deleteMany({ where: { organizationId: orgId } });

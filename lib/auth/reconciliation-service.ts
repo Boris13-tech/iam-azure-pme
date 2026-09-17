@@ -4,6 +4,7 @@ import { mapLegacyPermission } from "./legacy-permission-map";
 
 export interface ReadinessReport {
   subjectsChecked: number;
+  scopeResolved?: boolean;
   legacyActiveGrants: number;
   expectedNativeGrants: number;
   nativeActiveGrants: number;
@@ -30,7 +31,7 @@ export async function runAuthorizationReconciliation(organizationId: string, ten
   };
 
   // 1. Fetch all subjects in the given tenant
-  const subjects = await rawPrisma.subject.findMany({
+  const subjects = await withTenantDb({ organizationId, tenantId, subjectId: "system", type: "SYSTEM" as any }, async (tx) => tx.subject.findMany({
     where: { organizationId, tenantId },
     include: {
       legacyBridge: {
@@ -60,7 +61,9 @@ export async function runAuthorizationReconciliation(organizationId: string, ten
         }
       }
     }
-  });
+  }));
+
+  if (subjects.length === 0) { report.scopeResolved = true; return report; }
 
   // Track valid role IDs for orphan checks
   const allRoles = await rawPrisma.role.findMany({ select: { id: true } });

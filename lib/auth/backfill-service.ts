@@ -52,7 +52,7 @@ export async function runLegacyRbacBackfill(options: BackfillOptions): Promise<B
   };
 
   // 1. Fetch Subjects in this tenant that have a VALIDATED LegacyBridge
-  const subjects = await rawPrisma.subject.findMany({
+  const subjects = await withTenantDb({ organizationId, tenantId, subjectId: "system", type: "SYSTEM" as any }, async (tx) => tx.subject.findMany({
     where: {
       organizationId,
       tenantId,
@@ -83,7 +83,7 @@ export async function runLegacyRbacBackfill(options: BackfillOptions): Promise<B
         }
       }
     }
-  });
+  }));
 
   if (subjects.length === 0) {
     return report; // Nothing to backfill in this tenant

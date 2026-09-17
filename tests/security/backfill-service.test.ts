@@ -3,6 +3,11 @@ import { runLegacyRbacBackfill } from "../../lib/auth/backfill-service";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 
 // Mock the rawPrisma dependency
+
+vi.mock("../../lib/db/scoped-client", () => ({
+  withTenantDb: vi.fn(async (ctx, cb) => cb(rawPrisma)),
+  createScopedDb: vi.fn(() => rawPrisma)
+}));
 vi.mock("../../lib/db/raw-prisma", () => ({
   rawPrisma: {
     subject: {

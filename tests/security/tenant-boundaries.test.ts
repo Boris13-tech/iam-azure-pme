@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
-import { createScopedDb } from "../../lib/db/scoped-client";
+import { createScopedDb, withTenantDb } from "../../lib/db/scoped-client";
 import { SessionContext } from "../../lib/auth/session-store";
 import { adminPrisma } from "../helpers/admin-prisma";
 
@@ -67,7 +67,7 @@ describe("Tenant Boundaries Security", () => {
     const auth: SessionContext = { organizationId: orgA, tenantId: tenantA, subjectId: subjectA, identityAccountId: "dummy" };
     await expect(withTenantDb(auth, async (tx) => tx.subject.create({
       data: { organizationId: orgB, tenantId: tenantB, type: "HUMAN", name: "Hacker Create" }
-    })).rejects.toThrow("CROSS_ORGANIZATION_WRITE_DENIED");
+    }))).rejects.toThrow("CROSS_ORGANIZATION_WRITE_DENIED");
   });
 
   it("should prevent updating organizationId (moving to another org)", async () => {

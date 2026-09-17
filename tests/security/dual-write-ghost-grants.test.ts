@@ -102,7 +102,7 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     expect(report.orphanLegacyRoleAssignments).toBe(0);
     
     // Should have 1 assignment active
-    const assignments = await rawPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
+    const assignments = await adminPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
     expect(assignments.length).toBe(1);
     expect(assignments[0].sourceRef).toBe(roleAId);
   });
@@ -120,13 +120,13 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     expect(report.orphanLegacyRoleAssignments).toBe(0);
 
     // Active assignment should only be from Role B
-    const active = await rawPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }, include: { entitlement: true }});
+    const active = await adminPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }, include: { entitlement: true }});
     expect(active.length).toBe(1);
     expect(active[0].sourceRef).toBe(roleBId);
     expect(active[0].entitlement.key).toBe("users.create");
 
     // Old assignment should be REVOKED
-    const revoked = await rawPrisma.assignment.findMany({ where: { subjectId, status: "REVOKED" }});
+    const revoked = await adminPrisma.assignment.findMany({ where: { subjectId, status: "REVOKED" }});
     expect(revoked.length).toBeGreaterThanOrEqual(1);
     expect(revoked.some(r => r.sourceRef === roleAId)).toBe(true);
   });
@@ -146,7 +146,7 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     expect(report.nativeActiveGrants).toBe(0);
 
     // Everything should be revoked
-    const active = await rawPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
+    const active = await adminPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
     expect(active.length).toBe(0);
   });
 
@@ -170,7 +170,7 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     ]);
 
     // The user should eventually have ONE of the roles.
-    const finalRole = await rawPrisma.userRole.findFirst({ where: { userId: legacyUserId } });
+    const finalRole = await adminPrisma.userRole.findFirst({ where: { userId: legacyUserId } });
     expect(finalRole).toBeDefined();
 
     // The reconciliation should STILL be perfectly clean.
@@ -181,7 +181,7 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     expect(report.expiredRevokedInconsistencies).toBe(0);
     
     // The active assignments should perfectly match the winning role.
-    const active = await rawPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
+    const active = await adminPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
     expect(active.every(a => a.sourceRef === finalRole!.roleId)).toBe(true);
   });
 });

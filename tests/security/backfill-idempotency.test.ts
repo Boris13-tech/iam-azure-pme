@@ -106,8 +106,8 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
       await rawPrisma.userRole.deleteMany({ where: { userId: legacyUserId } });
       await adminPrisma.rolePermission.deleteMany({ where: { permission: { resource: "users", action: "update" } } });
       await adminPrisma.user.delete({ where: { id: legacyUserId } });
-      await rawPrisma.assignment.deleteMany({ where: { organizationId: orgId } });
-      await rawPrisma.entitlement.deleteMany({ where: { organizationId: orgId } });
+      await adminPrisma.assignment.deleteMany({ where: { organizationId: orgId } });
+      await adminPrisma.entitlement.deleteMany({ where: { organizationId: orgId } });
       await adminPrisma.subject.delete({ where: { id: subjectId } });
       await adminPrisma.tenant.delete({ where: { id: tenantId } });
       await adminPrisma.organization.delete({ where: { id: orgId } });
@@ -137,8 +137,8 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
     expect(firstReport.metrics.assignmentsToCreate).toBe(1);
     expect(firstReport.metrics.conflicts).toBe(0);
 
-    const entitlementCountAfterFirst = await rawPrisma.entitlement.count({ where: { organizationId: orgId }});
-    const assignmentCountAfterFirst = await rawPrisma.assignment.count({ where: { organizationId: orgId }});
+    const entitlementCountAfterFirst = await adminPrisma.entitlement.count({ where: { organizationId: orgId }});
+    const assignmentCountAfterFirst = await adminPrisma.assignment.count({ where: { organizationId: orgId }});
     
     expect(entitlementCountAfterFirst).toBe(1);
     expect(assignmentCountAfterFirst).toBe(1);
@@ -154,8 +154,8 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
     // Should still "want" to create 1 because dry logic counts them, but conflict prevents insert
     expect(secondReport.metrics.conflicts).toBe(1); // Caught by the P2002 handler
 
-    const entitlementCountAfterSecond = await rawPrisma.entitlement.count({ where: { organizationId: orgId }});
-    const assignmentCountAfterSecond = await rawPrisma.assignment.count({ where: { organizationId: orgId }});
+    const entitlementCountAfterSecond = await adminPrisma.entitlement.count({ where: { organizationId: orgId }});
+    const assignmentCountAfterSecond = await adminPrisma.assignment.count({ where: { organizationId: orgId }});
     
     // Database state remained exactly the same
     expect(entitlementCountAfterSecond).toBe(1);
