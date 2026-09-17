@@ -12,19 +12,33 @@ async function run() {
   assert(loginHtml.includes("E2E_ERROR_TEST"), "/login should render the async searchParams error");
   console.log("✅ /login?error=... works");
 
+  const prisma = new PrismaClient({ datasourceUrl: "postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public" });
   const adminPrisma = new PrismaClient({ datasourceUrl: "postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public" });
   
-  // Seed basic data if missing
-  let org = await adminPrisma.organization.findFirst();
+  let org = await adminPrisma.organization.findFirst({ where: { name: "E2E Org" } });
   if (!org) org = await adminPrisma.organization.create({ data: { name: "E2E Org" } });
   
-  let tenant = await adminPrisma.tenant.findFirst({ where: { organizationId: org.id } });
+  let tenant = await adminPrisma.tenant.findFirst({ where: { name: "E2E Tenant", organizationId: org.id } });
   if (!tenant) tenant = await adminPrisma.tenant.create({ data: { name: "E2E Tenant", organizationId: org.id } });
   
-  let provider = await adminPrisma.providerConnection.findFirst();
-  if (!provider) provider = await adminPrisma.providerConnection.create({
-     data: { organizationId: org.id, providerType: "MICROSOFT_ENTRA", configuration: { clientId: "dummy", tenantId: "dummy" }, externalScopeId: "dummy" }
+  let provider = await adminPrisma.providerConnection.findFirst({
+    where: {
+      organizationId: org.id,
+      providerType: "MICROSOFT_ENTRA",
+      externalScopeId: "dummy"
+    }
   });
+
+  if (!provider) {
+    provider = await adminPrisma.providerConnection.create({
+      data: {
+        organizationId: org.id,
+        providerType: "MICROSOFT_ENTRA",
+        externalScopeId: "dummy",
+        name: "E2E Entra Provider"
+      }
+    });
+  }
 
   const tenantId = tenant.id;
   const orgId = org.id;
@@ -32,10 +46,26 @@ async function run() {
   let user = await adminPrisma.user.findFirst({ where: { email: "e2e@example.com" }});
   if (!user) {
     user = await adminPrisma.user.create({ data: { email: "e2e@example.com", name: "E2E User" }});
-    const subj = await adminPrisma.subject.create({ data: { id: user.id, organizationId: orgId, tenantId: tenantId, type: "HUMAN" }});
+    const subj = await adminPrisma.subject.create({
+      data: {
+        id: user.id,
+        organizationId: orgId,
+        tenantId,
+        type: "HUMAN",
+        name: "E2E User"
+      }
+    });
     await adminPrisma.identityAccount.create({ data: { organizationId: orgId, tenantId: tenantId, subjectId: subj.id, providerConnectionId: provider.id, externalObjectId: "oid_123" }});
   }
-  let idAcc = await adminPrisma.identityAccount.findFirst({ where: { subjectId: user.id } });
+  
+  const idAcc = await adminPrisma.identityAccount.findFirst({
+    where: {
+      organizationId: orgId,
+      tenantId,
+      subjectId: user.id
+    }
+  });
+  assert(idAcc, "E2E IdentityAccount fixture must exist");
 
   console.log("Testing /auth/login...");
   const authLoginRes = await fetch(baseUrl + "/auth/login?tenant=" + tenantId + "&connection=" + provider.id, { redirect: "manual" });
@@ -46,7 +76,9 @@ async function run() {
   const state = url.searchParams.get("state");
   assert(state, "State should be in redirect URL");
   
-  const tx = await adminPrisma.authTransaction.findUnique({ where: { state } });
+  const tx = await adminPrisma.authTransaction.findUnique({
+    where: { stateHash: state }
+  });
   assert(tx, "AuthTransaction should be created in DB");
   assert(tx.nonce && tx.codeVerifier, "Nonce and PKCE should be created");
   console.log("✅ /auth/login flow generates correct state & PKCE");
@@ -68,7 +100,15 @@ async function run() {
   console.log("✅ invalid session denies access");
 
   const dummyUser = await adminPrisma.user.create({ data: { name: "Dummy " + Date.now(), email: "dummy" + Date.now() + "@x.com" }});
-  await adminPrisma.subject.create({ data: { id: dummyUser.id, organizationId: orgId, tenantId: tenantId, type: "HUMAN" }});
+  await adminPrisma.subject.create({
+    data: {
+      id: dummyUser.id,
+      organizationId: orgId,
+      tenantId,
+      type: "HUMAN",
+      name: dummyUser.name
+    }
+  });
   await adminPrisma.legacyUserBridge.create({ data: { organizationId: orgId, legacyUserId: dummyUser.id, subjectId: dummyUser.id, status: "VALIDATED" }});
 
   const patchUserRes = await fetch(baseUrl + "/api/users/" + dummyUser.id, { method: "PATCH", headers: { Cookie: cookie, Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ name: "Updated Name" }) });
@@ -87,12 +127,14 @@ async function run() {
 
   const logoutRes = await fetch(baseUrl + "/auth/logout", { method: "POST", headers: { Cookie: cookie, Accept: "application/json" } });
   assert(logoutRes.status === 200 || logoutRes.status === 302 || logoutRes.status === 307, "Logout should succeed");
+  
   const revokedSession = await adminPrisma.session.findUnique({ where: { id: session.id } });
   assert(revokedSession, "Session record should be preserved");
   assert(revokedSession.revokedAt !== null, "Session should be marked as revoked");
   const resolved = await SessionStore.getSession(rawToken);
   assert(resolved === null, "SessionStore should not resolve revoked session");
-  console.log("✅ /auth/logout successfully deletes session");
+  
+  console.log("✅ /auth/logout successfully revokes session and rejects token reuse");
 
   console.log("🎉 ALL E2E HTTP TESTS PASSED");
   process.exit(0);
