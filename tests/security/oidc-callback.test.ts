@@ -110,7 +110,7 @@ describe("OIDC Callback Security", () => {
     req.cookies.set("oidc_code_verifier", "verifier");
 
     const res = await GET(req);
-    expect(res.status).toBe(303);
+    expect(res.status).toBe(307);
     
     const setCookie = res.headers.get("set-cookie");
     expect(setCookie).toContain("luxia_session=");
