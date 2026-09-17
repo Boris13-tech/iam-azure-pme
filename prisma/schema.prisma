@@ -128,6 +128,7 @@ model Tenant {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   subjects     Subject[]
   resources    Resource[]
+  Session      Session[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -183,6 +184,7 @@ model IdentityAccount {
   providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
   Session            Session[]
 
+  @@unique([organizationId, id])
   @@unique([organizationId, providerConnectionId, externalObjectId])
   @@index([organizationId])
   @@index([organizationId, subjectId])
@@ -279,9 +281,23 @@ model Session {
   ipHash        String?
   userAgentHash String?
 
+  tenant          Tenant          @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   subject         Subject         @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
-  identityAccount IdentityAccount @relation(fields: [identityAccountId], references: [id], onDelete: Restrict)
+  identityAccount IdentityAccount @relation(fields: [organizationId, identityAccountId], references: [organizationId, id], onDelete: Restrict)
 
   @@index([organizationId])
   @@index([subjectId])
+}
+
+model AuthTransaction {
+  id           String    @id
+  stateHash    String    @unique
+  nonce        String
+  codeVerifier String
+  returnTo     String?
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([expiresAt])
 }
