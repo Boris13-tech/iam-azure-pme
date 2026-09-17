@@ -19,6 +19,19 @@ export async function dualWriteUpdateUserRole(auth: AuthContext, legacyUserId: s
   });
 }
 
+
+export async function dualWriteRevokeUserRole(auth: AuthContext, legacyUserId: string) {
+  await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
+    // 1. Legacy Write
+    await tx.userRole.deleteMany({
+      where: { userId: legacyUserId }
+    });
+    
+    // 2. Native Write (sync with no role)
+    await syncNativeAssignmentsForUser(auth, legacyUserId, '', tx);
+  });
+}
+
 export async function dualWriteCreateRole(auth: AuthContext, name: string, description: string, permissions: string[]) {
   throw new Error("Global role definitions are frozen during Phase 5E/5F cutover. Mutation rejected.");
 }

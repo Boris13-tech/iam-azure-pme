@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:security": "vitest run tests/security",
     "test:security:watch": "vitest tests/security",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "soak:staging": "tsx scripts/soak/run-soak.ts"
   },
   "dependencies": {
     "@azure/msal-node": "^3.8.10",
