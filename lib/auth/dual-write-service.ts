@@ -6,7 +6,7 @@ import { mapLegacyPermission } from "./legacy-permission-map";
 export async function dualWriteUpdateUserRole(auth: AuthContext, legacyUserId: string, roleId: string) {
   await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
     // 1. Transactional Serialization
-    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('dualwrite'), hashtext($1))`, legacyUserId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('dualwrite'), hashtext(${legacyUserId}))`;
 
     // 2. Validate isolation constraints BEFORE any mutation
     const bridge = await tx.legacyUserBridge.findFirst({
@@ -41,7 +41,7 @@ export async function dualWriteUpdateUserRole(auth: AuthContext, legacyUserId: s
 export async function dualWriteRevokeUserRole(auth: AuthContext, legacyUserId: string) {
   await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
     // 1. Transactional Serialization
-    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('dualwrite'), hashtext($1))`, legacyUserId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('dualwrite'), hashtext(${legacyUserId}))`;
 
     // 2. Validate isolation constraints BEFORE any mutation
     const bridge = await tx.legacyUserBridge.findFirst({
