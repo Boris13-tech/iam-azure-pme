@@ -48,6 +48,25 @@ jobs:
     - name: Generate Prisma schema
       run: npx prisma generate
 
+    - name: Ensure no UTF-8 BOM in migrations
+      run: |
+        node -e "
+        const fs = require('fs');
+        const path = require('path');
+        const root = 'prisma/migrations';
+        if (fs.existsSync(root)) {
+          for (const dir of fs.readdirSync(root)) {
+            const file = path.join(root, dir, 'migration.sql');
+            if (!fs.existsSync(file)) continue;
+            const content = fs.readFileSync(file, 'utf8');
+            if (content.charCodeAt(0) === 0xFEFF) {
+              console.error('BOM detected:', file);
+              process.exit(1);
+            }
+          }
+        }
+        "
+
     - name: Deploy Prisma Migrations
       run: npx prisma migrate deploy
       env:
