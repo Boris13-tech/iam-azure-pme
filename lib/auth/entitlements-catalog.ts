@@ -1,3 +1,18 @@
+export const LEGACY_ADMIN_ENTITLEMENT_KEYS_V1 = [
+  "users.read",
+  "users.create",
+  "users.update",
+  "users.delete",
+  "roles.read",
+  "roles.create",
+  "roles.update",
+  "roles.delete",
+  "roles.manage",
+  "audit.read",
+  "settings.read",
+  "settings.update",
+] as const;
+
 export const ENTITLEMENT_CATALOG_V1 = [
   "users.read",
   "users.create",

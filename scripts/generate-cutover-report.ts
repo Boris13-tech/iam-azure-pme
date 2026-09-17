@@ -24,7 +24,7 @@ async function main() {
 
   try {
     // Check Global Role metrics
-    const multiTenantRoles = await rawPrisma.$queryRaw<any[]>`SELECT count(*) FROM "Role" WHERE name LIKE '%_%'`;
+    const multiTenantRoles = await rawPrisma.$queryRaw<any[]>`SELECT COUNT(*) as count FROM (SELECT r.id FROM "Role" r JOIN "UserRole" ur ON r.id = ur."roleId" JOIN "User" u ON ur."userId" = u.id GROUP BY r.id HAVING COUNT(DISTINCT u."tenantId") > 1) subq`;
     const mCount = Number(multiTenantRoles[0]?.count || 0);
 
     const triggersRes = await rawPrisma.$queryRaw<any[]>`
@@ -93,9 +93,12 @@ async function main() {
   console.log("");
   try {
     // Dual write ghost grants: legacyUserBridge validates existence
-    const ghostGrants = 0; // Handled in reconciliation.orphans in practice
-    const partialCommits = 0; // Handled by Prisma tx
-    const concurrentDrift = 0; // Not fully tracked without CDC
+    const ghostRes = await rawPrisma.$queryRaw<any[]>`SELECT COUNT(*) as count FROM "Assignment" a WHERE a.source = 'LEGACY_ROLE' AND NOT EXISTS (SELECT 1 FROM "LegacyUserBridge" b JOIN "UserRole" ur ON b."legacyUserId" = ur."userId" WHERE b."subjectId" = a."subjectId" AND ur."roleId" = a."sourceRef")`;
+    const ghostGrants = Number(ghostRes[0]?.count || 0);
+    const partialRes = await rawPrisma.$queryRaw<any[]>`SELECT COUNT(*) as count FROM "AuditLog" WHERE action = 'DUAL_WRITE_PARTIAL'`;
+    const partialCommits = Number(partialRes[0]?.count || 0);
+    const driftRes = await rawPrisma.$queryRaw<any[]>`SELECT COUNT(*) as count FROM "AuthorizationShadowObservation" WHERE status = 'CONCURRENT_DRIFT'`;
+    const concurrentDrift = Number(driftRes[0]?.count || 0);
     console.log(`dualwrite.ghost_grants         ${ghostGrants}`);
     console.log(`dualwrite.partial_commits      ${partialCommits}`);
     console.log(`dualwrite.concurrent_drift     ${concurrentDrift}`);
@@ -106,7 +109,10 @@ async function main() {
   }
 
   console.log("");
-  console.log("rollback.drill                 PASS");
+  const rollbackRes = await rawPrisma.$queryRaw<any[]>`SELECT COUNT(*) as count FROM "AuthorizationShadowObservation" WHERE status = 'ROLLBACK_DRILL_FAIL'`;
+  const rollbackCount = Number(rollbackRes[0]?.count || 0);
+  console.log(`rollback.drill                 ${rollbackCount === 0 ? 'PASS' : 'FAIL'}`);
+  if (rollbackCount > 0) criticalFailure = true;
   console.log("");
   
   if (criticalFailure) {

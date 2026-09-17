@@ -12,12 +12,12 @@ $$ LANGUAGE plpgsql;
 -- Apply triggers to Role, Permission, and RolePermission tables
 DROP TRIGGER IF EXISTS freeze_role_mutation ON "Role";
 CREATE TRIGGER freeze_role_mutation
-BEFORE UPDATE OR DELETE ON "Role"
+BEFORE INSERT OR UPDATE OR DELETE ON "Role"
 FOR EACH ROW EXECUTE FUNCTION prevent_global_role_mutation();
 
 DROP TRIGGER IF EXISTS freeze_permission_mutation ON "Permission";
 CREATE TRIGGER freeze_permission_mutation
-BEFORE UPDATE OR DELETE ON "Permission"
+BEFORE INSERT OR UPDATE OR DELETE ON "Permission"
 FOR EACH ROW EXECUTE FUNCTION prevent_global_role_mutation();
 
 DROP TRIGGER IF EXISTS freeze_role_permission_mutation ON "RolePermission";

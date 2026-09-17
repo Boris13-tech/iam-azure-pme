@@ -82,6 +82,7 @@ jobs:
               SELECT FROM pg_catalog.pg_roles
               WHERE  rolname = 'app_user') THEN
               CREATE ROLE app_user LOGIN PASSWORD 'app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+              GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
            END IF;
         END
         $do$;

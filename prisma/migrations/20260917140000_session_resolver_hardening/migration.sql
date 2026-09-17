@@ -24,7 +24,5 @@ END;
 $$;
 
 -- 2. Revoke execute from PUBLIC
-REVOKE EXECUTE ON FUNCTION resolve_session(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.resolve_session(TEXT) FROM PUBLIC;
 
--- 3. Grant execute exclusively to the runtime role
-GRANT EXECUTE ON FUNCTION resolve_session(TEXT) TO app_user;

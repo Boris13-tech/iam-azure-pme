@@ -1,6 +1,6 @@
 import { withTenantDb } from "../db/scoped-client";
 import { AuthContext } from "./authorization-engine";
-import { ENTITLEMENT_CATALOG_V1, CatalogEntitlement } from "./entitlements-catalog";
+import { ENTITLEMENT_CATALOG_V1, CatalogEntitlement, LEGACY_ADMIN_ENTITLEMENT_KEYS_V1 } from "./entitlements-catalog";
 import { mapLegacyPermission } from "./legacy-permission-map";
 
 export async function dualWriteUpdateUserRole(auth: AuthContext, legacyUserId: string, roleId: string) {
@@ -71,7 +71,7 @@ async function syncNativeAssignmentsForUser(auth: AuthContext, legacyUserId: str
   const keysToGrant = new Set<CatalogEntitlement>();
 
   if (role.name === "Administrateur") {
-    ENTITLEMENT_CATALOG_V1.forEach(k => keysToGrant.add(k));
+    LEGACY_ADMIN_ENTITLEMENT_KEYS_V1.forEach(k => keysToGrant.add(k as CatalogEntitlement));
   } else {
     for (const rp of role.permissions) {
       const p = rp.permission;
