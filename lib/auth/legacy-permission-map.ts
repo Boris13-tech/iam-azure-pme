@@ -10,6 +10,7 @@ export const LEGACY_PERMISSION_MAP: Record<string, CatalogEntitlement> = {
   "create:roles": "roles.create",
   "update:roles": "roles.update",
   "delete:roles": "roles.delete",
+  "manage:roles": "roles.manage",
   
   "read:audit": "audit.read",
 

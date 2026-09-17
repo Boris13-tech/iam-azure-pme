@@ -8,6 +8,7 @@ export const ENTITLEMENT_CATALOG_V1 = [
   "roles.create",
   "roles.update",
   "roles.delete",
+  "roles.manage",
 
   "audit.read",
 

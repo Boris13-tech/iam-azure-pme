@@ -22,43 +22,56 @@ export async function checkPermission(
 ): Promise<boolean> {
   const mode = (process.env.AUTHZ_MODE as AuthorizationMode) || "legacy";
 
-  // 1. Evaluate Legacy
+  // 1. Evaluate Legacy and Native in parallel (if not strictly legacy)
   let legacyDecision: LegacyAuthorizationDecision;
-  try {
-    const legacyAllowed = await hasLegacyPermission(auth, request.action, request.resource);
-    legacyDecision = {
-      allowed: legacyAllowed,
-      reasonCode: legacyAllowed ? "LEGACY_ALLOW" : "LEGACY_DENY"
-    };
-  } catch (err) {
-    legacyDecision = {
-      allowed: false,
-      reasonCode: "LEGACY_ERROR"
-    };
-  }
-
-  // If we're strictly legacy, exit early.
-  if (mode === "legacy") {
-    return legacyDecision.allowed;
-  }
-
-  // 2. Evaluate Native (shadow or native mode)
   let nativeDecision: AuthorizationDecision | null = null;
   let nativeError: unknown = null;
 
+  if (mode === "legacy") {
+    try {
+      const legacyAllowed = await hasLegacyPermission(auth, request.action, request.resource);
+      return legacyAllowed;
+    } catch (err) {
+      return false; // safe fail closed
+    }
+  }
+
+  // Shadow or Native mode: we run both
   try {
-    nativeDecision = await authorize(auth, request);
+    const [legacyAllowed, nativeRes] = await Promise.allSettled([
+      hasLegacyPermission(auth, request.action, request.resource),
+      authorize(auth, request)
+    ]);
+
+    // Parse legacy
+    if (legacyAllowed.status === "fulfilled") {
+      legacyDecision = {
+        allowed: legacyAllowed.value,
+        reasonCode: legacyAllowed.value ? "LEGACY_ALLOW" : "LEGACY_DENY"
+      };
+    } else {
+      legacyDecision = { allowed: false, reasonCode: "LEGACY_ERROR" };
+    }
+
+    // Parse native
+    if (nativeRes.status === "fulfilled") {
+      nativeDecision = nativeRes.value;
+    } else {
+      nativeError = nativeRes.reason;
+    }
   } catch (err) {
+    // Top-level failure
+    legacyDecision = { allowed: false, reasonCode: "LEGACY_ERROR" };
     nativeError = err;
   }
 
-  // 3. Shadow Observation
+  // 2. Shadow Observation (Await it to guarantee lifecycle completion in Serverless)
   if (mode === "shadow") {
-    // Record observation asynchronously to not block the request
-    recordObservation(auth, request, legacyDecision, nativeDecision, nativeError).catch(e => {
+    try {
+      await recordObservation(auth, request, legacyDecision, nativeDecision, nativeError);
+    } catch (e) {
       console.error("Failed to record authorization shadow observation", e);
-    });
-
+    }
     // In shadow mode, legacy is STILL the absolute source of truth
     return legacyDecision.allowed;
   }
@@ -111,8 +124,8 @@ async function recordObservation(
         nativeAllowed: nativeDecision ? nativeDecision.allowed : null,
         nativeReasonCode: nativeDecision ? nativeDecision.reasonCode : null,
         status,
-        nativeAssignmentIds: nativeDecision?.matchedAssignmentIds ?? null,
-        nativeEntitlementIds: nativeDecision?.matchedEntitlementIds ?? null,
+        nativeAssignmentIds: nativeDecision?.matchedAssignmentIds,
+        nativeEntitlementIds: nativeDecision?.matchedEntitlementIds,
         errorCode,
       }
     });
