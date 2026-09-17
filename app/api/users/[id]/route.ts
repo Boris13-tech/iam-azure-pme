@@ -1,26 +1,36 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { hasPermission } from "@/lib/permissions";
+import { rawPrisma } from "@/lib/db/raw-prisma";
+import { requireAuth } from "@/lib/auth/require-auth";
+import { hasLegacyPermission, resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
 import { updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const allowed = await hasPermission(userId, "update", "users");
-  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const body = await req.json();
-  
   try {
-    const userToUpdate = await prisma.user.findUnique({ where: { id: params.id } });
-    if (!userToUpdate) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const auth = await requireAuth();
 
-    if (userToUpdate.id === userId && body.status === "SUSPENDED") {
+    const allowed = await hasLegacyPermission(auth, "update", "users");
+    if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const legacyUser = await resolveLegacyUser(auth);
+    if (!legacyUser) return NextResponse.json({ error: "Forbidden - No legacy mapping" }, { status: 403 });
+
+    const body = await req.json();
+
+    const bridge = await rawPrisma.legacyUserBridge.findFirst({
+      where: {
+        legacyUserId: params.id,
+        organizationId: auth.organizationId,
+        status: "VALIDATED"
+      }
+    });
+
+    if (!bridge) return NextResponse.json({ error: "Not found or not in this organization" }, { status: 404 });
+
+    if (params.id === legacyUser.id && body.status === "SUSPENDED") {
       return NextResponse.json({ error: "Cannot suspend yourself" }, { status: 400 });
     }
 
-    const updatedUser = await prisma.user.update({
+    const updatedUser = await rawPrisma.user.update({
       where: { id: params.id },
       data: {
         status: body.status,
@@ -28,7 +38,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       }
     });
 
-    // Update in Azure AD
     const hasGraphConfig = 
       (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
       process.env.GRAPH_CLIENT_SECRET && 
@@ -44,19 +53,18 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     if (body.roleId) {
-      // Clean up other roles first or upsert
-      await prisma.userRole.deleteMany({
+      await rawPrisma.userRole.deleteMany({
         where: { userId: params.id }
       });
       
-      await prisma.userRole.create({
+      await rawPrisma.userRole.create({
         data: { userId: params.id, roleId: body.roleId },
       });
     }
 
-    await prisma.auditLog.create({
+    await rawPrisma.auditLog.create({
       data: {
-        actorId: userId,
+        actorId: legacyUser.id,
         action: "UPDATE_USER",
         target: params.id,
         ip: req.headers.get("x-forwarded-for") || "unknown",
@@ -66,28 +74,42 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     return NextResponse.json(updatedUser);
   } catch (error: any) {
+    if (error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }
 
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const allowed = await hasPermission(userId, "delete", "users");
-  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  if (params.id === userId) {
-    return NextResponse.json({ error: "Cannot delete yourself" }, { status: 400 });
-  }
-
   try {
-    const deletedUser = await prisma.user.update({
+    const auth = await requireAuth();
+
+    const allowed = await hasLegacyPermission(auth, "delete", "users");
+    if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const legacyUser = await resolveLegacyUser(auth);
+    if (!legacyUser) return NextResponse.json({ error: "Forbidden - No legacy mapping" }, { status: 403 });
+
+    if (params.id === legacyUser.id) {
+      return NextResponse.json({ error: "Cannot delete yourself" }, { status: 400 });
+    }
+
+    const bridge = await rawPrisma.legacyUserBridge.findFirst({
+      where: {
+        legacyUserId: params.id,
+        organizationId: auth.organizationId,
+        status: "VALIDATED"
+      }
+    });
+
+    if (!bridge) return NextResponse.json({ error: "Not found or not in this organization" }, { status: 404 });
+
+    const deletedUser = await rawPrisma.user.update({
       where: { id: params.id },
       data: { status: "INACTIVE" }
     });
 
-    // Update in Azure AD (deactivate account)
     const hasGraphConfig = 
       (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
       process.env.GRAPH_CLIENT_SECRET && 
@@ -97,9 +119,9 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
       await updateAzureUserStatus(deletedUser.azureId, false);
     }
 
-    await prisma.auditLog.create({
+    await rawPrisma.auditLog.create({
       data: {
-        actorId: userId,
+        actorId: legacyUser.id,
         action: "SOFT_DELETE_USER",
         target: params.id,
         ip: req.headers.get("x-forwarded-for") || "unknown",
@@ -109,6 +131,9 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
 
     return NextResponse.json({ success: true, user: deletedUser });
   } catch (error: any) {
+    if (error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }

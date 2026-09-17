@@ -1,62 +1,76 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { hasPermission } from "@/lib/permissions";
-import { syncAzureUsers, createAzureUser } from "@/lib/graph";
+import { rawPrisma } from "@/lib/db/raw-prisma";
+import { requireAuth } from "@/lib/auth/require-auth";
+import { hasLegacyPermission, resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
+import { createAzureUser } from "@/lib/graph";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const auth = await requireAuth();
 
-  const allowed = await hasPermission(userId, "read", "users");
-  if (!allowed) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const allowed = await hasLegacyPermission(auth, "read", "users");
+    if (!allowed) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const skip = parseInt(searchParams.get("skip") || "0");
+    const take = parseInt(searchParams.get("take") || "10");
+
+    const bridges = await rawPrisma.legacyUserBridge.findMany({
+      skip,
+      take,
+      where: {
+        organizationId: auth.organizationId,
+        status: "VALIDATED"
+      },
+      include: {
+        legacyUser: {
+          include: { roles: { include: { role: true } } }
+        }
+      },
+      orderBy: { legacyUser: { createdAt: "desc" } },
+    });
+
+    const total = await rawPrisma.legacyUserBridge.count({
+      where: {
+        organizationId: auth.organizationId,
+        status: "VALIDATED"
+      }
+    });
+
+    const users = bridges.map(b => b.legacyUser).filter(u => u !== null);
+
+    return NextResponse.json({ users, total });
+  } catch (error: any) {
+    if (error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
-
-  const hasGraphConfig = 
-    (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
-    process.env.GRAPH_CLIENT_SECRET && 
-    process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
-
-  if (hasGraphConfig) {
-    await syncAzureUsers();
-  }
-
-  const { searchParams } = new URL(req.url);
-  const skip = parseInt(searchParams.get("skip") || "0");
-  const take = parseInt(searchParams.get("take") || "10");
-
-  const users = await prisma.user.findMany({
-    skip,
-    take,
-    include: { roles: { include: { role: true } } },
-    orderBy: { createdAt: "desc" },
-  });
-
-  const total = await prisma.user.count();
-
-  return NextResponse.json({ users, total });
 }
 
 export async function POST(req: Request) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const allowed = await hasPermission(userId, "create", "users");
-  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const body = await req.json();
-  
   try {
+    const auth = await requireAuth();
+
+    const allowed = await hasLegacyPermission(auth, "create", "users");
+    if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const legacyUser = await resolveLegacyUser(auth);
+    if (!legacyUser) return NextResponse.json({ error: "Forbidden - No legacy mapping" }, { status: 403 });
+
+    const body = await req.json();
     let azureId = body.azureId || null;
 
     const hasGraphConfig = 
-    (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
-    process.env.GRAPH_CLIENT_SECRET && 
-    process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
+      process.env.GRAPH_CLIENT_SECRET && 
+      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
 
-  if (hasGraphConfig) {
+    if (hasGraphConfig) {
       try {
         const azureUser = await createAzureUser(body.name, body.email);
         azureId = azureUser.azureId;
@@ -66,7 +80,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const newUser = await prisma.user.create({
+    const newUser = await rawPrisma.user.create({
       data: {
         email: body.email,
         name: body.name,
@@ -75,9 +89,26 @@ export async function POST(req: Request) {
       }
     });
 
+    const newSubject = await rawPrisma.subject.create({
+      data: {
+        organizationId: auth.organizationId,
+        tenantId: auth.tenantId,
+        type: "HUMAN",
+      }
+    });
+
+    await rawPrisma.legacyUserBridge.create({
+      data: {
+        organizationId: auth.organizationId,
+        subjectId: newSubject.id,
+        legacyUserId: newUser.id,
+        status: "VALIDATED"
+      }
+    });
+
     if (body.roleId) {
       try {
-        await prisma.userRole.create({
+        await rawPrisma.userRole.create({
           data: {
             userId: newUser.id,
             roleId: body.roleId
@@ -88,9 +119,9 @@ export async function POST(req: Request) {
       }
     }
 
-    await prisma.auditLog.create({
+    await rawPrisma.auditLog.create({
       data: {
-        actorId: userId,
+        actorId: legacyUser.id,
         action: "CREATE_USER",
         target: newUser.id,
         ip: req.headers.get("x-forwarded-for") || "unknown",
@@ -100,6 +131,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json(newUser);
   } catch (error: any) {
+    if (error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }

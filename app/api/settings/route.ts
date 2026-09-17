@@ -1,50 +1,42 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { hasPermission } from "@/lib/permissions";
+import { rawPrisma } from "@/lib/db/raw-prisma";
+import { requireAuth } from "@/lib/auth/require-auth";
+import { hasLegacyPermission } from "@/lib/auth/legacy-auth-adapter";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   try {
-    let policy = await prisma.accessPolicy.findUnique({
+    const auth = await requireAuth();
+
+    let policy = await rawPrisma.accessPolicy.findUnique({
       where: { id: "global" }
     });
 
     if (!policy) {
-      policy = await prisma.accessPolicy.create({
+      policy = await rawPrisma.accessPolicy.create({
         data: { id: "global" }
       });
     }
 
     return NextResponse.json(policy);
   } catch (error: any) {
+    if (error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
 export async function POST(req: Request) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  // Only admins can change policies (or mock admin)
-  const allowed = await hasPermission(userId, "manage", "settings");
-  if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const body = await req.json();
-  const { mfa, geoBlock, sessionTimeout, passwordRotation } = body;
-
   try {
-    const policy = await prisma.accessPolicy.upsert({
-      where: { id: "global" },
-      update: { mfa, geoBlock, sessionTimeout, passwordRotation },
-      create: { id: "global", mfa, geoBlock, sessionTimeout, passwordRotation }
-    });
-
-    return NextResponse.json(policy);
+    await requireAuth();
+    // Temporarily disable mutations since AccessPolicy is not yet tenant-aware
+    return NextResponse.json({ error: "Mutating global access policies is disabled in this Phase until they are scoped by Organization." }, { status: 403 });
   } catch (error: any) {
+    if (error.message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }
