@@ -114,7 +114,8 @@ export async function GET(request: Request) {
     }, ip, userAgent);
 
     // 10. Set HttpOnly/Secure/SameSite=Lax luxia_session cookie
-    cookies().set("luxia_session", rawToken, {
+    const cookieStore = await cookies();
+    cookieStore.set("luxia_session", rawToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
