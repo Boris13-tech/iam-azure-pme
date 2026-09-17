@@ -2,11 +2,12 @@ import { randomUUID } from "crypto";
 import { adminPrisma } from "../../tests/helpers/admin-prisma";
 import { executeScenario, SoakScenario } from "./scenarios";
 import { SoakReport } from "./report";
-import { rawPrisma } from "../../lib/db/raw-prisma";
 import * as crypto from "crypto";
 
 async function main() {
   console.log("Starting Soak Staging Execution (Simulated Traffic)...");
+
+  const soakStartedAt = new Date();
 
   // 1. Setup deterministic fixtures (using adminPrisma ONLY)
   const orgId = randomUUID();
@@ -20,9 +21,6 @@ async function main() {
   const legacyUser1 = randomUUID();
   const legacyUser2 = randomUUID();
   const legacyUser3 = randomUUID();
-
-  // Make sure DB is clean from previous shadow observations
-  await rawPrisma.authorizationShadowObservation.deleteMany();
 
   // Create Org & Tenants
   await adminPrisma.organization.create({ data: { id: orgId, name: "Soak Org" } });
@@ -51,8 +49,7 @@ async function main() {
   await adminPrisma.user.create({ data: { id: legacyUser2, email: "soak2@example.com", name: "Soak 2" } });
   await adminPrisma.user.create({ data: { id: legacyUser3, email: "soak3@example.com", name: "Soak 3" } });
 
-  await adminPrisma.subject.create({ data: { id: subject1Id, organizationId: orgId, organizationId: orgId,
-      tenantId: tenantA, name: "S1", type: "HUMAN" } });
+  await adminPrisma.subject.create({ data: { id: subject1Id, organizationId: orgId, tenantId: tenantA, name: "S1", type: "HUMAN" } });
   await adminPrisma.subject.create({ data: { id: subject2Id, organizationId: orgId, tenantId: tenantA, name: "S2", type: "HUMAN" } });
   await adminPrisma.subject.create({ data: { id: subject3Id, organizationId: orgId, tenantId: tenantA, name: "S3", type: "HUMAN" } });
 
@@ -64,12 +61,23 @@ async function main() {
   await adminPrisma.userRole.create({ data: { userId: legacyUser1, roleId: roleA.id } });
   await adminPrisma.userRole.create({ data: { userId: legacyUser2, roleId: roleB.id } });
 
+  // Create ProviderConnection dedicated to Soak
+  const soakProvider = await adminPrisma.providerConnection.create({
+    data: {
+      organizationId: orgId,
+      name: "Soak Provider",
+      providerType: "MICROSOFT_ENTRA",
+      externalScopeId: "soak-scope"
+    }
+  });
+
   // Create Sessions for the Session Validation Scenarios
   const idpAccount = await adminPrisma.identityAccount.create({
     data: {
-      providerConnectionId: (await adminPrisma.providerConnection.findFirst())?.id || "N/A",
+      organizationId: orgId,
       tenantId: tenantA,
       subjectId: subject1Id,
+      providerConnectionId: soakProvider.id,
       externalObjectId: "oidc-sub-1"
     }
   });
@@ -130,7 +138,7 @@ async function main() {
   };
 
   // Scenarios Generation
-  const report = new SoakReport();
+  const report = new SoakReport(orgId, tenantA, soakStartedAt);
   const scenarios: SoakScenario[] = [];
 
   const auth1 = { organizationId: orgId, tenantId: tenantA, subjectId: subject1Id, type: "HUMAN" } as any;
@@ -138,10 +146,12 @@ async function main() {
   const auth3 = { organizationId: orgId, tenantId: tenantA, subjectId: subject3Id, type: "HUMAN" } as any;
   const auth1TenantB = { organizationId: orgId, tenantId: tenantB, subjectId: subject1Id, type: "HUMAN" } as any;
 
-  // Level 1: Smoke (Deterministic)
+  // Level 1: Smoke (Deterministic with expectations)
   console.log("Running Smoke Scenarios...");
-  scenarios.push({ id: "smoke-allow", type: "AUTHORIZE", authContext: auth1, action: "read", resource: "users", expectedGatewayDecision: true });
-  scenarios.push({ id: "smoke-deny", type: "AUTHORIZE", authContext: auth1, action: "read", resource: "settings", expectedGatewayDecision: false });
+  scenarios.push({ id: "smoke-allow-1", type: "AUTHORIZE", authContext: auth1, action: "read", resource: "users", expectedGatewayDecision: true });
+  scenarios.push({ id: "smoke-allow-2", type: "AUTHORIZE", authContext: auth2, action: "read", resource: "settings", expectedGatewayDecision: true });
+  scenarios.push({ id: "smoke-deny-1", type: "AUTHORIZE", authContext: auth1, action: "read", resource: "settings", expectedGatewayDecision: false });
+  scenarios.push({ id: "smoke-deny-2", type: "AUTHORIZE", authContext: auth2, action: "read", resource: "users", expectedGatewayDecision: false });
   scenarios.push({ id: "smoke-unknown-entitlement", type: "AUTHORIZE", authContext: auth1, action: "fly", resource: "moon", expectedGatewayDecision: false });
   scenarios.push({ id: "smoke-cross-tenant-deny", type: "AUTHORIZE", authContext: auth1TenantB, action: "read", resource: "users", expectedGatewayDecision: false });
   

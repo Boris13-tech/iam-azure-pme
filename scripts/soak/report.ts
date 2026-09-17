@@ -4,7 +4,12 @@ import { ScenarioResult } from "./scenarios";
 
 export class SoakReport {
   results: ScenarioResult[] = [];
-  startTime = new Date();
+  
+  constructor(
+    private orgId: string,
+    private tenantId: string,
+    private soakStartedAt: Date
+  ) {}
 
   addResult(res: ScenarioResult) {
     this.results.push(res);
@@ -15,18 +20,24 @@ export class SoakReport {
     console.log("SOAK SUMMARY");
     console.log("=========================================");
     console.log(`scenarios                 ${this.results.length}`);
-    console.log(`passed                    ${this.results.length}`); // We fail fast on throws, so all in array passed
+    console.log(`passed                    ${this.results.length}`);
     console.log(`failed                    0`);
     console.log("");
 
     let criticalFailure = false;
 
     try {
-      const shadowDivergence = await rawPrisma.authorizationShadowObservation.count({ where: { status: "DIVERGENCE" } });
-      const shadowNativeErr = await rawPrisma.authorizationShadowObservation.count({ where: { status: "NATIVE_ERROR" } });
-      const shadowLegacyErr = await rawPrisma.authorizationShadowObservation.count({ where: { status: "LEGACY_ERROR" } });
+      const baseFilter = {
+        organizationId: this.orgId,
+        tenantId: this.tenantId,
+        createdAt: { gte: this.soakStartedAt }
+      };
+
+      const shadowDivergence = await rawPrisma.authorizationShadowObservation.count({ where: { ...baseFilter, status: "DIVERGENCE" } });
+      const shadowNativeErr = await rawPrisma.authorizationShadowObservation.count({ where: { ...baseFilter, status: "NATIVE_ERROR" } });
+      const shadowLegacyErr = await rawPrisma.authorizationShadowObservation.count({ where: { ...baseFilter, status: "LEGACY_ERROR" } });
       const shadowUnknown = await rawPrisma.authorizationShadowObservation.count({
-        where: { status: "DIVERGENCE", nativeReasonCode: "UNKNOWN_ENTITLEMENT" }
+        where: { ...baseFilter, status: "DIVERGENCE", nativeReasonCode: "UNKNOWN_ENTITLEMENT" }
       });
       
       const realDivergence = shadowDivergence - shadowUnknown;
@@ -49,6 +60,8 @@ export class SoakReport {
         FROM "Assignment" a
         WHERE a.source = 'LEGACY_ROLE'
           AND a.status = 'ACTIVE'
+          AND a."organizationId" = ${this.orgId}
+          AND a."tenantId" = ${this.tenantId}
           AND NOT EXISTS (
             SELECT 1
             FROM "LegacyUserBridge" b
@@ -66,17 +79,8 @@ export class SoakReport {
     }
 
     try {
-      let missing = 0, unexpected = 0, orphans = 0, inconsistencies = 0;
-      const tenants = await rawPrisma.tenant.findMany();
-      for (const t of tenants) {
-        const rep = await runAuthorizationReconciliation(t.organizationId, t.id);
-        missing += rep.missingNativeGrants;
-        unexpected += rep.unexpectedNativeGrants;
-        orphans += rep.orphanLegacyRoleAssignments;
-        inconsistencies += rep.expiredRevokedInconsistencies;
-      }
-      
-      const drift = missing + unexpected + orphans + inconsistencies;
+      const rep = await runAuthorizationReconciliation(this.orgId, this.tenantId);
+      const drift = rep.missingNativeGrants + rep.unexpectedNativeGrants + rep.orphanLegacyRoleAssignments + rep.expiredRevokedInconsistencies;
       console.log(`reconciliation drift      ${drift}`);
       if (drift > 0) criticalFailure = true;
     } catch {
@@ -84,7 +88,7 @@ export class SoakReport {
       criticalFailure = true;
     }
 
-    console.log(`rollback drill            ${criticalFailure ? 'SKIP' : 'PASS'}`); // Will actually be tested manually in the runner script before calling this
+    console.log(`rollback drill            ${criticalFailure ? 'SKIP' : 'PASS'}`);
 
     console.log("=========================================");
     

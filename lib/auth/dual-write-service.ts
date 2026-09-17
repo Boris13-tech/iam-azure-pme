@@ -5,7 +5,26 @@ import { mapLegacyPermission } from "./legacy-permission-map";
 
 export async function dualWriteUpdateUserRole(auth: AuthContext, legacyUserId: string, roleId: string) {
   await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
-    // 1. Legacy Write
+    // 1. Transactional Serialization
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('dualwrite'), hashtext($1))`, legacyUserId);
+
+    // 2. Validate isolation constraints BEFORE any mutation
+    const bridge = await tx.legacyUserBridge.findFirst({
+      where: { legacyUserId },
+      include: { subject: true }
+    });
+
+    if (!bridge || bridge.status !== "VALIDATED") {
+      throw new Error(`LegacyUserBridge invalid or not found for user ${legacyUserId}`);
+    }
+    if (bridge.organizationId !== auth.organizationId) {
+      throw new Error(`Cross-organization boundary violation for legacy user ${legacyUserId}`);
+    }
+    if (!bridge.subject || bridge.subject.tenantId !== auth.tenantId) {
+      throw new Error(`Cross-tenant boundary violation for legacy user ${legacyUserId}`);
+    }
+
+    // 3. Legacy Write
     await tx.userRole.deleteMany({
       where: { userId: legacyUserId }
     });
@@ -14,21 +33,39 @@ export async function dualWriteUpdateUserRole(auth: AuthContext, legacyUserId: s
       data: { userId: legacyUserId, roleId: roleId }
     });
 
-    // 2. Native Write
-    await syncNativeAssignmentsForUser(auth, legacyUserId, roleId, tx);
+    // 4. Native Write
+    await syncNativeAssignmentsForUser(auth, bridge.subject.id, roleId, tx);
   });
 }
 
-
 export async function dualWriteRevokeUserRole(auth: AuthContext, legacyUserId: string) {
   await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
-    // 1. Legacy Write
+    // 1. Transactional Serialization
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('dualwrite'), hashtext($1))`, legacyUserId);
+
+    // 2. Validate isolation constraints BEFORE any mutation
+    const bridge = await tx.legacyUserBridge.findFirst({
+      where: { legacyUserId },
+      include: { subject: true }
+    });
+
+    if (!bridge || bridge.status !== "VALIDATED") {
+      throw new Error(`LegacyUserBridge invalid or not found for user ${legacyUserId}`);
+    }
+    if (bridge.organizationId !== auth.organizationId) {
+      throw new Error(`Cross-organization boundary violation for legacy user ${legacyUserId}`);
+    }
+    if (!bridge.subject || bridge.subject.tenantId !== auth.tenantId) {
+      throw new Error(`Cross-tenant boundary violation for legacy user ${legacyUserId}`);
+    }
+
+    // 3. Legacy Write
     await tx.userRole.deleteMany({
       where: { userId: legacyUserId }
     });
     
-    // 2. Native Write (sync with no role)
-    await syncNativeAssignmentsForUser(auth, legacyUserId, '', tx);
+    // 4. Native Write (sync with no role)
+    await syncNativeAssignmentsForUser(auth, bridge.subject.id, '', tx);
   });
 }
 
@@ -44,20 +81,7 @@ export async function dualWriteDeleteRole(auth: AuthContext, roleId: string) {
   throw new Error("Global role definitions are frozen during Phase 5E/5F cutover. Mutation rejected.");
 }
 
-async function syncNativeAssignmentsForUser(auth: AuthContext, legacyUserId: string, currentRoleId: string, tx: any) {
-  const bridge = await tx.legacyUserBridge.findFirst({
-    where: {
-      legacyUserId: legacyUserId,
-      organizationId: auth.organizationId,
-      status: "VALIDATED"
-    },
-    include: { subject: true }
-  });
-
-  if (!bridge || !bridge.subject) return;
-
-  const subjectId = bridge.subject.id;
-
+async function syncNativeAssignmentsForUser(auth: AuthContext, subjectId: string, currentRoleId: string, tx: any) {
   // Revoke old assignments from any LEGACY_ROLE
   await tx.assignment.updateMany({
     where: {
@@ -72,6 +96,8 @@ async function syncNativeAssignmentsForUser(auth: AuthContext, legacyUserId: str
       validUntil: new Date()
     }
   });
+
+  if (!currentRoleId) return; // Revoked completely
 
   // Get the new role with permissions
   const role = await tx.role.findUnique({
