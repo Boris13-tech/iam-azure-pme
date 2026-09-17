@@ -5,6 +5,8 @@ export type AuthTransactionData = {
   stateHash: string;
   nonce: string;
   codeVerifier: string;
+  expectedOrganizationId: string;
+  expectedProviderConnectionId: string;
   returnTo?: string;
   expiresInMinutes?: number;
 };
@@ -24,6 +26,8 @@ export class AuthTransactionStore {
         stateHash: data.stateHash,
         nonce: data.nonce,
         codeVerifier: data.codeVerifier,
+        expectedOrganizationId: data.expectedOrganizationId,
+        expectedProviderConnectionId: data.expectedProviderConnectionId,
         returnTo: data.returnTo,
         expiresAt
       }

@@ -290,14 +290,16 @@ model Session {
 }
 
 model AuthTransaction {
-  id           String    @id
-  stateHash    String    @unique
-  nonce        String
-  codeVerifier String
-  returnTo     String?
-  expiresAt    DateTime
-  consumedAt   DateTime?
-  createdAt    DateTime  @default(now())
+  id                           String    @id
+  stateHash                    String    @unique
+  nonce                        String
+  codeVerifier                 String
+  expectedOrganizationId       String
+  expectedProviderConnectionId String
+  returnTo                     String?
+  expiresAt                    DateTime
+  consumedAt                   DateTime?
+  createdAt                    DateTime  @default(now())
 
   @@index([expiresAt])
 }

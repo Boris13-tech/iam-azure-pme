@@ -1,12 +1,12 @@
 import * as client from 'openid-client';
+import { ProviderConnection } from '@prisma/client';
 
-export async function getEntraOIDCConfig() {
-  const tenantId = process.env.GRAPH_TENANT_ID;
-  const clientId = process.env.GRAPH_CLIENT_ID;
-  const clientSecret = process.env.GRAPH_CLIENT_SECRET;
+export async function getEntraOIDCConfig(providerConnection: ProviderConnection) {
+  const clientId = process.env.ENTRA_AUTH_CLIENT_ID;
+  const clientSecret = process.env.ENTRA_AUTH_CLIENT_SECRET;
   
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error("Missing Entra ID configuration in environment variables");
+  if (!clientId || !clientSecret) {
+    throw new Error("Missing ENTRA_AUTH_CLIENT configuration in environment variables");
   }
 
   // Ensure redirect URI points to the callback route
@@ -14,8 +14,9 @@ export async function getEntraOIDCConfig() {
     ? `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback` 
     : 'http://localhost:3000/auth/callback';
 
-  // OIDC Discovery
-  const issuerUrl = new URL(`https://login.microsoftonline.com/${tenantId}/v2.0`);
+  // OIDC Discovery on tenant-specific endpoint
+  // ProviderConnection.externalScopeId holds the Entra tenant ID (tid)
+  const issuerUrl = new URL(`https://login.microsoftonline.com/${providerConnection.externalScopeId}/v2.0`);
   const config = await client.discovery(
     issuerUrl,
     clientId,
