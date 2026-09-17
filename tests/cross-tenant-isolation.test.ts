@@ -59,7 +59,8 @@ async function main() {
     await prisma.identityAccount.create({
       data: {
         organizationId: orgA.id,
-        subjectId: subjectA.id,
+          tenantId: tenantA.id,
+          subjectId: subjectA.id,
         providerConnectionId: providerB.id, // Provider B is in Org B
         externalObjectId: "oid-123"
       }
