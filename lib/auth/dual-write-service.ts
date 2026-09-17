@@ -20,114 +20,15 @@ export async function dualWriteUpdateUserRole(auth: AuthContext, legacyUserId: s
 }
 
 export async function dualWriteCreateRole(auth: AuthContext, name: string, description: string, permissions: string[]) {
-  return await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
-    // 1. Legacy Write
-    const newRole = await tx.role.create({
-      data: { name, description, isCustom: true }
-    });
-
-    if (permissions && Array.isArray(permissions)) {
-      for (const permStr of permissions) {
-        const [action, resource] = permStr.split(":");
-        const perm = await tx.permission.upsert({
-          where: { action_resource: { action, resource } },
-          update: {},
-          create: { action, resource }
-        });
-
-        await tx.rolePermission.create({
-          data: {
-            roleId: newRole.id,
-            permissionId: perm.id
-          }
-        });
-      }
-    }
-    
-    // 2. Native Write (No subjects have this role yet, so no assignments to sync, just return the role)
-    return newRole;
-  });
+  throw new Error("Global role definitions are frozen during Phase 5E/5F cutover. Mutation rejected.");
 }
 
 export async function dualWriteUpdateRolePermissions(auth: AuthContext, roleId: string, name: string, description: string, permissions: string[]) {
-  return await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
-    // 1. Legacy Write
-    const role = await tx.role.update({
-      where: { id: roleId },
-      data: { name, description }
-    });
-
-    if (permissions && Array.isArray(permissions)) {
-      await tx.rolePermission.deleteMany({
-        where: { roleId: roleId }
-      });
-
-      for (const permStr of permissions) {
-        const [action, resource] = permStr.split(":");
-        const perm = await tx.permission.upsert({
-          where: { action_resource: { action, resource } },
-          update: {},
-          create: { action, resource }
-        });
-
-        await tx.rolePermission.create({
-          data: {
-            roleId: role.id,
-            permissionId: perm.id
-          }
-        });
-      }
-    }
-
-    // 2. Native Write
-    // We must sync assignments for all Subjects IN THIS TENANT that hold this role.
-    const bridges = await tx.legacyUserBridge.findMany({
-      where: {
-        organizationId: auth.organizationId,
-        status: "VALIDATED",
-        legacyUser: {
-          roles: {
-            some: { roleId: roleId }
-          }
-        }
-      },
-      include: {
-        subject: true
-      }
-    });
-
-    for (const bridge of bridges) {
-      if (bridge.subject) {
-        await syncNativeAssignmentsForUser(auth, bridge.legacyUserId, roleId, tx);
-      }
-    }
-
-    return role;
-  });
+  throw new Error("Global role definitions are frozen during Phase 5E/5F cutover. Mutation rejected.");
 }
 
 export async function dualWriteDeleteRole(auth: AuthContext, roleId: string) {
-  await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
-    // 2. Native Write: Revoke all assignments sourced from this role in this tenant
-    // (Doing Native first here since Legacy delete might cascade and we lose the ref, 
-    // though we only need the roleId string).
-    await tx.assignment.updateMany({
-      where: {
-        organizationId: auth.organizationId,
-        tenantId: auth.tenantId,
-        source: "LEGACY_ROLE",
-        sourceRef: roleId,
-        status: "ACTIVE"
-      },
-      data: {
-        status: "REVOKED",
-        validUntil: new Date()
-      }
-    });
-
-    // 1. Legacy Write
-    await tx.role.delete({ where: { id: roleId } });
-  });
+  throw new Error("Global role definitions are frozen during Phase 5E/5F cutover. Mutation rejected.");
 }
 
 async function syncNativeAssignmentsForUser(auth: AuthContext, legacyUserId: string, currentRoleId: string, tx: any) {
