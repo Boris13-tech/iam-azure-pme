@@ -148,4 +148,39 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     const active = await rawPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
     expect(active.length).toBe(0);
   });
+
+  it("should handle deterministic reconciliation (running twice yields same result)", async () => {
+    if (!orgId) return;
+    const run1 = await runAuthorizationReconciliation(orgId, tenantId);
+    const run2 = await runAuthorizationReconciliation(orgId, tenantId);
+    expect(run1).toEqual(run2);
+  });
+
+  it("should handle concurrent role replacements without ghost grants", async () => {
+    if (!orgId) return;
+    const auth = { organizationId: orgId, tenantId: tenantId, subjectId: "admin", type: "HUMAN" } as any;
+
+    // We simulate two parallel requests updating the user's role:
+    // Request 1: User gets Role A
+    // Request 2: User gets Role B
+    await Promise.all([
+      dualWriteUpdateUserRole(auth, legacyUserId, roleAId).catch(() => {}),
+      dualWriteUpdateUserRole(auth, legacyUserId, roleBId).catch(() => {})
+    ]);
+
+    // The user should eventually have ONE of the roles.
+    const finalRole = await rawPrisma.userRole.findFirst({ where: { userId: legacyUserId } });
+    expect(finalRole).toBeDefined();
+
+    // The reconciliation should STILL be perfectly clean.
+    const report = await runAuthorizationReconciliation(orgId, tenantId);
+    expect(report.missingNativeGrants).toBe(0);
+    expect(report.unexpectedNativeGrants).toBe(0);
+    expect(report.orphanLegacyRoleAssignments).toBe(0);
+    expect(report.expiredRevokedInconsistencies).toBe(0);
+    
+    // The active assignments should perfectly match the winning role.
+    const active = await rawPrisma.assignment.findMany({ where: { subjectId, status: "ACTIVE" }});
+    expect(active.every(a => a.sourceRef === finalRole!.roleId)).toBe(true);
+  });
 });

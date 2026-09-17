@@ -20,7 +20,15 @@ export async function checkPermission(
   auth: AuthContext,
   request: AuthorizationRequest
 ): Promise<boolean> {
-  const mode = (process.env.AUTHZ_MODE as AuthorizationMode) || "legacy";
+  const rawMode = process.env.AUTHZ_MODE || "legacy";
+  const validModes: AuthorizationMode[] = ["legacy", "shadow", "native-shadow-legacy", "native"];
+  const mode: AuthorizationMode = validModes.includes(rawMode as AuthorizationMode) 
+    ? (rawMode as AuthorizationMode) 
+    : "legacy";
+
+  if (rawMode !== mode) {
+    console.warn(`[AUTHZ] Unknown AUTHZ_MODE '${rawMode}', falling back to 'legacy' fail-safe`);
+  }
 
   // 1. Evaluate Legacy and Native in parallel (if not strictly legacy)
   let legacyDecision: LegacyAuthorizationDecision;
