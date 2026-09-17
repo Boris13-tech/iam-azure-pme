@@ -164,6 +164,7 @@ model Subject {
   tenant       Tenant            @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   identities   IdentityAccount[]
   legacyBridge LegacyUserBridge?
+  Session      Session[]
 
   @@unique([organizationId, id])
   @@index([organizationId, tenantId])
@@ -180,6 +181,7 @@ model IdentityAccount {
 
   subject            Subject            @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
   providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
+  Session            Session[]
 
   @@unique([organizationId, providerConnectionId, externalObjectId])
   @@index([organizationId])
@@ -256,4 +258,30 @@ model LegacyUserBridge {
 
   @@unique([organizationId, subjectId])
   @@index([organizationId])
+}
+
+// ----------------------------------------------------------------------
+// SESSION MANAGEMENT (PHASE 3 - COMMIT A)
+// ----------------------------------------------------------------------
+
+model Session {
+  id                String @id
+  organizationId    String
+  tenantId          String
+  subjectId         String
+  identityAccountId String
+
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime?
+
+  ipHash        String?
+  userAgentHash String?
+
+  subject         Subject         @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
+  identityAccount IdentityAccount @relation(fields: [identityAccountId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([subjectId])
 }
