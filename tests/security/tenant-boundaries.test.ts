@@ -60,36 +60,29 @@ describe("Tenant Boundaries Security", () => {
     expect(subjects[0].id).toBe(subjectA);
   });
 
-  it("should override organizationId on create", async () => {
+  it("should prevent creating a Subject with wrong organizationId", async () => {
     const auth: SessionContext = { organizationId: orgA, tenantId: tenantA, subjectId: subjectA, identityAccountId: "dummy" };
     const scopedPrisma = createScopedDb(auth);
 
-    const newSubject = await scopedPrisma.subject.create({
+    await expect(scopedPrisma.subject.create({
       data: { organizationId: orgB, tenantId: tenantB, type: "HUMAN", name: "Hacker Create" }
-    });
-
-    expect(newSubject.organizationId).toBe(orgA);
-    expect(newSubject.tenantId).toBe(tenantA);
+    })).rejects.toThrow("CROSS_ORGANIZATION_WRITE_DENIED");
   });
 
-  it("should override organizationId on update (prevent moving to another org)", async () => {
+  it("should prevent updating organizationId (moving to another org)", async () => {
     const auth: SessionContext = { organizationId: orgA, tenantId: tenantA, subjectId: subjectA, identityAccountId: "dummy" };
     const scopedPrisma = createScopedDb(auth);
 
-    const updated = await scopedPrisma.subject.update({
+    await expect(scopedPrisma.subject.update({
       where: { id: subjectA },
       data: { organizationId: orgB }
-    });
-
-    expect(updated.organizationId).toBe(orgA); // Overridden back to OrgA by scoped client
+    })).rejects.toThrow("CROSS_ORGANIZATION_WRITE_DENIED");
   });
 
   it("should prevent deleting data from another org", async () => {
     const auth: SessionContext = { organizationId: orgA, tenantId: tenantA, subjectId: subjectA, identityAccountId: "dummy" };
     const scopedPrisma = createScopedDb(auth);
 
-    // This won't throw PrismaClientKnownRequestError directly if record not found in some cases depending on operation,
-    // but update/delete with where will throw RecordNotFound if it doesn't match the where clause
     await expect(
       scopedPrisma.subject.delete({
         where: { id: "some-org-b-subject-id" }

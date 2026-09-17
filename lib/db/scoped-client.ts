@@ -26,8 +26,19 @@ export function createScopedDb(scope: DataScope) {
           // @ts-expect-error dynamic args
           args.where = args.where || {};
           
+          const checkDataScope = (data: any) => {
+            if (!data) return;
+            if (data.organizationId && data.organizationId !== scope.organizationId) {
+              throw new Error("CROSS_ORGANIZATION_WRITE_DENIED");
+            }
+            if (scope.tenantId && ['Subject', 'Resource'].includes(model) && data.tenantId && data.tenantId !== scope.tenantId) {
+              throw new Error("CROSS_TENANT_WRITE_DENIED");
+            }
+          };
+
           const applyScopeToData = (data: any) => {
             if (!data) return;
+            checkDataScope(data);
             data.organizationId = scope.organizationId;
             if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
               data.tenantId = scope.tenantId;
