@@ -4,6 +4,7 @@ import * as client from "openid-client";
 import { getEntraOIDCConfig } from "../../../lib/auth/providers/entra";
 import { AuthTransactionStore } from "../../../lib/auth/auth-transaction-store";
 import { rawPrisma } from "../../../lib/db/raw-prisma";
+import { withTenantDb } from "../../../lib/db/scoped-client";
 import { SessionStore } from "../../../lib/auth/session-store";
 
 export const runtime = "nodejs";
@@ -71,18 +72,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Missing oid in token" }, { status: 400 });
     }
 
-    const identityAccount = await rawPrisma.identityAccount.findUnique({
-      where: {
-        organizationId_providerConnectionId_externalObjectId: {
-          organizationId: transaction.expectedOrganizationId,
-          providerConnectionId: provider.id,
-          externalObjectId: oid,
+    const identityAccount = await withTenantDb(
+      { organizationId: transaction.expectedOrganizationId, tenantId: transaction.expectedTenantId },
+      async (tx) => tx.identityAccount.findUnique({
+        where: {
+          organizationId_providerConnectionId_externalObjectId: {
+            organizationId: transaction.expectedOrganizationId,
+            providerConnectionId: provider.id,
+            externalObjectId: oid,
+          }
+        },
+        include: {
+          subject: true
         }
-      },
-      include: {
-        subject: true
-      }
-    });
+      })
+    );
 
     // 8. Fail closed if identity unknown
     if (!identityAccount) {
