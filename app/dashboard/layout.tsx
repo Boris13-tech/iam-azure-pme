@@ -3,13 +3,6 @@ import React from "react";
 import Link from "next/link";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const handleLogout = () => {
-    // Clear access token cookie
-    document.cookie = "access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-    // Redirect to login page
-    window.location.href = "/login";
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans">
       <aside className="w-64 bg-[#0f172a] text-slate-300 flex-col hidden md:flex shadow-xl z-10">
@@ -23,13 +16,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <Link href="/dashboard/audit" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Journal d'Audit</Link>
           <Link href="/dashboard/settings" className="block px-4 py-3 rounded-xl hover:bg-white/10 hover:text-white transition-all font-semibold text-sm">Politiques d'Accès</Link>
         </nav>
-        <div className="p-5 border-t border-white/10">
-          <button 
-            onClick={handleLogout}
-            className="w-full bg-indigo-600/90 hover:bg-indigo-500 py-2.5 rounded-xl transition-colors font-bold text-white shadow-lg text-sm"
-          >
-            Déconnexion
-          </button>
+        <div className="p-5 border-t border-white/10 space-y-3">
+          <form method="POST" action="/auth/logout">
+            <button 
+              type="submit"
+              className="w-full bg-indigo-600/90 hover:bg-indigo-500 py-2.5 rounded-xl transition-colors font-bold text-white shadow-lg text-sm"
+            >
+              Déconnexion
+            </button>
+          </form>
+          <form method="POST" action="/auth/logout?federated=true">
+            <button 
+              type="submit"
+              className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-600 py-2.5 rounded-xl transition-colors font-bold text-slate-300 shadow-sm text-xs"
+            >
+              Déconnexion Totale (Entra)
+            </button>
+          </form>
         </div>
       </aside>
       <main className="flex-1 flex flex-col h-screen overflow-hidden">

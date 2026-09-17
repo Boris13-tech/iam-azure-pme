@@ -30,10 +30,10 @@ export function createScopedDb(scope: DataScope) {
               if (args.data) {
                 // Not mutating data blindly because Prisma checks types, but enforcing scope on where for updates
                 if (['update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
-                  // @ts-ignore
+                  // @ts-expect-error Prisma dynamic args typing is too strict
                   args.where = { ...(args.where || {}), organizationId: scope.organizationId };
                   if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
-                    // @ts-ignore
+                    // @ts-expect-error Prisma dynamic args typing is too strict
                     args.where = { ...args.where, tenantId: scope.tenantId };
                   }
                 }
@@ -41,11 +41,11 @@ export function createScopedDb(scope: DataScope) {
             }
             
             if (['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy'].includes(operation)) {
-              // @ts-ignore
+              // @ts-expect-error Prisma dynamic args typing is too strict
               args.where = { ...(args.where || {}), organizationId: scope.organizationId };
               
               if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
-                 // @ts-ignore
+                 // @ts-expect-error Prisma dynamic args typing is too strict
                  args.where = { ...args.where, tenantId: scope.tenantId };
               }
             }

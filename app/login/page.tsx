@@ -1,74 +1,17 @@
-"use client";
+import React from 'react';
+import { ShieldCheck, Lock, AlertCircle } from 'lucide-react';
+import { rawPrisma } from '@/lib/db/raw-prisma';
+import Link from 'next/link';
 
-import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Lock, User, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { PublicClientApplication } from '@azure/msal-browser';
+export const dynamic = 'force-dynamic';
 
-// Configuration MSAL pour le navigateur (Frontend)
-const msalConfig = {
-  auth: {
-    clientId: process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID || "",
-    authority: "https://login.microsoftonline.com/" + process.env.NEXT_PUBLIC_GRAPH_TENANT_ID,
-    redirectUri: typeof window !== "undefined" ? window.location.origin + "/login" : "/",
-  }
-};
+export default async function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
+  // For the mono-tenant prototype, fetch the first available Entra ID connection
+  const provider = await rawPrisma.providerConnection.findFirst({
+    where: { providerType: 'MICROSOFT_ENTRA' }
+  });
 
-const msalInstance = new PublicClientApplication(msalConfig);
-
-export default function LoginPage() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState(""); // Pour afficher l'erreur visiblement
-  const router = useRouter();
-
-  // Initialisation de MSAL au chargement de la page
-  useEffect(() => {
-    let isMounted = true;
-    
-    msalInstance.initialize().then(() => {
-      // Gère le retour de Microsoft après la redirection
-      return msalInstance.handleRedirectPromise();
-    }).then((response) => {
-      if (!isMounted) return;
-      if (response) {
-        // Succès ! Microsoft nous a renvoyé ici avec le token
-        document.cookie = `access_token=${response.idToken}; path=/; max-age=3600`;
-        window.location.href = '/dashboard/audit'; // Force le rechargement complet pour s'assurer que le middleware voit le cookie
-      } else {
-        // Pas de réponse = on affiche la page de login normale
-        setIsLoading(false);
-      }
-    }).catch(e => {
-      if (!isMounted) return;
-      console.error("Erreur MSAL", e);
-      setErrorMsg(e.message || JSON.stringify(e));
-      setIsLoading(false);
-    });
-
-    // SÉCURITÉ ANTI-BLOCAGE
-    const fallbackTimer = setTimeout(() => {
-      if (isMounted) setIsLoading(false);
-    }, 1500);
-
-    return () => {
-      isMounted = false;
-      clearTimeout(fallbackTimer);
-    };
-  }, []);
-
-  const handleMicrosoftLogin = async () => {
-    setIsLoading(true);
-    setErrorMsg("");
-    try {
-      await msalInstance.loginRedirect({
-        scopes: ["user.read"]
-      });
-    } catch (error: any) {
-      console.error("Erreur de connexion:", error);
-      setIsLoading(false);
-      setErrorMsg(error.message || "La redirection a échoué. Vérifiez vos clés dans Vercel.");
-    }
-  };
+  const errorMsg = searchParams?.error || "";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4 relative overflow-hidden">
@@ -95,18 +38,19 @@ export default function LoginPage() {
 
         <div className="space-y-6">
           <div className="space-y-4">
-            <button 
-              onClick={handleMicrosoftLogin}
-              disabled={isLoading}
-              className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-300 shadow-lg shadow-blue-600/20 hover:shadow-blue-500/40 disabled:opacity-70 disabled:cursor-not-allowed group"
-            >
-              {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
+            {provider ? (
+              <Link 
+                href={`/auth/login?connection=${provider.id}`}
+                className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-300 shadow-lg shadow-blue-600/20 hover:shadow-blue-500/40 group"
+              >
                 <Lock className="w-5 h-5 group-hover:scale-110 transition-transform" />
-              )}
-              {isLoading ? "Chargement Microsoft..." : "Connexion avec Microsoft"}
-            </button>
+                Connexion avec Microsoft
+              </Link>
+            ) : (
+              <div className="p-4 bg-yellow-500/20 border border-yellow-500/50 rounded-xl text-yellow-200 text-sm text-center">
+                Aucune configuration Entra ID trouvée pour cette instance.
+              </div>
+            )}
           </div>
         </div>
       </div>

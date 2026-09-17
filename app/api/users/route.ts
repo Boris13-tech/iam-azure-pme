@@ -94,6 +94,7 @@ export async function POST(req: Request) {
         organizationId: auth.organizationId,
         tenantId: auth.tenantId,
         type: "HUMAN",
+        name: body.name,
       }
     });
 
