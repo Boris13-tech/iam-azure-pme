@@ -112,8 +112,15 @@ describe("OIDC Callback Security", () => {
     const res = await GET(req);
     expect(res.status).toBe(307);
     
-    const setCookie = res.headers.get("set-cookie");
-    expect(setCookie).toContain("luxia_session=");
+    expect(mockCookieSet).toHaveBeenCalledWith(
+      "luxia_session",
+      expect.any(String),
+      expect.objectContaining({
+        httpOnly: true,
+        secure: expect.any(Boolean),
+        sameSite: "lax",
+      })
+    );
   });
 
   it("should reject replayed OIDC state", async () => {
