@@ -3,7 +3,7 @@ import { authorize, AuthorizationRequest, AuthorizationDecision, AuthorizationIn
 import { hasLegacyPermission } from "./legacy-auth-adapter";
 import { withTenantDb } from "../db/scoped-client";
 
-export type AuthorizationMode = "legacy" | "shadow" | "native";
+export type AuthorizationMode = "legacy" | "shadow" | "native-shadow-legacy" | "native";
 
 export type LegacyAuthorizationDecision = {
   allowed: boolean;
@@ -66,17 +66,26 @@ export async function checkPermission(
   }
 
   // 2. Shadow Observation (Await it to guarantee lifecycle completion in Serverless)
-  if (mode === "shadow") {
+  if (mode === "shadow" || mode === "native-shadow-legacy") {
     try {
       await recordObservation(auth, request, legacyDecision, nativeDecision, nativeError);
     } catch (e) {
       console.error("Failed to record authorization shadow observation", e);
     }
+    
+    if (mode === "native-shadow-legacy") {
+      if (nativeError) {
+        console.error("Native authorization failed", nativeError);
+        return false; // Fail closed if native is primary
+      }
+      return nativeDecision!.allowed;
+    }
+    
     // In shadow mode, legacy is STILL the absolute source of truth
     return legacyDecision.allowed;
   }
 
-  // 4. Native mode (Future)
+  // 4. Native mode (Future, fully independent of legacy evaluation)
   if (mode === "native") {
     if (nativeError) {
       // In native mode, if infrastructure fails, it's a hard DENY (fail closed)
