@@ -3,6 +3,7 @@ import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { checkPermission } from "@/lib/auth/authorization-gateway";
 import { resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
+import { dualWriteUpdateUserRole } from "@/lib/auth/dual-write-service";
 
 import { updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
 
@@ -55,13 +56,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     if (body.roleId) {
-      await rawPrisma.userRole.deleteMany({
-        where: { userId: params.id }
-      });
-      
-      await rawPrisma.userRole.create({
-        data: { userId: params.id, roleId: body.roleId },
-      });
+      await dualWriteUpdateUserRole(auth, params.id, body.roleId);
     }
 
     await rawPrisma.auditLog.create({

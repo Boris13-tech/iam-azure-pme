@@ -39,8 +39,31 @@ describe("Phase 5D - Authorization Shadow Parity Mode", () => {
     });
   });
 
-  it("shadow mode: returns legacy decision when PARITY (ALLOW/ALLOW)", async () => {
+  it("Legacy ALLOW / Native DENY => Observation DIVERGENCE, Runtime ALLOW", async () => {
     vi.mocked(hasLegacyPermission).mockResolvedValueOnce(true);
+    vi.mocked(authorize).mockResolvedValueOnce({
+      allowed: false,
+      reasonCode: "DENY_NO_ACTIVE_ASSIGNMENT",
+      matchedAssignmentIds: [],
+      matchedEntitlementIds: [],
+      evaluatedAt: new Date(),
+    });
+
+    const result = await checkPermission(auth, req);
+    
+    expect(result).toBe(true); // Runtime remains legacy ALLOW
+    
+    // Verify observation
+    const createSpy = vi.mocked(withTenantDb).mock.calls[0][1] as any;
+    const mockTx = { authorizationShadowObservation: { create: vi.fn() } };
+    await createSpy(mockTx);
+    expect(mockTx.authorizationShadowObservation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "DIVERGENCE" }) })
+    );
+  });
+
+  it("Legacy DENY / Native ALLOW => Observation DIVERGENCE, Runtime DENY", async () => {
+    vi.mocked(hasLegacyPermission).mockResolvedValueOnce(false);
     vi.mocked(authorize).mockResolvedValueOnce({
       allowed: true,
       reasonCode: "ALLOW_ACTIVE_ASSIGNMENT",
@@ -51,13 +74,17 @@ describe("Phase 5D - Authorization Shadow Parity Mode", () => {
 
     const result = await checkPermission(auth, req);
     
-    // Gateway always returns legacy decision in shadow mode
-    expect(result).toBe(true);
-    expect(hasLegacyPermission).toHaveBeenCalledWith(auth, req.action, req.resource);
-    expect(authorize).toHaveBeenCalledWith(auth, req);
+    expect(result).toBe(false); // Runtime remains legacy DENY
+    
+    const createSpy = vi.mocked(withTenantDb).mock.calls[0][1] as any;
+    const mockTx = { authorizationShadowObservation: { create: vi.fn() } };
+    await createSpy(mockTx);
+    expect(mockTx.authorizationShadowObservation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "DIVERGENCE" }) })
+    );
   });
 
-  it("shadow mode: returns legacy decision when PARITY (DENY/DENY)", async () => {
+  it("Legacy DENY / Native DENY => Observation PARITY, Runtime DENY", async () => {
     vi.mocked(hasLegacyPermission).mockResolvedValueOnce(false);
     vi.mocked(authorize).mockResolvedValueOnce({
       allowed: false,
@@ -68,43 +95,48 @@ describe("Phase 5D - Authorization Shadow Parity Mode", () => {
     });
 
     const result = await checkPermission(auth, req);
-    expect(result).toBe(false);
+    
+    expect(result).toBe(false); 
+    
+    const createSpy = vi.mocked(withTenantDb).mock.calls[0][1] as any;
+    const mockTx = { authorizationShadowObservation: { create: vi.fn() } };
+    await createSpy(mockTx);
+    expect(mockTx.authorizationShadowObservation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "PARITY" }) })
+    );
   });
 
-  it("shadow mode: returns legacy decision when DIVERGENCE (ALLOW/DENY)", async () => {
-    vi.mocked(hasLegacyPermission).mockResolvedValueOnce(true); // Legacy Allows (e.g., admin bypass)
-    vi.mocked(authorize).mockResolvedValueOnce({
-      allowed: false, // Native denies
-      reasonCode: "DENY_NO_ACTIVE_ASSIGNMENT",
-      matchedAssignmentIds: [],
-      matchedEntitlementIds: [],
-      evaluatedAt: new Date(),
-    });
-
-    const result = await checkPermission(auth, req);
-    expect(result).toBe(true); // Must not break the app
-  });
-
-  it("shadow mode: returns legacy decision when DIVERGENCE (DENY/ALLOW)", async () => {
-    vi.mocked(hasLegacyPermission).mockResolvedValueOnce(false); 
-    vi.mocked(authorize).mockResolvedValueOnce({
-      allowed: true,
-      reasonCode: "ALLOW_ACTIVE_ASSIGNMENT",
-      matchedAssignmentIds: [],
-      matchedEntitlementIds: [],
-      evaluatedAt: new Date(),
-    });
-
-    const result = await checkPermission(auth, req);
-    expect(result).toBe(false); // Must not give access prematurely
-  });
-
-  it("shadow mode: handles NATIVE_ERROR without affecting legacy response", async () => {
+  it("Legacy ALLOW / Native DB failure => Observation NATIVE_ERROR, Runtime ALLOW", async () => {
     vi.mocked(hasLegacyPermission).mockResolvedValueOnce(true);
     vi.mocked(authorize).mockRejectedValueOnce(new Error("DB Connection Lost"));
 
     const result = await checkPermission(auth, req);
+    
     expect(result).toBe(true); // Legacy remains authoritative
+    
+    const createSpy = vi.mocked(withTenantDb).mock.calls[0][1] as any;
+    const mockTx = { authorizationShadowObservation: { create: vi.fn() } };
+    await createSpy(mockTx);
+    expect(mockTx.authorizationShadowObservation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "NATIVE_ERROR" }) })
+    );
+  });
+
+  it("Legacy ALLOW / Native ALLOW / Observation insert fails => Runtime ALLOW", async () => {
+    vi.mocked(hasLegacyPermission).mockResolvedValueOnce(true);
+    vi.mocked(authorize).mockResolvedValueOnce({
+      allowed: true,
+      reasonCode: "ALLOW_ACTIVE_ASSIGNMENT",
+      matchedAssignmentIds: ["ass-1"],
+      matchedEntitlementIds: ["ent-1"],
+      evaluatedAt: new Date(),
+    });
+    
+    vi.mocked(withTenantDb).mockRejectedValueOnce(new Error("RLS Observation Insert Failed"));
+
+    // Should not throw, should return true
+    const result = await checkPermission(auth, req);
+    expect(result).toBe(true);
   });
 
   it("legacy mode: skips native evaluation entirely", async () => {

@@ -3,6 +3,7 @@ import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { checkPermission } from "@/lib/auth/authorization-gateway";
 import { resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
+import { dualWriteUpdateUserRole } from "@/lib/auth/dual-write-service";
 import { createAzureUser } from "@/lib/graph";
 
 export const dynamic = "force-dynamic";
@@ -110,12 +111,7 @@ export async function POST(req: Request) {
 
     if (body.roleId) {
       try {
-        await rawPrisma.userRole.create({
-          data: {
-            userId: newUser.id,
-            roleId: body.roleId
-          }
-        });
+        await dualWriteUpdateUserRole(auth, newUser.id, body.roleId);
       } catch (e) {
         console.warn("Role assignment failed", e);
       }

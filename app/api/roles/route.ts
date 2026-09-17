@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { checkPermission } from "@/lib/auth/authorization-gateway";
+import { dualWriteCreateRole } from "@/lib/auth/dual-write-service";
 
 export const dynamic = "force-dynamic";
 
@@ -35,31 +36,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { name, description, permissions } = body;
 
-    const newRole = await rawPrisma.role.create({
-      data: {
-        name,
-        description,
-        isCustom: true
-      }
-    });
-
-    if (permissions && Array.isArray(permissions)) {
-      for (const permStr of permissions) {
-        const [action, resource] = permStr.split(":");
-        const perm = await rawPrisma.permission.upsert({
-          where: { action_resource: { action, resource } },
-          update: {},
-          create: { action, resource }
-        });
-
-        await rawPrisma.rolePermission.create({
-          data: {
-            roleId: newRole.id,
-            permissionId: perm.id
-          }
-        });
-      }
-    }
+    const newRole = await dualWriteCreateRole(auth, name, description, permissions);
 
     return NextResponse.json(newRole);
   } catch (error: any) {
