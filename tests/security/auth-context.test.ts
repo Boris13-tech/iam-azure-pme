@@ -8,8 +8,12 @@ import { cookies } from "next/headers";
 
 // Mock next/headers
 vi.mock("next/headers", () => ({
-  cookies: vi.fn(),
-  headers: vi.fn()
+  cookies: vi.fn(() => ({
+    get: vi.fn(() => undefined)
+  })),
+  headers: vi.fn(() => ({
+    get: vi.fn(() => null)
+  }))
 }));
 
 describe("AuthContext Security", () => {

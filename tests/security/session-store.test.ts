@@ -71,9 +71,9 @@ describe("SessionStore Security", () => {
       organizationId: orgId, tenantId, subjectId, identityAccountId
     });
 
-    // Manually expire the session in DB
-    await rawPrisma.session.update({
-      where: { id: session.id },
+    // Manually expire the session in DB using adminPrisma to bypass RLS for test setup
+    await adminPrisma.session.update({
+      where: { id: session.id as string },
       data: { expiresAt: new Date(Date.now() - 1000) }
     });
 

@@ -52,7 +52,39 @@ export async function runLegacyRbacBackfill(options: BackfillOptions): Promise<B
   };
 
   // 1. Fetch Subjects in this tenant that have a VALIDATED LegacyBridge
-  const subjects = (await withTenantDb({ organizationId: organizationId, tenantId: tenantId }, async (tx) => tx.subject.findMany({ where: { organizationId: organizationId, type: "HUMAN" }, include: { legacyBridge: true } }))) as any[];
+  const subjects = (await withTenantDb(
+    { organizationId, tenantId },
+    async (tx) =>
+      tx.subject.findMany({
+        where: {
+          organizationId,
+          tenantId,
+          type: "HUMAN",
+          legacyBridge: { status: "VALIDATED" },
+        },
+        include: {
+          legacyBridge: {
+            include: {
+              legacyUser: {
+                include: {
+                  roles: {
+                    include: {
+                      role: {
+                        include: {
+                          permissions: {
+                            include: { permission: true },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      })
+  )) as any[];
 
   if (subjects.length === 0) {
     return report; // Nothing to backfill in this tenant
