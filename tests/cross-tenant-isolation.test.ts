@@ -41,7 +41,8 @@ async function main() {
     if (error.code === 'P2003') { // Foreign key constraint failed
       console.log("✅ TEST 1 PASSED: DB rejected Org A Subject -> Tenant B.");
     } else {
-      console.error("Unexpected error in Test 1:", error);
+      console.error("❌ Unexpected error in Test 1:", error);
+      process.exit(1);
     }
   }
 
@@ -70,7 +71,8 @@ async function main() {
     if (error.code === 'P2003') {
       console.log("✅ TEST 2 PASSED: DB rejected Org A Subject -> Org B ProviderConnection.");
     } else {
-      console.error("Unexpected error in Test 2:", error);
+      console.error("❌ Unexpected error in Test 2:", error);
+      process.exit(1);
     }
   }
 
@@ -91,12 +93,18 @@ async function main() {
     if (error.code === 'P2003') {
       console.log("✅ TEST 3 PASSED: DB rejected Resource in Org A -> Org B ProviderConnection.");
     } else {
-      console.error("Unexpected error in Test 3:", error);
+      console.error("❌ Unexpected error in Test 3:", error);
+      process.exit(1);
     }
   }
 
-  // Cleanup
+  // Cleanup in correct order because of Restrict constraints
   console.log("Cleaning up...");
+  await prisma.resource.deleteMany({ where: { organizationId: { in: [orgA.id, orgB.id] } } });
+  await prisma.identityAccount.deleteMany({ where: { organizationId: { in: [orgA.id, orgB.id] } } });
+  await prisma.subject.deleteMany({ where: { organizationId: { in: [orgA.id, orgB.id] } } });
+  await prisma.tenant.deleteMany({ where: { organizationId: { in: [orgA.id, orgB.id] } } });
+  await prisma.providerConnection.deleteMany({ where: { organizationId: { in: [orgA.id, orgB.id] } } });
   await prisma.organization.deleteMany({ where: { id: { in: [orgA.id, orgB.id] } } });
   
   console.log("All tests passed! 🚀");

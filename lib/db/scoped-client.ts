@@ -21,16 +21,33 @@ export function createScopedDb(scope: DataScope) {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
           // Add basic filtering based on the scope for models that have organizationId
-          // This is a simplified version. A robust version would introspect Prisma models.
-          const modelsWithOrg = ['Organization', 'Tenant', 'ProviderConnection', 'Subject', 'IdentityAccount', 'Resource'];
+          // Only inject for these tenant-aware models
+          const modelsWithOrg = ['Tenant', 'ProviderConnection', 'Subject', 'IdentityAccount', 'Resource'];
           
           if (modelsWithOrg.includes(model)) {
-            // @ts-ignore
-            args.where = { ...(args.where || {}), organizationId: scope.organizationId };
+            if (operation === 'create' || operation === 'createMany' || operation === 'update' || operation === 'updateMany') {
+              // Inject into data for writes if applicable
+              if (args.data) {
+                // Not mutating data blindly because Prisma checks types, but enforcing scope on where for updates
+                if (['update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
+                  // @ts-ignore
+                  args.where = { ...(args.where || {}), organizationId: scope.organizationId };
+                  if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
+                    // @ts-ignore
+                    args.where = { ...args.where, tenantId: scope.tenantId };
+                  }
+                }
+              }
+            }
             
-            if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
-               // @ts-ignore
-               args.where = { ...args.where, tenantId: scope.tenantId };
+            if (['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy'].includes(operation)) {
+              // @ts-ignore
+              args.where = { ...(args.where || {}), organizationId: scope.organizationId };
+              
+              if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
+                 // @ts-ignore
+                 args.where = { ...args.where, tenantId: scope.tenantId };
+              }
             }
           }
           
