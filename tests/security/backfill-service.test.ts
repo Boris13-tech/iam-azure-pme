@@ -44,7 +44,7 @@ describe("Phase 5B - Legacy RBAC Backfill Pipeline", () => {
                 role: {
                   id: "role-1",
                   name: "Editor",
-                  rolePermissions: [
+                  permissions: [
                     {
                       permission: {
                         action: "dance",
@@ -84,7 +84,7 @@ describe("Phase 5B - Legacy RBAC Backfill Pipeline", () => {
                 role: {
                   id: "role-admin",
                   name: "Administrateur",
-                  rolePermissions: [] // even if empty, it should expand
+                  permissions: [] // even if empty, it should expand
                 }
               }
             ]

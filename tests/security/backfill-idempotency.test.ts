@@ -1,4 +1,4 @@
-import { adminPrisma } from "../../helpers/admin-prisma";
+import { adminPrisma } from "../helpers/admin-prisma";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { runLegacyRbacBackfill } from "../../lib/auth/backfill-service";
 import { rawPrisma } from "../../lib/db/raw-prisma";

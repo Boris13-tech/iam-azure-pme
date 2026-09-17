@@ -1,4 +1,4 @@
-import { adminPrisma } from "../../helpers/admin-prisma";
+import { adminPrisma } from "../helpers/admin-prisma";
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { POST } from "../../app/auth/logout/route";
 import { NextRequest } from "next/server";

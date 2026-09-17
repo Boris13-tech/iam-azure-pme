@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { createScopedDb } from "../../lib/db/scoped-client";
 import { SessionContext } from "../../lib/auth/session-store";
+import { adminPrisma } from "../helpers/admin-prisma";
 
 describe("Tenant Boundaries Security", () => {
   let orgA: string;

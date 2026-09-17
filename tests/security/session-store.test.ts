@@ -1,4 +1,4 @@
-import { adminPrisma } from "../../helpers/admin-prisma";
+import { adminPrisma } from "../helpers/admin-prisma";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { SessionStore } from "../../lib/auth/session-store";
 import { rawPrisma } from "../../lib/db/raw-prisma";

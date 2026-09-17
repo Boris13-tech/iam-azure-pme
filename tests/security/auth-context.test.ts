@@ -1,4 +1,4 @@
-import { adminPrisma } from "../../helpers/admin-prisma";
+import { adminPrisma } from "../helpers/admin-prisma";
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { getAuthContext } from "../../lib/auth/auth-context";
 import { requireAuth } from "../../lib/auth/require-auth";
