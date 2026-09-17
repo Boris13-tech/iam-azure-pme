@@ -1,3 +1,4 @@
+import { adminPrisma } from "../../helpers/admin-prisma";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { runAuthorizationReconciliation } from "../../lib/auth/reconciliation-service";
@@ -26,20 +27,20 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     tenantId = randomUUID();
     
     // Create org & tenant
-    await rawPrisma.organization.create({ data: { id: orgId, name: "Recon Org" } });
-    await rawPrisma.tenant.create({ data: { id: tenantId, organizationId: orgId, name: "Recon Tenant" } });
+    await adminPrisma.organization.create({ data: { id: orgId, name: "Recon Org" } });
+    await adminPrisma.tenant.create({ data: { id: tenantId, organizationId: orgId, name: "Recon Tenant" } });
     
     // Create legacy roles
-    const roleA = await rawPrisma.role.create({ data: { name: "Role A " + randomUUID(), isCustom: true } });
-    const roleB = await rawPrisma.role.create({ data: { name: "Role B " + randomUUID(), isCustom: true } });
+    const roleA = await adminPrisma.role.create({ data: { name: "Role A " + randomUUID(), isCustom: true } });
+    const roleB = await adminPrisma.role.create({ data: { name: "Role B " + randomUUID(), isCustom: true } });
     roleAId = roleA.id;
     roleBId = roleB.id;
 
     // Create legacy permissions
-    const perm1 = await rawPrisma.permission.create({ data: { action: "read", resource: "users" } });
-    const perm2 = await rawPrisma.permission.create({ data: { action: "create", resource: "users" } });
+    const perm1 = await adminPrisma.permission.create({ data: { action: "read", resource: "users" } });
+    const perm2 = await adminPrisma.permission.create({ data: { action: "create", resource: "users" } });
 
-    await rawPrisma.rolePermission.createMany({
+    await adminPrisma.rolePermission.createMany({
       data: [
         { roleId: roleAId, permissionId: perm1.id },
         { roleId: roleBId, permissionId: perm2.id }
@@ -47,10 +48,10 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     });
 
     // Create user & subject
-    const user = await rawPrisma.user.create({ data: { email: `test-${randomUUID()}@luxia.fr`, name: "Recon User" } });
+    const user = await adminPrisma.user.create({ data: { email: `test-${randomUUID()}@luxia.fr`, name: "Recon User" } });
     legacyUserId = user.id;
 
-    const subject = await rawPrisma.subject.create({
+    const subject = await adminPrisma.subject.create({
       data: {
         id: randomUUID(),
         organizationId: orgId,
@@ -61,7 +62,7 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
     });
     subjectId = subject.id;
 
-    await rawPrisma.legacyUserBridge.create({
+    await adminPrisma.legacyUserBridge.create({
       data: {
         legacyUserId,
         subjectId,
@@ -73,10 +74,10 @@ describe("Phase 5E.1 - Authorization Cutover Readiness", () => {
 
   afterAll(async () => {
     try {
-      await rawPrisma.organization.delete({ where: { id: orgId } }).catch(() => {});
-      await rawPrisma.role.delete({ where: { id: roleAId } }).catch(() => {});
-      await rawPrisma.role.delete({ where: { id: roleBId } }).catch(() => {});
-      await rawPrisma.user.delete({ where: { id: legacyUserId } }).catch(() => {});
+      await adminPrisma.organization.delete({ where: { id: orgId } }).catch(() => {});
+      await adminPrisma.role.delete({ where: { id: roleAId } }).catch(() => {});
+      await adminPrisma.role.delete({ where: { id: roleBId } }).catch(() => {});
+      await adminPrisma.user.delete({ where: { id: legacyUserId } }).catch(() => {});
     } catch {}
   });
 

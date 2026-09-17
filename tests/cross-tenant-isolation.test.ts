@@ -1,3 +1,4 @@
+import { adminPrisma } from "../helpers/admin-prisma";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -18,9 +19,7 @@ async function main() {
     data: {
       name: "Entra B",
       organizationId: orgB.id,
-      providerType: "MICROSOFT_ENTRA",
-      externalScopeId: "tenant-b-id"
-    }
+      }
   });
 
   console.log("Setup complete. Testing composite boundaries...");

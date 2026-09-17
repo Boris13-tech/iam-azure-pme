@@ -1,3 +1,4 @@
+import { adminPrisma } from "../../helpers/admin-prisma";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { runLegacyRbacBackfill } from "../../lib/auth/backfill-service";
 import { rawPrisma } from "../../lib/db/raw-prisma";
@@ -13,17 +14,24 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
     // Setup minimal DB state for integration test
     try {
       // 1. Create Organization
-      await rawPrisma.organization.create({
+      await adminPrisma.organization.create({
         data: {
           id: orgId,
-          name: "Test Org",
-          providerType: "AZURE_AD",
-          externalScopeId: randomUUID(),
+          name: "Test Org"
+        }
+      });
+
+      await adminPrisma.providerConnection.create({
+        data: {
+          organizationId: orgId,
+          name: "Entra",
+          providerType: "MICROSOFT_ENTRA",
+          externalScopeId: randomUUID()
         }
       });
 
       // 2. Create Tenant
-      await rawPrisma.tenant.create({
+      await adminPrisma.tenant.create({
         data: {
           id: tenantId,
           organizationId: orgId,
@@ -32,7 +40,7 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
       });
 
       // 3. Create Subject
-      await rawPrisma.subject.create({
+      await adminPrisma.subject.create({
         data: {
           id: subjectId,
           organizationId: orgId,
@@ -43,7 +51,7 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
       });
 
       // 4. Create Legacy User
-      await rawPrisma.user.create({
+      await adminPrisma.user.create({
         data: {
           id: legacyUserId,
           email: `${randomUUID()}@test.com`,
@@ -53,7 +61,7 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
 
       // 5. Create LegacyRole and LegacyPermission
       const roleId = randomUUID();
-      await rawPrisma.role.create({
+      await adminPrisma.role.create({
         data: {
           id: roleId,
           name: "Test Editor"
@@ -61,7 +69,7 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
       });
 
       const permId = randomUUID();
-      await rawPrisma.permission.create({
+      await adminPrisma.permission.create({
         data: {
           id: permId,
           action: "update",
@@ -78,7 +86,7 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
       });
 
       // 6. Create Bridge
-      await rawPrisma.legacyUserBridge.create({
+      await adminPrisma.legacyUserBridge.create({
         data: {
           organizationId: orgId,
           subjectId: subjectId,
@@ -94,15 +102,15 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
   afterAll(async () => {
     try {
       // Cleanup
-      await rawPrisma.legacyUserBridge.deleteMany({ where: { organizationId: orgId } });
+      await adminPrisma.legacyUserBridge.deleteMany({ where: { organizationId: orgId } });
       await rawPrisma.userRole.deleteMany({ where: { userId: legacyUserId } });
-      await rawPrisma.rolePermission.deleteMany({ where: { permission: { resource: "users", action: "update" } } });
-      await rawPrisma.user.delete({ where: { id: legacyUserId } });
+      await adminPrisma.rolePermission.deleteMany({ where: { permission: { resource: "users", action: "update" } } });
+      await adminPrisma.user.delete({ where: { id: legacyUserId } });
       await rawPrisma.assignment.deleteMany({ where: { organizationId: orgId } });
       await rawPrisma.entitlement.deleteMany({ where: { organizationId: orgId } });
-      await rawPrisma.subject.delete({ where: { id: subjectId } });
-      await rawPrisma.tenant.delete({ where: { id: tenantId } });
-      await rawPrisma.organization.delete({ where: { id: orgId } });
+      await adminPrisma.subject.delete({ where: { id: subjectId } });
+      await adminPrisma.tenant.delete({ where: { id: tenantId } });
+      await adminPrisma.organization.delete({ where: { id: orgId } });
     } catch (e) {
       // Ignore cleanup errors
     }

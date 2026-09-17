@@ -69,7 +69,7 @@ export async function runLegacyRbacBackfill(options: BackfillOptions): Promise<B
                 include: {
                   role: {
                     include: {
-                      rolePermissions: {
+                      permissions: {
                         include: {
                           permission: true
                         }
@@ -99,7 +99,7 @@ export async function runLegacyRbacBackfill(options: BackfillOptions): Promise<B
   const assignmentsToCreate = new Map<string, { key: CatalogEntitlement, roleId: string }[]>();
 
   for (const subject of subjects) {
-    const bridge = (subject as any).legacyBridge;
+    const bridge = subject.legacyBridge;
     if (!bridge || !bridge.legacyUser) {
       report.metrics.invalidBridges++;
       continue;
@@ -129,7 +129,7 @@ export async function runLegacyRbacBackfill(options: BackfillOptions): Promise<B
       }
 
       // Normal permissions
-      for (const rp of role.rolePermissions) {
+      for (const rp of role.permissions) {
         const p = rp.permission;
         seenPermissions.add(`${p.action}:${p.resource}`);
 

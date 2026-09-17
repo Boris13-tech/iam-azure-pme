@@ -1,3 +1,4 @@
+import { adminPrisma } from "../../helpers/admin-prisma";
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { GET } from "../../app/auth/callback/route";
 import { NextRequest } from "next/server";
@@ -30,32 +31,32 @@ describe("OIDC Callback Security", () => {
   let providerConnectionId: string;
 
   beforeAll(async () => {
-    const org = await rawPrisma.organization.create({ data: { name: "Test Org 4" } });
+    const org = await adminPrisma.organization.create({ data: { name: "Test Org 4" } });
     orgId = org.id;
-    const tenant = await rawPrisma.tenant.create({ data: { organizationId: orgId, name: "Test Tenant 4" } });
+    const tenant = await adminPrisma.tenant.create({ data: { organizationId: orgId, name: "Test Tenant 4" } });
     tenantId = tenant.id;
-    const subject = await rawPrisma.subject.create({
+    const subject = await adminPrisma.subject.create({
       data: { organizationId: orgId, tenantId, type: "HUMAN", name: "Test User 4" }
     });
     subjectId = subject.id;
-    const provider = await rawPrisma.providerConnection.create({
-      data: { organizationId: orgId, providerType: "MICROSOFT_ENTRA", externalScopeId: "tid-abc", name: "Entra 4" }
+    const provider = await adminPrisma.providerConnection.create({
+      data: { organizationId: orgId, name: "Entra" }
     });
     providerConnectionId = provider.id;
-    const identity = await rawPrisma.identityAccount.create({
-      data: { organizationId: orgId, subjectId, providerConnectionId: provider.id, externalObjectId: "oid-abc" }
+    const identity = await adminPrisma.identityAccount.create({
+      data: { organizationId: orgId, tenantId, subjectId, providerConnectionId: provider.id, externalObjectId: "oid-abc" }
     });
     identityAccountId = identity.id;
   });
 
   afterAll(async () => {
     await rawPrisma.authTransaction.deleteMany({});
-    await rawPrisma.session.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.subject.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.organization.deleteMany({ where: { id: orgId } });
+    await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.organization.deleteMany({ where: { id: orgId } });
   });
 
   it("should reject if no cookies found (no state)", async () => {

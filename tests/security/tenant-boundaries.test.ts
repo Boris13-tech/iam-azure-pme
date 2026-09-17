@@ -12,33 +12,36 @@ describe("Tenant Boundaries Security", () => {
   let tenantB: string;
 
   beforeAll(async () => {
-    const oA = await rawPrisma.organization.create({ data: { name: "Org A" } });
+    const oA = await adminPrisma.organization.create({ data: { name: "Org A" } });
     orgA = oA.id;
-    const tA = await rawPrisma.tenant.create({ data: { organizationId: orgA, name: "Tenant A" } });
+    const tA = await adminPrisma.tenant.create({ data: { organizationId: orgA, name: "Tenant A" } });
     tenantA = tA.id;
-    const sA = await rawPrisma.subject.create({
+    const sA = await adminPrisma.subject.create({
       data: { organizationId: orgA, tenantId: tenantA, type: "HUMAN", name: "Subject A" }
     });
     subjectA = sA.id;
 
-    const oB = await rawPrisma.organization.create({ data: { name: "Org B" } });
+    const oB = await adminPrisma.organization.create({ data: { name: "Org B" } });
     orgB = oB.id;
-    const tB = await rawPrisma.tenant.create({ data: { organizationId: orgB, name: "Tenant B" } });
+    const tB = await adminPrisma.tenant.create({ data: { organizationId: orgB, name: "Tenant B" } });
     tenantB = tB.id;
-    await rawPrisma.subject.create({
+    await adminPrisma.subject.create({
       data: { organizationId: orgB, tenantId: tenantB, type: "HUMAN", name: "Subject B" }
     });
   });
 
   afterAll(async () => {
-    await rawPrisma.subject.deleteMany({ where: { organizationId: { in: [orgA, orgB] } } });
-    await rawPrisma.tenant.deleteMany({ where: { organizationId: { in: [orgA, orgB] } } });
-    await rawPrisma.organization.deleteMany({ where: { id: { in: [orgA, orgB] } } });
+    const orgIds = [orgA, orgB].filter((id): id is string => Boolean(id));
+    if (orgIds.length > 0) {
+      await adminPrisma.subject.deleteMany({ where: { organizationId: { in: orgIds } } });
+      await adminPrisma.tenant.deleteMany({ where: { organizationId: { in: orgIds } } });
+      await adminPrisma.organization.deleteMany({ where: { id: { in: orgIds } } });
+    }
   });
 
   it("should prevent creating a Subject in Org A pointing to Tenant B", async () => {
     await expect(
-      rawPrisma.subject.create({
+      adminPrisma.subject.create({
         data: { organizationId: orgA, tenantId: tenantB, type: "HUMAN", name: "Hacker" }
       })
     ).rejects.toThrow();
@@ -124,7 +127,7 @@ describe("Tenant Boundaries Security", () => {
 
     it("IdentityAccount with tenantA but Subject from tenantB should throw DB DENY", async () => {
       await expect(
-        rawPrisma.identityAccount.create({
+        adminPrisma.identityAccount.create({
           data: {
             id: "fake-identity",
             organizationId: orgA,
