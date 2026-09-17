@@ -13,42 +13,70 @@ export function createScopedDb(scope: DataScope) {
     throw new Error("organizationId is mandatory for the Tenant-aware Repository.");
   }
 
-  // Using Prisma Client Extensions to automatically append organizationId
-  // Note: For a fully strict RLS-like enforcement at the Prisma layer, 
-  // query extensions override the default behavior.
   return rawPrisma.$extends({
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          // Add basic filtering based on the scope for models that have organizationId
-          // Only inject for these tenant-aware models
           const modelsWithOrg = ['Tenant', 'ProviderConnection', 'Subject', 'IdentityAccount', 'Resource'];
           
-          if (modelsWithOrg.includes(model)) {
-            if (operation === 'create' || operation === 'createMany' || operation === 'update' || operation === 'updateMany') {
-              // Inject into data for writes if applicable
-              if (args.data) {
-                // Not mutating data blindly because Prisma checks types, but enforcing scope on where for updates
-                if (['update', 'updateMany', 'delete', 'deleteMany'].includes(operation)) {
-                  // @ts-expect-error Prisma dynamic args typing is too strict
-                  args.where = { ...(args.where || {}), organizationId: scope.organizationId };
-                  if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
-                    // @ts-expect-error Prisma dynamic args typing is too strict
-                    args.where = { ...args.where, tenantId: scope.tenantId };
-                  }
-                }
-              }
+          if (!modelsWithOrg.includes(model)) {
+            return query(args);
+          }
+
+          // @ts-expect-error dynamic args
+          args.where = args.where || {};
+          
+          const applyScopeToData = (data: any) => {
+            if (!data) return;
+            data.organizationId = scope.organizationId;
+            if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
+              data.tenantId = scope.tenantId;
             }
-            
-            if (['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy'].includes(operation)) {
-              // @ts-expect-error Prisma dynamic args typing is too strict
-              args.where = { ...(args.where || {}), organizationId: scope.organizationId };
-              
-              if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
-                 // @ts-expect-error Prisma dynamic args typing is too strict
-                 args.where = { ...args.where, tenantId: scope.tenantId };
-              }
+          };
+
+          const applyScopeToWhere = (where: any) => {
+            if (!where) return;
+            where.organizationId = scope.organizationId;
+            if (scope.tenantId && ['Subject', 'Resource'].includes(model)) {
+              where.tenantId = scope.tenantId;
             }
+          };
+
+          if (['create'].includes(operation)) {
+            // @ts-expect-error dynamic args
+            applyScopeToData(args.data);
+          } 
+          else if (['createMany'].includes(operation)) {
+            // @ts-expect-error dynamic args
+            if (Array.isArray(args.data)) {
+              // @ts-expect-error dynamic args
+              args.data.forEach(applyScopeToData);
+            } else {
+              // @ts-expect-error dynamic args
+              applyScopeToData(args.data);
+            }
+          }
+          else if (['update', 'updateMany'].includes(operation)) {
+            // @ts-expect-error dynamic args
+            applyScopeToWhere(args.where);
+            // @ts-expect-error dynamic args
+            applyScopeToData(args.data);
+          }
+          else if (['upsert'].includes(operation)) {
+            // @ts-expect-error dynamic args
+            applyScopeToWhere(args.where);
+            // @ts-expect-error dynamic args
+            applyScopeToData(args.create);
+            // @ts-expect-error dynamic args
+            applyScopeToData(args.update);
+          }
+          else if (['delete', 'deleteMany'].includes(operation)) {
+            // @ts-expect-error dynamic args
+            applyScopeToWhere(args.where);
+          }
+          else if (['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow', 'findMany', 'count', 'aggregate', 'groupBy'].includes(operation)) {
+            // @ts-expect-error dynamic args
+            applyScopeToWhere(args.where);
           }
           
           return query(args);
