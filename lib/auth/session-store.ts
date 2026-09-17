@@ -10,18 +10,19 @@ export type SessionContext = {
 
 export class SessionStore {
   /**
-   * Creates a new session in the database.
+   * Creates a new session.
+   * Returns the unhashed token for the browser and the persisted session object.
    */
   static async createSession(ctx: SessionContext, ip?: string, userAgent?: string) {
-    const sessionId = crypto.randomBytes(32).toString("hex");
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     
-    // Sessions usually expire after some time (e.g., 24 hours)
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24);
 
-    return await rawPrisma.session.create({
+    const session = await rawPrisma.session.create({
       data: {
-        id: sessionId,
+        id: hashedToken,
         organizationId: ctx.organizationId,
         tenantId: ctx.tenantId,
         subjectId: ctx.subjectId,
@@ -29,17 +30,20 @@ export class SessionStore {
         expiresAt,
         ipHash: ip ? crypto.createHash('sha256').update(ip).digest('hex') : null,
         userAgentHash: userAgent ? crypto.createHash('sha256').update(userAgent).digest('hex') : null,
+        lastSeenAt: new Date()
       }
     });
+
+    return { session, rawToken };
   }
 
   /**
-   * Validates and retrieves a session.
-   * Updates lastSeenAt implicitly to keep session fresh.
+   * Validates and retrieves a session from the raw browser token.
    */
-  static async getSession(sessionId: string) {
+  static async getSession(rawToken: string) {
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     const session = await rawPrisma.session.findUnique({
-      where: { id: sessionId }
+      where: { id: hashedToken }
     });
 
     if (!session) return null;
@@ -48,11 +52,14 @@ export class SessionStore {
       return null;
     }
 
-    // Refresh lastSeenAt in the background (fire and forget)
-    rawPrisma.session.update({
-      where: { id: sessionId },
-      data: { lastSeenAt: new Date() }
-    }).catch(console.error);
+    // Refresh lastSeenAt only if older than 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    if (!session.lastSeenAt || session.lastSeenAt < fiveMinutesAgo) {
+      await rawPrisma.session.update({
+        where: { id: hashedToken },
+        data: { lastSeenAt: new Date() }
+      });
+    }
 
     return session;
   }
@@ -60,19 +67,20 @@ export class SessionStore {
   /**
    * Revokes a specific session.
    */
-  static async revokeSession(sessionId: string) {
+  static async revokeSession(rawToken: string) {
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     await rawPrisma.session.update({
-      where: { id: sessionId },
+      where: { id: hashedToken },
       data: { revokedAt: new Date() }
     });
   }
 
   /**
-   * Revokes all sessions for a given subject.
+   * Revokes all sessions for a given subject securely within their organization.
    */
-  static async revokeAllForSubject(subjectId: string) {
+  static async revokeAllForSubject(organizationId: string, subjectId: string) {
     await rawPrisma.session.updateMany({
-      where: { subjectId, revokedAt: null },
+      where: { organizationId, subjectId, revokedAt: null },
       data: { revokedAt: new Date() }
     });
   }

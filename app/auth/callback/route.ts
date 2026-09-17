@@ -96,7 +96,7 @@ export async function GET(request: Request) {
     const ip = request.headers.get("x-forwarded-for") || "unknown";
     const userAgent = request.headers.get("user-agent") || "unknown";
 
-    const session = await SessionStore.createSession({
+    const { session, rawToken } = await SessionStore.createSession({
       organizationId: transaction.expectedOrganizationId,
       tenantId: subject.tenantId,
       subjectId: subject.id,
@@ -104,7 +104,7 @@ export async function GET(request: Request) {
     }, ip, userAgent);
 
     // 10. Set HttpOnly/Secure/SameSite=Lax luxia_session cookie
-    cookies().set("luxia_session", session.id, {
+    cookies().set("luxia_session", rawToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
