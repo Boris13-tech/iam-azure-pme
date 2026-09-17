@@ -125,10 +125,11 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   subjects     Subject[]
   resources    Resource[]
   Session      Session[]
+  Entitlement  Entitlement[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -166,6 +167,7 @@ model Subject {
   identities   IdentityAccount[]
   legacyBridge LegacyUserBridge?
   Session      Session[]
+  Assignment   Assignment[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -306,4 +308,57 @@ model AuthTransaction {
   createdAt                    DateTime  @default(now())
 
   @@index([expiresAt])
+}
+
+enum AssignmentSource {
+  LEGACY_ROLE
+  DIRECT
+  PROVIDER
+  POLICY
+  SYSTEM
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+model Entitlement {
+  id             String       @id @default(uuid())
+  organizationId String
+  tenantId       String
+  key            String
+  action         String
+  resource       String
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  tenant         Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  assignments    Assignment[]
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, key])
+  @@index([organizationId, tenantId])
+}
+
+model Assignment {
+  id             String           @id @default(uuid())
+  organizationId String
+  tenantId       String
+  subjectId      String
+  entitlementId  String
+  source         AssignmentSource
+  sourceRef      String?
+  status         AssignmentStatus @default(ACTIVE)
+  validFrom      DateTime?
+  validUntil     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  subject        Subject          @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  entitlement    Entitlement      @relation(fields: [organizationId, tenantId, entitlementId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@index([organizationId, tenantId, subjectId, status])
+  @@index([organizationId, tenantId, entitlementId])
 }
