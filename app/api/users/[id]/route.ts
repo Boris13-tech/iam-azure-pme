@@ -7,7 +7,8 @@ import { dualWriteUpdateUserRole } from "@/lib/auth/dual-write-service";
 
 import { updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     const auth = await requireAuth();
 
@@ -21,7 +22,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     const bridge = await rawPrisma.legacyUserBridge.findFirst({
       where: {
-        legacyUserId: params.id,
+        legacyUserId: id,
         organizationId: auth.organizationId,
         status: "VALIDATED"
       }
@@ -29,12 +30,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     if (!bridge) return NextResponse.json({ error: "Not found or not in this organization" }, { status: 404 });
 
-    if (params.id === legacyUser.id && body.status === "SUSPENDED") {
+    if (id === legacyUser.id && body.status === "SUSPENDED") {
       return NextResponse.json({ error: "Cannot suspend yourself" }, { status: 400 });
     }
 
     const updatedUser = await rawPrisma.user.update({
-      where: { id: params.id },
+      where: { id: id },
       data: {
         status: body.status,
         name: body.name,
@@ -56,14 +57,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     if (body.roleId) {
-      await dualWriteUpdateUserRole(auth, params.id, body.roleId);
+      await dualWriteUpdateUserRole(auth, id, body.roleId);
     }
 
     await rawPrisma.auditLog.create({
       data: {
         actorId: legacyUser.id,
         action: "UPDATE_USER",
-        target: params.id,
+        target: id,
         ip: req.headers.get("x-forwarded-for") || "unknown",
         result: "SUCCESS"
       }
@@ -78,7 +79,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     const auth = await requireAuth();
 
@@ -88,13 +90,13 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     const legacyUser = await resolveLegacyUser(auth);
     if (!legacyUser) return NextResponse.json({ error: "Forbidden - No legacy mapping" }, { status: 403 });
 
-    if (params.id === legacyUser.id) {
+    if (id === legacyUser.id) {
       return NextResponse.json({ error: "Cannot delete yourself" }, { status: 400 });
     }
 
     const bridge = await rawPrisma.legacyUserBridge.findFirst({
       where: {
-        legacyUserId: params.id,
+        legacyUserId: id,
         organizationId: auth.organizationId,
         status: "VALIDATED"
       }
@@ -103,7 +105,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     if (!bridge) return NextResponse.json({ error: "Not found or not in this organization" }, { status: 404 });
 
     const deletedUser = await rawPrisma.user.update({
-      where: { id: params.id },
+      where: { id: id },
       data: { status: "INACTIVE" }
     });
 
@@ -120,7 +122,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
       data: {
         actorId: legacyUser.id,
         action: "SOFT_DELETE_USER",
-        target: params.id,
+        target: id,
         ip: req.headers.get("x-forwarded-for") || "unknown",
         result: "SUCCESS"
       }

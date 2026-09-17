@@ -5,7 +5,8 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-export default async function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const sp = await searchParams;
   // For the mono-tenant prototype, fetch the first available Entra ID connection
   const provider = await rawPrisma.providerConnection.findFirst({
     where: { providerType: 'MICROSOFT_ENTRA' },
@@ -22,7 +23,7 @@ export default async function LoginPage({ searchParams }: { searchParams: { erro
 
   const defaultTenantId = provider?.organization?.tenants?.[0]?.id;
 
-  const errorMsg = searchParams?.error || "";
+  const errorMsg = sp?.error || "";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4 relative overflow-hidden">
