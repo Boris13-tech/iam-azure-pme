@@ -24,6 +24,19 @@ vi.mock("openid-client", () => ({
   })
 }));
 
+
+const { mockCookieSet } = vi.hoisted(() => ({ mockCookieSet: vi.fn() }));
+
+vi.mock("next/headers", () => ({
+  cookies: vi.fn(() => ({
+    get: vi.fn(),
+    set: mockCookieSet,
+  })),
+  headers: vi.fn(() => ({
+    get: vi.fn(() => null),
+  })),
+}));
+
 describe("OIDC Callback Security", () => {
   let orgId: string;
   let tenantId: string;
