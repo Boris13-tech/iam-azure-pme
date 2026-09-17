@@ -41,7 +41,7 @@ describe("OIDC Callback Security", () => {
     });
     subjectId = subject.id;
     const provider = await adminPrisma.providerConnection.create({
-      data: { organizationId: orgId, name: "Entra", providerType: "MICROSOFT_ENTRA", externalScopeId: `scope-${orgId}`}
+      data: { organizationId: orgId, name: "Entra", providerType: "MICROSOFT_ENTRA", externalScopeId: "tid-abc"}
     });
     providerConnectionId = provider.id;
     const identity = await adminPrisma.identityAccount.create({
