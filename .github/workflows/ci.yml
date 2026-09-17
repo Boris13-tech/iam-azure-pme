@@ -81,20 +81,22 @@ jobs:
         BEGIN
            IF NOT EXISTS (
               SELECT FROM pg_catalog.pg_roles
-              WHERE  rolname = 'app_user') THEN
-              CREATE ROLE app_user LOGIN PASSWORD 'app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+              WHERE rolname = 'app_user') THEN
+              CREATE ROLE app_user LOGIN PASSWORD 'app_password'
+                NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
            END IF;
         END
         $do$;
+
         GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
-        $do$;
         GRANT CONNECT ON DATABASE luxia_db TO app_user;
         GRANT USAGE ON SCHEMA public TO app_user;
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
         GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
         EOF
+
         PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
-        psql "$PSQL_URL" -f bootstrap.sql
+        psql -v ON_ERROR_STOP=1 "$PSQL_URL" -f bootstrap.sql
 
     - name: Run Security Tests
       run: npm run test:security
