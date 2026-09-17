@@ -45,7 +45,7 @@ describe("Phase 5B - Backfill Idempotency (PostgreSQL Integration)", () => {
           id: subjectId,
           organizationId: orgId,
           tenantId: tenantId,
-          type: "USER",
+          type: "HUMAN",
           name: "Test Subject"
         }
       });

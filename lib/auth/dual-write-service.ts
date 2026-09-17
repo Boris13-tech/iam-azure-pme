@@ -193,9 +193,8 @@ async function syncNativeAssignmentsForUser(auth: AuthContext, legacyUserId: str
         data: {
           organizationId: auth.organizationId,
           tenantId: auth.tenantId,
-          key,
-          name: key,
-          description: `Auto-provisioned for ${key}`,
+          key: key,
+          description: `Legacy migrated: ${key}`,
           action: action || "all",
           resource: resource || key
         }

@@ -40,7 +40,7 @@ describe("OIDC Callback Security", () => {
     });
     subjectId = subject.id;
     const provider = await adminPrisma.providerConnection.create({
-      data: { organizationId: orgId, name: "Entra" }
+      data: { organizationId: orgId, name: "Entra", providerType: "MICROSOFT_ENTRA", externalScopeId: `scope-${orgId}`}
     });
     providerConnectionId = provider.id;
     const identity = await adminPrisma.identityAccount.create({
@@ -50,7 +50,14 @@ describe("OIDC Callback Security", () => {
   });
 
   afterAll(async () => {
-    await rawPrisma.authTransaction.deleteMany({});
+    await adminPrisma.assignment.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.legacyUserBridge.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.organization.deleteMany({ where: { id: orgId } });
+  });
     await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
