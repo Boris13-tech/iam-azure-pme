@@ -167,7 +167,7 @@ async function syncNativeAssignmentsForUser(auth: AuthContext, legacyUserId: str
 
   if (!role) return;
 
-  let keysToGrant = new Set<CatalogEntitlement>();
+  const keysToGrant = new Set<CatalogEntitlement>();
 
   if (role.name === "Administrateur") {
     ENTITLEMENT_CATALOG_V1.forEach(k => keysToGrant.add(k));
