@@ -16,8 +16,9 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  roles     UserRole[]
-  auditLogs AuditLog[]
+  roles           UserRole[]
+  auditLogs       AuditLog[]
+  migrationBridge LegacyUserBridge?
 }
 
 model Role {
@@ -162,6 +163,7 @@ model Subject {
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   tenant       Tenant            @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   identities   IdentityAccount[]
+  legacyBridge LegacyUserBridge?
 
   @@unique([organizationId, id])
   @@index([organizationId, tenantId])
@@ -222,4 +224,36 @@ model Resource {
   @@unique([organizationId, id])
   @@index([organizationId, tenantId])
   @@index([organizationId, providerConnectionId])
+}
+
+// ----------------------------------------------------------------------
+// MIGRATION BRIDGE (PHASE 2 - COMMIT D)
+// ----------------------------------------------------------------------
+
+enum MigrationStatus {
+  PENDING
+  LINKED
+  VALIDATED
+  FAILED
+}
+
+model LegacyUserBridge {
+  id             String          @id @default(uuid())
+  legacyUserId   String          @unique
+  organizationId String
+  subjectId      String
+  status         MigrationStatus @default(PENDING)
+
+  migratedAt  DateTime?
+  validatedAt DateTime?
+  error       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  legacyUser User    @relation(fields: [legacyUserId], references: [id], onDelete: Restrict)
+  subject    Subject @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, subjectId])
+  @@index([organizationId])
 }
