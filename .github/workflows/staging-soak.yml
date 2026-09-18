@@ -1,0 +1,56 @@
+﻿name: Extended Staging Soak (Phase 5E.2-B)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  staging-soak:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+      AUTHZ_MODE: native-shadow-legacy
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify AUTHZ_MODE
+        run: |
+          if [ "$AUTHZ_MODE" != "native-shadow-legacy" ]; then
+            echo "Error: AUTHZ_MODE must be native-shadow-legacy"
+            exit 1
+          fi
+
+      - name: Verify staging DB role
+        run: |
+          cat << 'EOF' > verify-db.ts
+          import { PrismaClient } from "@prisma/client";
+          async function verify() {
+            const adminPrisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_MIGRATION_URL });
+            const globalRole = await adminPrisma.role.findFirst({ where: { name: "Administrateur" } });
+            if (!globalRole) throw new Error("Global role 'Administrateur' not found in Staging environment");
+            console.log("Staging DB Role 'Administrateur' Verified.");
+            process.exit(0);
+          }
+          verify().catch(e => { console.error(e); process.exit(1); });
+          EOF
+          npx tsx verify-db.ts
+
+      - name: Gate 0 HTTP smoke
+        run: npx tsx scripts/e2e-http.ts
+
+      - name: Extended soak
+        run: npm run soak:staging
