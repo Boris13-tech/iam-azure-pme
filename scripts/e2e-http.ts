@@ -10,7 +10,7 @@ async function run() {
   const loginRes = await fetch(baseUrl + "/login?error=E2E_ERROR_TEST");
   const loginHtml = await loginRes.text();
   assert(loginHtml.includes("E2E_ERROR_TEST"), "/login should render the async searchParams error");
-  console.log("✅ /login?error=... works");
+  console.log("/login?error                  PASS");
 
   const prisma = new PrismaClient({ datasourceUrl: "postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public" });
   const adminPrisma = new PrismaClient({ datasourceUrl: "postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public" });
@@ -25,7 +25,7 @@ async function run() {
     where: {
       organizationId: org.id,
       providerType: "MICROSOFT_ENTRA",
-      externalScopeId: "dummy"
+      externalScopeId: "common"
     }
   });
 
@@ -34,7 +34,7 @@ async function run() {
       data: {
         organizationId: org.id,
         providerType: "MICROSOFT_ENTRA",
-        externalScopeId: "dummy",
+        externalScopeId: "common",
         name: "E2E Entra Provider"
       }
     });
@@ -81,23 +81,50 @@ async function run() {
   });
   assert(tx, "AuthTransaction should be created in DB");
   assert(tx.nonce && tx.codeVerifier, "Nonce and PKCE should be created");
-  console.log("✅ /auth/login flow generates correct state & PKCE");
+  console.log("/auth/login                         PASS\nstate + nonce + PKCE                PASS");
 
   const { session, rawToken } = await SessionStore.createSession({ organizationId: orgId, tenantId: tenantId, subjectId: user.id, identityAccountId: idAcc.id }, "127.0.0.1", "e2e-agent");
   const cookie = "luxia_session=" + rawToken;
   
-  const globalRole = await adminPrisma.role.findFirst({ where: { name: "Global Administrator" } });
-  if (globalRole) await adminPrisma.userRole.create({ data: { userId: user.id, roleId: globalRole.id } }).catch(() => {});
+  
+
+  let globalRole = await adminPrisma.role.findFirst({ where: { name: "Administrateur" } });
+  if (!globalRole) {
+    globalRole = await adminPrisma.role.create({ data: { name: "Administrateur", description: "E2E", isCustom: false } });
+    const perm1 = await adminPrisma.permission.upsert({ where: { action_resource: { action: "read", resource: "roles" } }, create: { action: "read", resource: "roles" }, update: {} });
+    const perm2 = await adminPrisma.permission.upsert({ where: { action_resource: { action: "read", resource: "users" } }, create: { action: "read", resource: "users" }, update: {} });
+    const perm3 = await adminPrisma.permission.upsert({ where: { action_resource: { action: "update", resource: "users" } }, create: { action: "update", resource: "users" }, update: {} });
+    const perm4 = await adminPrisma.permission.upsert({ where: { action_resource: { action: "delete", resource: "users" } }, create: { action: "delete", resource: "users" }, update: {} });
+    
+    await adminPrisma.rolePermission.createMany({
+      data: [
+        { roleId: globalRole.id, permissionId: perm1.id },
+        { roleId: globalRole.id, permissionId: perm2.id },
+        { roleId: globalRole.id, permissionId: perm3.id },
+        { roleId: globalRole.id, permissionId: perm4.id },
+      ],
+      skipDuplicates: true
+    });
+  }
+  await adminPrisma.userRole.create({ data: { userId: user.id, roleId: globalRole.id } }).catch(() => {});
+
+
   
   await adminPrisma.legacyUserBridge.create({ data: { organizationId: orgId, legacyUserId: user.id, subjectId: user.id, status: "VALIDATED" } }).catch(() => {});
 
   const apiRolesRes = await fetch(baseUrl + "/api/roles", { headers: { Cookie: cookie, Accept: "application/json" } });
-  assert(apiRolesRes.status === 200, "Should allow access with valid session cookie, got " + apiRolesRes.status);
-  console.log("✅ authenticated API allows access");
+  assert(apiRolesRes.status === 200, "Should allow access with valid session cookie, got " + apiRolesRes.status + " " + await apiRolesRes.text());
+  console.log("valid session cookie               PASS");
 
-  const dashRes = await fetch(baseUrl + "/dashboard", { headers: { Cookie: "luxia_session=INVALID_TOKEN" }, redirect: "manual" });
-  assert(dashRes.status === 307 || dashRes.status === 302, "Should redirect to login");
-  console.log("✅ invalid session denies access");
+  
+  const missingDashRes = await fetch(baseUrl + "/dashboard", { headers: { Cookie: "" }, redirect: "manual" });
+  assert(missingDashRes.status === 307 || missingDashRes.status === 302, "Should redirect to login");
+  console.log("missing cookie redirect            PASS");
+
+  const invalidTokenRes = await fetch(baseUrl + "/api/roles", { headers: { Cookie: "luxia_session=INVALID_RANDOM_TOKEN", Accept: "application/json" } });
+  assert(invalidTokenRes.status === 401, "Should reject invalid random token");
+  console.log("invalid token rejection            PASS");
+
 
   const dummyUser = await adminPrisma.user.create({ data: { name: "Dummy " + Date.now(), email: "dummy" + Date.now() + "@x.com" }});
   await adminPrisma.subject.create({
@@ -113,16 +140,16 @@ async function run() {
 
   const patchUserRes = await fetch(baseUrl + "/api/users/" + dummyUser.id, { method: "PATCH", headers: { Cookie: cookie, Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ name: "Updated Name" }) });
   assert(patchUserRes.status === 200, "PATCH /api/users/[id] should work, got " + patchUserRes.status);
-  console.log("✅ PATCH /api/users/[id] async params work");
+  console.log("PATCH /api/users/[id]         PASS");
 
   const deleteUserRes = await fetch(baseUrl + "/api/users/" + dummyUser.id, { method: "DELETE", headers: { Cookie: cookie, Accept: "application/json" } });
   assert(deleteUserRes.status === 200, "DELETE /api/users/[id] should work, got " + deleteUserRes.status);
-  console.log("✅ DELETE /api/users/[id] async params work");
+  console.log("DELETE /api/users/[id]        PASS");
 
   if (globalRole) {
       const patchRoleRes = await fetch(baseUrl + "/api/roles/" + globalRole.id, { method: "PATCH", headers: { Cookie: cookie, Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ name: "Hacked" }) });
       assert(patchRoleRes.status !== 200, "PATCH global role should be rejected");
-      console.log("✅ PATCH /api/roles/[id] global freeze applied");
+      console.log("global Role freeze           PASS");
   }
 
   const logoutRes = await fetch(baseUrl + "/auth/logout", { method: "POST", headers: { Cookie: cookie, Accept: "application/json" } });
@@ -134,7 +161,13 @@ async function run() {
   const resolved = await SessionStore.getSession(rawToken);
   assert(resolved === null, "SessionStore should not resolve revoked session");
   
-  console.log("✅ /auth/logout successfully revokes session and rejects token reuse");
+  
+  console.log("logout → revokedAt set             PASS");
+  const revokedApiRes = await fetch(baseUrl + "/api/roles", { headers: { Cookie: cookie, Accept: "application/json" } });
+  assert(revokedApiRes.status === 401, "Should reject revoked token");
+  console.log("revoked token rejection            PASS
+token reuse after logout           PASS");
+
 
   console.log("🎉 ALL E2E HTTP TESTS PASSED");
   process.exit(0);
