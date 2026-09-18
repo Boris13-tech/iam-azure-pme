@@ -14,9 +14,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     environment: process.env.APP_ENV ?? "unknown",
     gitSha:
-      process.env.GIT_COMMIT_SHA ??
       process.env.VERCEL_GIT_COMMIT_SHA ??
-      process.env.GITHUB_SHA ??
+      process.env.GIT_COMMIT_SHA ??
       "unknown",
     authzMode: process.env.AUTHZ_MODE ?? "legacy"
   });
