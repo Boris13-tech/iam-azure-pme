@@ -1,0 +1,137 @@
+﻿name: Extended Staging Soak (Phase 5E.2-B)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  staging-soak:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTHZ_MODE: native-shadow-legacy
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify AUTHZ_MODE configuration
+        run: |
+          if [ "$AUTHZ_MODE" != "native-shadow-legacy" ]; then
+            echo "Error: AUTHZ_MODE must be native-shadow-legacy"
+            exit 1
+          fi
+
+      - name: Verify runtime DB security posture
+        run: |
+          cat << 'EOF' > verify-runtime-db.ts
+          import { PrismaClient } from "@prisma/client";
+          
+          async function verify() {
+            const db = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+            const rows = await db.$queryRaw<any[]>`
+              SELECT
+                current_user,
+                r.rolsuper,
+                r.rolbypassrls,
+                has_function_privilege(
+                  current_user,
+                  'public.resolve_session(text)',
+                  'EXECUTE'
+                ) AS resolver_execute
+              FROM pg_roles r
+              WHERE r.rolname = current_user
+            `;
+          
+            if (rows.length !== 1) throw new Error("Runtime role not resolved");
+            const r = rows[0];
+          
+            if (r.rolsuper) throw new Error("Runtime role is SUPERUSER");
+            if (r.rolbypassrls) throw new Error("Runtime role has BYPASSRLS");
+            if (!r.resolver_execute) throw new Error("Runtime role cannot execute resolve_session");
+          
+            console.log("Runtime DB security posture PASS");
+            await db.$disconnect();
+          }
+          
+          verify().catch(e => { console.error(e); process.exit(1); });
+          EOF
+          npx tsx verify-runtime-db.ts
+
+      - name: Verify staging fixtures
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: |
+          cat << 'EOF' > verify-fixtures.ts
+          import { PrismaClient } from "@prisma/client";
+          async function verify() {
+            const adminPrisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_MIGRATION_URL });
+            const globalRole = await adminPrisma.role.findFirst({ where: { name: "Administrateur" } });
+            if (!globalRole) throw new Error("Global role 'Administrateur' not found in Staging environment");
+            
+            const org = await adminPrisma.organization.findFirst({ where: { name: "E2E Org" } });
+            if (!org) throw new Error("Organization 'E2E Org' not found");
+            
+            const tenant = await adminPrisma.tenant.findFirst({ where: { name: "E2E Tenant", organizationId: org.id } });
+            if (!tenant) throw new Error("Tenant 'E2E Tenant' not found");
+            
+            const provider = await adminPrisma.providerConnection.findFirst({
+              where: { organizationId: org.id, providerType: "MICROSOFT_ENTRA", externalScopeId: "common" }
+            });
+            if (!provider) throw new Error("Provider 'MICROSOFT_ENTRA' not found");
+            
+            console.log("Staging fixtures Verified.");
+            await adminPrisma.$disconnect();
+          }
+          verify().catch(e => { console.error(e); process.exit(1); });
+          EOF
+          npx tsx verify-fixtures.ts
+
+      - name: Verify remote deployment provenance
+        env:
+          STAGING_PROVENANCE_TOKEN: ${{ secrets.STAGING_PROVENANCE_TOKEN }}
+        run: |
+          cat << 'EOF' > verify-provenance.ts
+          import assert from "assert";
+          
+          async function verify() {
+            const baseUrl = process.env.STAGING_BASE_URL || "http://localhost:3000";
+            const token = process.env.STAGING_PROVENANCE_TOKEN || "";
+            const res = await fetch(baseUrl + "/api/internal/runtime-info", {
+              headers: { "x-luxia-provenance-token": token }
+            });
+            if (!res.ok) throw new Error("Failed to fetch runtime info: " + res.status);
+            const data = await res.json();
+            
+            console.log("Remote Runtime Info:", data);
+            
+            assert.strictEqual(data.environment, "staging", "Environment mismatch");
+            assert.strictEqual(data.authzMode, "native-shadow-legacy", "AUTHZ_MODE mismatch");
+            assert.strictEqual(data.gitSha, process.env.GITHUB_SHA, "Git SHA mismatch! The remote server is not running the current commit.");
+            
+            console.log("Remote deployment provenance PASS");
+          }
+          verify().catch(e => { console.error(e); process.exit(1); });
+          EOF
+          npx tsx verify-provenance.ts
+
+      - name: Gate 0 HTTP smoke
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: npx tsx scripts/e2e-http.ts
+
+      - name: Extended soak
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: npm run soak:staging
