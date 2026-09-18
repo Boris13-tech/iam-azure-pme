@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(req: NextRequest) {
   const sessionToken = req.cookies.get("luxia_session")?.value;
 
   const isProtectedPath = req.nextUrl.pathname.startsWith("/dashboard") || 
-                         (req.nextUrl.pathname.startsWith("/api/") && !req.nextUrl.pathname.startsWith("/api/auth"));
+                         (req.nextUrl.pathname.startsWith("/api/") && !req.nextUrl.pathname.startsWith("/api/auth") && !req.nextUrl.pathname.startsWith("/api/internal"));
 
   if (isProtectedPath && !sessionToken) {
     if (req.nextUrl.pathname.startsWith("/api/")) {
