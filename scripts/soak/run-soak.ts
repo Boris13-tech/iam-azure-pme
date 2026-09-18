@@ -45,9 +45,9 @@ async function main() {
   await adminPrisma.rolePermission.create({ data: { roleId: roleB.id, permissionId: permSettingsRead.id } });
 
   // Users & Subjects
-  await adminPrisma.user.create({ data: { id: legacyUser1, email: "soak1@example.com", name: "Soak 1" } });
-  await adminPrisma.user.create({ data: { id: legacyUser2, email: "soak2@example.com", name: "Soak 2" } });
-  await adminPrisma.user.create({ data: { id: legacyUser3, email: "soak3@example.com", name: "Soak 3" } });
+  await adminPrisma.user.create({ data: { id: legacyUser1, email: `soak1-${randomUUID()}@example.com`, name: "Soak 1" } });
+  await adminPrisma.user.create({ data: { id: legacyUser2, email: `soak2-${randomUUID()}@example.com`, name: "Soak 2" } });
+  await adminPrisma.user.create({ data: { id: legacyUser3, email: `soak3-${randomUUID()}@example.com`, name: "Soak 3" } });
 
   await adminPrisma.subject.create({ data: { id: subject1Id, organizationId: orgId, tenantId: tenantA, name: "S1", type: "HUMAN" } });
   await adminPrisma.subject.create({ data: { id: subject2Id, organizationId: orgId, tenantId: tenantA, name: "S2", type: "HUMAN" } });
@@ -124,7 +124,7 @@ async function main() {
 
   // Backfill native
   const { runLegacyRbacBackfill } = require("../../lib/auth/backfill-service");
-  await runLegacyRbacBackfill(orgId, tenantA, true);
+  await runLegacyRbacBackfill({ organizationId: orgId, tenantId: tenantA, mode: "EXECUTE" });
 
   // Helper for reconciliation
   const { runAuthorizationReconciliation } = require("../../lib/auth/reconciliation-service");

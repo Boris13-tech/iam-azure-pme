@@ -3,8 +3,11 @@
 export function middleware(req: NextRequest) {
   const sessionToken = req.cookies.get("luxia_session")?.value;
 
+  const isRuntimeInfo = req.nextUrl.pathname === "/api/internal/runtime-info";
   const isProtectedPath = req.nextUrl.pathname.startsWith("/dashboard") || 
-                         (req.nextUrl.pathname.startsWith("/api/") && !req.nextUrl.pathname.startsWith("/api/auth") && !req.nextUrl.pathname.startsWith("/api/internal"));
+                         (req.nextUrl.pathname.startsWith("/api/") && 
+                          !req.nextUrl.pathname.startsWith("/api/auth") && 
+                          !isRuntimeInfo);
 
   if (isProtectedPath && !sessionToken) {
     if (req.nextUrl.pathname.startsWith("/api/")) {

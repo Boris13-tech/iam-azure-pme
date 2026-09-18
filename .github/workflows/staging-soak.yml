@@ -10,7 +10,6 @@ jobs:
     env:
       STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
       AUTHZ_MODE: native-shadow-legacy
     steps:
       - name: Checkout code
@@ -71,6 +70,8 @@ jobs:
           npx tsx verify-runtime-db.ts
 
       - name: Verify staging fixtures
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
         run: |
           cat << 'EOF' > verify-fixtures.ts
           import { PrismaClient } from "@prisma/client";
@@ -98,18 +99,24 @@ jobs:
           npx tsx verify-fixtures.ts
 
       - name: Verify remote deployment provenance
+        env:
+          STAGING_PROVENANCE_TOKEN: ${{ secrets.STAGING_PROVENANCE_TOKEN }}
         run: |
           cat << 'EOF' > verify-provenance.ts
           import assert from "assert";
           
           async function verify() {
             const baseUrl = process.env.STAGING_BASE_URL || "http://localhost:3000";
-            const res = await fetch(baseUrl + "/api/internal/runtime-info");
+            const token = process.env.STAGING_PROVENANCE_TOKEN || "";
+            const res = await fetch(baseUrl + "/api/internal/runtime-info", {
+              headers: { "x-luxia-provenance-token": token }
+            });
             if (!res.ok) throw new Error("Failed to fetch runtime info: " + res.status);
             const data = await res.json();
             
             console.log("Remote Runtime Info:", data);
             
+            assert.strictEqual(data.environment, "staging", "Environment mismatch");
             assert.strictEqual(data.authzMode, "native-shadow-legacy", "AUTHZ_MODE mismatch");
             assert.strictEqual(data.gitSha, process.env.GITHUB_SHA, "Git SHA mismatch! The remote server is not running the current commit.");
             
@@ -120,7 +127,11 @@ jobs:
           npx tsx verify-provenance.ts
 
       - name: Gate 0 HTTP smoke
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
         run: npx tsx scripts/e2e-http.ts
 
       - name: Extended soak
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
         run: npm run soak:staging
