@@ -101,6 +101,9 @@ jobs:
     - name: Run Security Tests
       run: npm run test:security
 
+    - name: Run Provider Adapter Contract Tests
+      run: npm run test:provider-adapters
+
     - name: Build
       run: npm run build
 

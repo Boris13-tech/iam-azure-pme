@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:security": "vitest run tests/security",
+    "test:provider-adapters": "vitest run tests/provider-adapters",
     "test:security:watch": "vitest tests/security",
     "postinstall": "prisma generate",
     "soak:staging": "tsx scripts/soak/run-soak.ts"
