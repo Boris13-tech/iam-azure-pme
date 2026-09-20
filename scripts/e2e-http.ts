@@ -6,6 +6,7 @@ async function run() {
   console.log("Starting E2E HTTP verification (Staging Harness)...");
 
   const baseUrl = process.env.STAGING_BASE_URL ?? "http://localhost:3000";
+  const requestOrigin = process.env.STAGING_ORIGIN ?? new URL(baseUrl).origin;
   const runtimeDb = process.env.DATABASE_URL;
   const adminDb = process.env.DATABASE_MIGRATION_URL;
 
@@ -110,8 +111,12 @@ async function run() {
   assert(invalidTokenRes.status === 401, "Should reject invalid random token");
   console.log("invalid random token → 401      PASS");
 
-  const logoutRes = await fetch(baseUrl + "/auth/logout", { method: "POST", headers: { Cookie: cookie, Accept: "application/json" } });
-  assert(logoutRes.status === 200 || logoutRes.status === 302 || logoutRes.status === 307, "Logout should succeed");
+  const logoutRes = await fetch(baseUrl + "/auth/logout", {
+    method: "POST",
+    headers: { Cookie: cookie, Accept: "application/json", Origin: requestOrigin },
+    redirect: "manual",
+  });
+  assert(logoutRes.status === 200 || logoutRes.status === 302 || logoutRes.status === 303 || logoutRes.status === 307, "Logout should succeed");
   const revokedSession = await adminPrisma.session.findUnique({ where: { id: session.id } });
   assert(revokedSession && revokedSession.revokedAt !== null, "Session should be marked as revoked");
   
@@ -147,7 +152,12 @@ async function run() {
   assert(patchRoleRes.status !== 200, "PATCH global role should be rejected");
   console.log("global Role mutation denied     PASS");
 
-  const logoutRes2 = await fetch(baseUrl + "/auth/logout", { method: "POST", headers: { Cookie: cookie2, Accept: "application/json" } });
+  const logoutRes2 = await fetch(baseUrl + "/auth/logout", {
+    method: "POST",
+    headers: { Cookie: cookie2, Accept: "application/json", Origin: requestOrigin },
+    redirect: "manual",
+  });
+  assert(logoutRes2.status === 200 || logoutRes2.status === 302 || logoutRes2.status === 303 || logoutRes2.status === 307, "Second logout should succeed");
   const revokedSession2 = await adminPrisma.session.findUnique({ where: { id: session2.id } });
   assert(revokedSession2 && revokedSession2.revokedAt !== null, "Session should be marked as revoked");
   console.log("logout → revokedAt              PASS");
