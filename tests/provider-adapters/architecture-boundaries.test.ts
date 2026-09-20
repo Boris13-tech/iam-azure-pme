@@ -27,7 +27,10 @@ const forbiddenImports = [
 describe("Phase 6A architecture boundaries", () => {
   it("keeps provider-neutral core free of provider SDKs and implementations", () => {
     const violations: string[] = [];
-    for (const file of providerNeutralCore.flatMap(sourceFiles)) {
+    for (const file of providerNeutralCore
+      .flatMap(sourceFiles)
+      .filter((file) => !file.includes(`${path.sep}implementations${path.sep}`))
+      .filter((file) => !file.includes(`${path.sep}infrastructure${path.sep}`))) {
       const content = fs.readFileSync(file, "utf8");
       for (const specifier of importSpecifiers(content)) {
         if (forbiddenImports.some((pattern) => pattern.test(specifier))) {

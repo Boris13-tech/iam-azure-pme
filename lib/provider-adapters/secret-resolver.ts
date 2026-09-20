@@ -32,6 +32,21 @@ export class SecretLease {
     }
   }
 
+  async use<T>(
+    consumer: (secret: Uint8Array) => Promise<T> | T,
+  ): Promise<T> {
+    if (this.disposed) {
+      throw new Error("Secret lease has been disposed");
+    }
+
+    const copy = this.value.slice();
+    try {
+      return await consumer(copy);
+    } finally {
+      copy.fill(0);
+    }
+  }
+
   dispose(): void {
     this.value.fill(0);
     this.disposed = true;

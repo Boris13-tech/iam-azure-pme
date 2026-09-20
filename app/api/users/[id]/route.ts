@@ -5,7 +5,7 @@ import { checkPermission } from "@/lib/auth/authorization-gateway";
 import { resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
 import { dualWriteUpdateUserRole } from "@/lib/auth/dual-write-service";
 
-import { updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
+import { hasMicrosoftGraphConfiguration, updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -42,17 +42,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       }
     });
 
-    const hasGraphConfig = 
-      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
-      process.env.GRAPH_CLIENT_SECRET && 
-      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+    const hasGraphConfig = hasMicrosoftGraphConfiguration();
 
     if (updatedUser.azureId && hasGraphConfig) {
       if (body.status !== undefined) {
-        await updateAzureUserStatus(updatedUser.azureId, body.status === "ACTIVE");
+        await updateAzureUserStatus(auth, updatedUser.azureId, body.status === "ACTIVE");
       }
       if (body.name !== undefined) {
-        await updateAzureUser(updatedUser.azureId, body.name);
+        await updateAzureUser(auth, updatedUser.azureId, body.name);
       }
     }
 
@@ -109,13 +106,10 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       data: { status: "INACTIVE" }
     });
 
-    const hasGraphConfig = 
-      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
-      process.env.GRAPH_CLIENT_SECRET && 
-      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+    const hasGraphConfig = hasMicrosoftGraphConfiguration();
 
     if (deletedUser.azureId && hasGraphConfig) {
-      await updateAzureUserStatus(deletedUser.azureId, false);
+      await updateAzureUserStatus(auth, deletedUser.azureId, false);
     }
 
     await rawPrisma.auditLog.create({

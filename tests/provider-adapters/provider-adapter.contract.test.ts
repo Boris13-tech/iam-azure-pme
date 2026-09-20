@@ -14,7 +14,27 @@ import {
 
 defineProviderAdapterContract(
   "FakeProviderAdapter",
-  (capabilities) => new FakeProviderAdapter(capabilities),
+  {
+    createAdapter: () =>
+      new FakeProviderAdapter([
+        "AUTHENTICATION",
+        "IDENTITY_LIFECYCLE",
+        "GROUP_DISCOVERY",
+        "RESOURCE_DISCOVERY",
+        "ACCESS_PROVISIONING",
+        "INCREMENTAL_SYNC",
+        "OFFLINE_OPERATION",
+      ]),
+    expectedCapabilities: [
+      "AUTHENTICATION",
+      "IDENTITY_LIFECYCLE",
+      "GROUP_DISCOVERY",
+      "RESOURCE_DISCOVERY",
+      "ACCESS_PROVISIONING",
+      "INCREMENTAL_SYNC",
+      "OFFLINE_OPERATION",
+    ],
+  },
 );
 
 describe("Phase 6A provider framework", () => {

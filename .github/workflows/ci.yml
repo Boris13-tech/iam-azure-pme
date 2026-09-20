@@ -104,6 +104,9 @@ jobs:
     - name: Run Provider Adapter Contract Tests
       run: npm run test:provider-adapters
 
+    - name: Run Microsoft Entra Parity Tests
+      run: npm run test:entra-parity
+
     - name: Build
       run: npm run build
 

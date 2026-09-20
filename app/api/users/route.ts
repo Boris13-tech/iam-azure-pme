@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { checkPermission } from "@/lib/auth/authorization-gateway";
 import { resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
 import { dualWriteUpdateUserRole } from "@/lib/auth/dual-write-service";
-import { createAzureUser } from "@/lib/graph";
+import { createAzureUser, hasMicrosoftGraphConfiguration } from "@/lib/graph";
 
 export const dynamic = "force-dynamic";
 
@@ -67,14 +67,11 @@ export async function POST(req: Request) {
     const body = await req.json();
     let azureId = body.azureId || null;
 
-    const hasGraphConfig = 
-      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
-      process.env.GRAPH_CLIENT_SECRET && 
-      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+    const hasGraphConfig = hasMicrosoftGraphConfiguration();
 
     if (hasGraphConfig) {
       try {
-        const azureUser = await createAzureUser(body.name, body.email);
+        const azureUser = await createAzureUser(auth, body.name, body.email);
         azureId = azureUser.azureId;
       } catch (graphError: any) {
         console.error("Failed to create user in Azure AD:", graphError);

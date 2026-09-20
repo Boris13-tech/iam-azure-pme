@@ -11,6 +11,8 @@ export type AuthChallenge = Readonly<{
   kind: "REDIRECT" | "LOCAL_CHALLENGE";
   redirectUrl?: string;
   publicChallenge?: Readonly<Record<string, string | number | boolean>>;
+  /** Adapter-owned state that must be stored server-side and never logged. */
+  continuation?: Readonly<Record<string, string>>;
   expiresAt: string;
 }>;
 

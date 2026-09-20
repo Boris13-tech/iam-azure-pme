@@ -5,6 +5,12 @@ import { NextRequest } from "next/server";
 import { SessionStore } from "../../lib/auth/session-store";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 
+vi.mock("../../lib/auth/providers/entra", () => ({
+  getEntraLogoutUrl: vi.fn().mockResolvedValue(
+    "https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Flogin"
+  )
+}));
+
 describe("Logout Security", () => {
   let orgId: string;
   let tenantId: string;
@@ -102,17 +108,6 @@ describe("Logout Security", () => {
     const { rawToken } = await SessionStore.createSession({
       organizationId: orgId, tenantId, subjectId, identityAccountId
     });
-
-    // Mock getEntraOIDCConfig
-    vi.mock("../../lib/auth/providers/entra", () => ({
-      getEntraOIDCConfig: vi.fn().mockResolvedValue({
-        config: {
-          serverMetadata: () => ({
-            end_session_endpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/logout"
-          })
-        }
-      })
-    }));
 
     const req = createMockRequest("http://localhost:3000", rawToken, true);
     const response = await POST(req);

@@ -7,20 +7,15 @@ import crypto from "crypto";
 import { AuthTransactionStore } from "../../lib/auth/auth-transaction-store";
 
 vi.mock("../../lib/auth/providers/entra", () => ({
-  getEntraOIDCConfig: vi.fn().mockResolvedValue({
-    config: {}, // we don't care about config since we mock openid-client
-    redirectUri: "http://localhost:3000/auth/callback"
-  })
-}));
-
-vi.mock("openid-client", () => ({
-  authorizationCodeGrant: vi.fn().mockResolvedValue({
-    claims: () => ({
+  completeEntraAuthentication: vi.fn().mockResolvedValue({
+    identity: { externalObjectId: "oid-abc" },
+    assuranceLevel: "ENTRA_OIDC",
+    authenticatedAt: new Date().toISOString(),
+    attributes: {
       iss: "https://login.microsoftonline.com/tid-abc/v2.0",
       tid: "tid-abc",
-      oid: "oid-abc",
       email: "test@example.com"
-    })
+    }
   })
 }));
 

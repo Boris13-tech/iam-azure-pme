@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import * as client from "openid-client";
-import { getEntraOIDCConfig } from "../../../lib/auth/providers/entra";
+import { completeEntraAuthentication } from "../../../lib/auth/providers/entra";
+import { ProviderAdapterError } from "../../../lib/provider-adapters";
 import { AuthTransactionStore } from "../../../lib/auth/auth-transaction-store";
 import { rawPrisma } from "../../../lib/db/raw-prisma";
 import { withTenantDb } from "../../../lib/db/scoped-client";
@@ -33,44 +33,35 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Provider mismatch" }, { status: 400 });
     }
 
-    // 3. Get OIDC Config for this tenant
-    const { config, redirectUri } = await getEntraOIDCConfig(provider);
-
-    // 4. Exchange authorization code
-    const tokens = await client.authorizationCodeGrant(
-      config,
-      url,
-      {
-        pkceCodeVerifier: transaction.codeVerifier,
-        expectedState: state,
-        expectedNonce: transaction.nonce,
-        idTokenExpected: true,
+    // 3. Exchange and validate the authorization response inside the adapter.
+    let verifiedIdentity;
+    try {
+      verifiedIdentity = await completeEntraAuthentication({
+        providerConnection: provider,
+        tenantId: transaction.expectedTenantId,
+        state,
+        nonce: transaction.nonce,
+        codeVerifier: transaction.codeVerifier,
+        currentUrl: url.href,
+      });
+    } catch (error) {
+      if (error instanceof ProviderAdapterError) {
+        const reason = error.safeDetails.reason;
+        if (reason === "TENANT_MISMATCH" || reason === "ISSUER_MISMATCH") {
+          return NextResponse.json({ error: reason }, { status: 403 });
+        }
+        if (reason === "NO_CLAIMS") {
+          return NextResponse.json({ error: "No claims in token" }, { status: 400 });
+        }
+        if (reason === "MISSING_OID") {
+          return NextResponse.json({ error: "Missing oid in token" }, { status: 400 });
+        }
       }
-    );
-
-    const claims = tokens.claims();
-    if (!claims) {
-      return NextResponse.json({ error: "No claims in token" }, { status: 400 });
+      throw error;
     }
 
-    // 5. Assert tid == ProviderConnection.externalScopeId
-    if (claims.tid !== provider.externalScopeId) {
-      console.error(`TENANT_MISMATCH: expected ${provider.externalScopeId}, got ${claims.tid}`);
-      return NextResponse.json({ error: "TENANT_MISMATCH" }, { status: 403 });
-    }
-
-    // 6. Validate issuer strictly
-    const expectedIssuer = `https://login.microsoftonline.com/${claims.tid}/v2.0`;
-    if (claims.iss !== expectedIssuer) {
-      console.error(`ISSUER_MISMATCH: expected ${expectedIssuer}, got ${claims.iss}`);
-      return NextResponse.json({ error: "ISSUER_MISMATCH" }, { status: 403 });
-    }
-
-    // 7. Resolve IdentityAccount using providerConnectionId + oid
-    const oid = claims.oid as string;
-    if (!oid) {
-      return NextResponse.json({ error: "Missing oid in token" }, { status: 400 });
-    }
+    // 4. Resolve IdentityAccount using providerConnectionId + external oid.
+    const oid = verifiedIdentity.identity.externalObjectId;
 
     const identityAccount = await withTenantDb(
       { organizationId: transaction.expectedOrganizationId, tenantId: transaction.expectedTenantId },
@@ -88,7 +79,7 @@ export async function GET(request: Request) {
       })
     );
 
-    // 8. Fail closed if identity unknown
+    // 5. Fail closed if identity unknown
     if (!identityAccount) {
       console.warn(`IDENTITY_NOT_ONBOARDED: oid ${oid} not found in org ${transaction.expectedOrganizationId}`);
       return NextResponse.json({ error: "IDENTITY_NOT_ONBOARDED" }, { status: 403 });
@@ -102,7 +93,7 @@ export async function GET(request: Request) {
 
     const subject = identityAccount.subject;
 
-    // 9. Create Session
+    // 6. Create Session
     const ip = request.headers.get("x-forwarded-for") || "unknown";
     const userAgent = request.headers.get("user-agent") || "unknown";
 
@@ -113,7 +104,7 @@ export async function GET(request: Request) {
       identityAccountId: identityAccount.id
     }, ip, userAgent);
 
-    // 10. Set HttpOnly/Secure/SameSite=Lax luxia_session cookie
+    // 7. Set HttpOnly/Secure/SameSite=Lax luxia_session cookie
     const cookieStore = await cookies();
     cookieStore.set("luxia_session", rawToken, {
       httpOnly: true,
@@ -123,7 +114,7 @@ export async function GET(request: Request) {
       path: "/",
     });
 
-    // 11. Redirect to returnTo or default
+    // 8. Redirect to returnTo or default
     return NextResponse.redirect(new URL(transaction.returnTo || "/dashboard", request.url));
 
   } catch (error) {
