@@ -9,7 +9,7 @@ jobs:
     environment: staging
     env:
       STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
-      AUTHZ_MODE: native-shadow-legacy
+      AUTHZ_MODE: native
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,8 +41,8 @@ jobs:
 
       - name: Verify AUTHZ_MODE configuration
         run: |
-          if [ "$AUTHZ_MODE" != "native-shadow-legacy" ]; then
-            echo "Error: AUTHZ_MODE must be native-shadow-legacy"
+          if [ "$AUTHZ_MODE" != "native" ]; then
+            echo "Error: AUTHZ_MODE must be native"
             exit 1
           fi
 
@@ -132,7 +132,7 @@ jobs:
             console.log("Remote Runtime Info:", data);
             
             assert.strictEqual(data.environment, "staging", "Environment mismatch");
-            assert.strictEqual(data.authzMode, "native-shadow-legacy", "AUTHZ_MODE mismatch");
+            assert.strictEqual(data.authzMode, "native", "AUTHZ_MODE mismatch");
             assert.strictEqual(data.gitSha, process.env.GITHUB_SHA, "Git SHA mismatch! The remote server is not running the current commit.");
             
             console.log("Remote deployment provenance PASS");
