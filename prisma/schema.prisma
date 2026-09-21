@@ -100,6 +100,7 @@ enum SubjectType {
 
 enum ProviderType {
   MICROSOFT_ENTRA
+  LUXIA_LOCAL
   AWS
   GOOGLE_WORKSPACE
   GITHUB
@@ -116,6 +117,10 @@ model Organization {
   providerConnections ProviderConnection[]
   subjects            Subject[]
   resources           Resource[]
+  localIdentities     LocalIdentity[]
+  localAuthenticators LocalAuthenticator[]
+  localAuthChallenges LocalAuthChallenge[]
+  localRecoveryCodes  LocalRecoveryCode[]
 }
 
 model Tenant {
@@ -125,11 +130,15 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  subjects     Subject[]
-  resources    Resource[]
-  Session      Session[]
-  Entitlement  Entitlement[]
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subjects            Subject[]
+  resources           Resource[]
+  Session             Session[]
+  Entitlement         Entitlement[]
+  localIdentities     LocalIdentity[]
+  localAuthenticators LocalAuthenticator[]
+  localAuthChallenges LocalAuthChallenge[]
+  localRecoveryCodes  LocalRecoveryCode[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -184,16 +193,151 @@ model IdentityAccount {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  subject            Subject            @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
-  providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
+  subject            Subject              @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  providerConnection ProviderConnection   @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
   Session            Session[]
+  localIdentity      LocalIdentity?
+  LocalAuthenticator LocalAuthenticator[]
+  LocalAuthChallenge LocalAuthChallenge[]
+  LocalRecoveryCode  LocalRecoveryCode[]
 
   @@unique([organizationId, id])
+  @@unique([organizationId, tenantId, id])
   @@unique([organizationId, tenantId, subjectId, id])
   @@unique([organizationId, providerConnectionId, externalObjectId])
   @@index([organizationId])
   @@index([organizationId, tenantId, subjectId])
   @@index([organizationId, providerConnectionId])
+}
+
+enum LocalIdentityStatus {
+  ACTIVE
+  DISABLED
+  LOCKED
+  RECOVERY_REQUIRED
+}
+
+enum LocalAuthenticatorType {
+  PASSKEY
+  TOTP
+  SECURITY_KEY
+  SMART_CARD
+  MANAGED_DEVICE
+  CUSTOM
+}
+
+enum LocalAuthenticatorStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum LocalChallengePurpose {
+  AUTHENTICATION
+  ENROLLMENT
+  RECOVERY
+}
+
+/// Tenant-scoped authentication profile for a canonical IdentityAccount.
+/// Authentication material is held by authenticators; identity ownership remains in Subject.
+model LocalIdentity {
+  id                String              @id @default(uuid())
+  organizationId    String
+  tenantId          String
+  identityAccountId String
+  principalName     String
+  status            LocalIdentityStatus @default(ACTIVE)
+  failedAttempts    Int                 @default(0)
+  lockedUntil       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant          Tenant               @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  identityAccount IdentityAccount      @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  authenticators  LocalAuthenticator[]
+  authChallenges  LocalAuthChallenge[]
+  recoveryCodes   LocalRecoveryCode[]
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, identityAccountId])
+  @@unique([organizationId, tenantId, principalName])
+  @@index([organizationId, tenantId, status])
+}
+
+/// Public verification material and opaque secret references only. Never stores biometric templates.
+model LocalAuthenticator {
+  id                String                   @id @default(uuid())
+  organizationId    String
+  tenantId          String
+  identityAccountId String
+  type              LocalAuthenticatorType
+  status            LocalAuthenticatorStatus @default(ACTIVE)
+  credentialId      String?
+  publicKey         String?
+  secretRef         String?
+  secretVersion     String?
+  relyingPartyId    String?
+  allowedOrigin     String?
+  signCount         BigInt                   @default(0)
+  lastTotpStep      BigInt?
+  enrolledAt        DateTime                 @default(now())
+  lastUsedAt        DateTime?
+  revokedAt         DateTime?
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant          Tenant          @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  localIdentity   LocalIdentity   @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
+  IdentityAccount IdentityAccount @relation(fields: [identityAccountId], references: [id])
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, credentialId])
+  @@index([organizationId, tenantId, identityAccountId, status])
+}
+
+/// Stores only a hash of the challenge; challenges are expiring and single-use.
+model LocalAuthChallenge {
+  id                String                @id @default(uuid())
+  organizationId    String
+  tenantId          String
+  identityAccountId String
+  authenticatorId   String?
+  purpose           LocalChallengePurpose
+  challengeHash     String
+  expiresAt         DateTime
+  usedAt            DateTime?
+  attempts          Int                   @default(0)
+  maxAttempts       Int                   @default(5)
+  createdAt         DateTime              @default(now())
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant          Tenant          @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  localIdentity   LocalIdentity   @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
+  IdentityAccount IdentityAccount @relation(fields: [identityAccountId], references: [id])
+
+  @@unique([organizationId, tenantId, id])
+  @@index([organizationId, tenantId, identityAccountId, purpose])
+  @@index([expiresAt])
+}
+
+/// High-entropy recovery codes are persisted as hashes and consumed once.
+model LocalRecoveryCode {
+  id                String    @id @default(uuid())
+  organizationId    String
+  tenantId          String
+  identityAccountId String
+  codeHash          String
+  expiresAt         DateTime?
+  usedAt            DateTime?
+  createdAt         DateTime  @default(now())
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant          Tenant          @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  localIdentity   LocalIdentity   @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
+  IdentityAccount IdentityAccount @relation(fields: [identityAccountId], references: [id])
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, codeHash])
+  @@index([organizationId, tenantId, identityAccountId])
 }
 
 enum ResourceType {
@@ -371,23 +515,23 @@ enum AuthorizationShadowStatus {
 }
 
 model AuthorizationShadowObservation {
-  id             String @id @default(uuid())
+  id String @id @default(uuid())
 
   organizationId String
   tenantId       String
   subjectId      String
 
-  action         String
-  resource       String
+  action   String
+  resource String
 
-  legacyAllowed  Boolean?
-  nativeAllowed  Boolean?
+  legacyAllowed Boolean?
+  nativeAllowed Boolean?
 
   nativeReasonCode String?
 
   status AuthorizationShadowStatus
 
-  nativeAssignmentIds Json?
+  nativeAssignmentIds  Json?
   nativeEntitlementIds Json?
 
   errorCode String?
