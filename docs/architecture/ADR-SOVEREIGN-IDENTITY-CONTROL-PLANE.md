@@ -1,10 +1,12 @@
 # ADR: Sovereign Identity Control Plane
 
-- Status: Accepted as product and architecture direction; implementation deferred
+- Status: Accepted foundation; roadmap and product-boundary sections partially superseded after Phase 6C
 - Date: 2026-09-20
 - Baseline: `0dd1d65b94124de69c9ef94d535027a6631c2e68`
 - Scope: Architecture after Phase 5F
 - Decision owner: LUXIA Identity
+
+> Post-6C note (2026-09-23): the sovereign core, canonical `Subject`, provider-adapter direction, deployment model, and offline invariants remain accepted. Sections that place authorization policy, relationship trust, or tamper-evident history inside LUXIA Identity, and the Phase 6D-12 ordering, are superseded by `ADR-POST-6C-IDENTITY-REALIGNMENT.md`. That ADR preserves the validated 6A-6C implementation while assigning Trust Graph, Policy, Trust Ledger, and AI governance to explicit product boundaries.
 
 ## Context and decision
 
