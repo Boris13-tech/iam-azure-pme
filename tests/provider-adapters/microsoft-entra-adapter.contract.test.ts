@@ -57,6 +57,13 @@ describe("Phase 6B Microsoft Entra parity", () => {
       tid: "tenant-a",
       iss: "https://login.microsoftonline.com/tenant-a/v2.0",
     });
+    expect(verified.evidence).toMatchObject({
+      method: "FEDERATED_OIDC",
+      outcome: "VERIFIED",
+      reasonCode: "ENTRA_OIDC_VERIFIED",
+      assurance: { profile: "entra-oidc" },
+      provenance: { source: "EXTERNAL_PROVIDER", offline: false },
+    });
     expect(oidc.completed).toHaveLength(1);
   });
 

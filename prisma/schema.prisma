@@ -113,14 +113,15 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenants             Tenant[]
-  providerConnections ProviderConnection[]
-  subjects            Subject[]
-  resources           Resource[]
-  localIdentities     LocalIdentity[]
-  localAuthenticators LocalAuthenticator[]
-  localAuthChallenges LocalAuthChallenge[]
-  localRecoveryCodes  LocalRecoveryCode[]
+  tenants                Tenant[]
+  providerConnections    ProviderConnection[]
+  subjects               Subject[]
+  resources              Resource[]
+  localIdentities        LocalIdentity[]
+  localAuthenticators    LocalAuthenticator[]
+  localAuthChallenges    LocalAuthChallenge[]
+  localRecoveryCodes     LocalRecoveryCode[]
+  authenticationEvidence AuthenticationEvidence[]
 }
 
 model Tenant {
@@ -130,15 +131,16 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  subjects            Subject[]
-  resources           Resource[]
-  Session             Session[]
-  Entitlement         Entitlement[]
-  localIdentities     LocalIdentity[]
-  localAuthenticators LocalAuthenticator[]
-  localAuthChallenges LocalAuthChallenge[]
-  localRecoveryCodes  LocalRecoveryCode[]
+  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subjects               Subject[]
+  resources              Resource[]
+  Session                Session[]
+  Entitlement            Entitlement[]
+  localIdentities        LocalIdentity[]
+  localAuthenticators    LocalAuthenticator[]
+  localAuthChallenges    LocalAuthChallenge[]
+  localRecoveryCodes     LocalRecoveryCode[]
+  authenticationEvidence AuthenticationEvidence[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -153,9 +155,10 @@ model ProviderConnection {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  identityAccounts IdentityAccount[]
-  resources        Resource[]
+  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  identityAccounts       IdentityAccount[]
+  resources              Resource[]
+  authenticationEvidence AuthenticationEvidence[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, providerType, externalScopeId])
@@ -163,20 +166,24 @@ model ProviderConnection {
 }
 
 model Subject {
-  id             String      @id @default(uuid())
-  organizationId String
-  tenantId       String
-  type           SubjectType
-  name           String
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  id                 String                @id @default(uuid())
+  organizationId     String
+  tenantId           String
+  type               SubjectType
+  name               String
+  lifecycleState     SubjectLifecycleState @default(ACTIVE)
+  lifecycleVersion   Int                   @default(1)
+  lifecycleChangedAt DateTime              @default(now())
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
-  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant       Tenant            @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
-  identities   IdentityAccount[]
-  legacyBridge LegacyUserBridge?
-  Session      Session[]
-  Assignment   Assignment[]
+  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant                 Tenant                   @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  identities             IdentityAccount[]
+  legacyBridge           LegacyUserBridge?
+  Session                Session[]
+  Assignment             Assignment[]
+  authenticationEvidence AuthenticationEvidence[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -193,13 +200,11 @@ model IdentityAccount {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  subject            Subject              @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
-  providerConnection ProviderConnection   @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
-  Session            Session[]
-  localIdentity      LocalIdentity?
-  LocalAuthenticator LocalAuthenticator[]
-  LocalAuthChallenge LocalAuthChallenge[]
-  LocalRecoveryCode  LocalRecoveryCode[]
+  subject                Subject                  @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  providerConnection     ProviderConnection       @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
+  Session                Session[]
+  localIdentity          LocalIdentity?
+  authenticationEvidence AuthenticationEvidence[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -208,6 +213,98 @@ model IdentityAccount {
   @@index([organizationId])
   @@index([organizationId, tenantId, subjectId])
   @@index([organizationId, providerConnectionId])
+}
+
+enum SubjectLifecycleState {
+  PROVISIONING
+  ACTIVE
+  SUSPENDED
+  DISABLED
+  RECOVERY_REQUIRED
+  RETIRED
+}
+
+enum AuthenticationMethod {
+  PASSKEY
+  SECURITY_KEY
+  TOTP
+  SMART_CARD
+  MANAGED_DEVICE
+  FEDERATED_OIDC
+  DEVICE_KEY
+  WORKLOAD_KEY
+  SERVICE_KEY
+  AGENT_KEY
+  CUSTOM
+}
+
+enum AuthenticationAssuranceLevel {
+  LOW
+  SUBSTANTIAL
+  HIGH
+}
+
+enum AuthenticationEvidenceOutcome {
+  VERIFIED
+  REJECTED
+}
+
+enum AuthenticationEvidenceSource {
+  LOCAL_VERIFIER
+  EXTERNAL_PROVIDER
+}
+
+enum AuthenticationUserVerification {
+  VERIFIED
+  PROVIDER_ASSERTED
+  NOT_VERIFIED
+  NOT_APPLICABLE
+}
+
+/// Provider-neutral, append-oriented authentication provenance. Higher layers
+/// consume this evidence; it does not encode an authorization decision.
+model AuthenticationEvidence {
+  id                      String                         @id @default(uuid())
+  organizationId          String
+  tenantId                String
+  subjectId               String
+  identityAccountId       String?
+  providerConnectionId    String
+  schemaVersion           Int                            @default(1)
+  method                  AuthenticationMethod
+  outcome                 AuthenticationEvidenceOutcome
+  assuranceLevel          AuthenticationAssuranceLevel
+  assuranceProfile        String
+  assuranceProfileVersion Int
+  phishingResistant       Boolean
+  hardwareBound           Boolean
+  userVerification        AuthenticationUserVerification
+  source                  AuthenticationEvidenceSource
+  sourceRef               String
+  verifierPolicyVersion   Int
+  operationId             String
+  correlationId           String?
+  causationId             String?
+  reasonCode              String
+  algorithmId             String?
+  keyVersion              String?
+  evidenceDigest          String?
+  offline                 Boolean                        @default(false)
+  partitionEpoch          BigInt?
+  occurredAt              DateTime
+  expiresAt               DateTime?
+  recordedAt              DateTime                       @default(now())
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant             Tenant             @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  subject            Subject            @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  identityAccount    IdentityAccount?   @relation(fields: [organizationId, tenantId, subjectId, identityAccountId], references: [organizationId, tenantId, subjectId, id], onDelete: Restrict)
+  providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@index([organizationId, tenantId, subjectId, occurredAt])
+  @@index([organizationId, tenantId, identityAccountId, occurredAt])
+  @@index([organizationId, tenantId, operationId])
 }
 
 enum LocalIdentityStatus {
@@ -284,10 +381,9 @@ model LocalAuthenticator {
   lastUsedAt        DateTime?
   revokedAt         DateTime?
 
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant          Tenant          @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
-  localIdentity   LocalIdentity   @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
-  IdentityAccount IdentityAccount @relation(fields: [identityAccountId], references: [id])
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant        Tenant        @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  localIdentity LocalIdentity @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
 
   @@unique([organizationId, tenantId, id])
   @@unique([organizationId, tenantId, credentialId])
@@ -309,10 +405,9 @@ model LocalAuthChallenge {
   maxAttempts       Int                   @default(5)
   createdAt         DateTime              @default(now())
 
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant          Tenant          @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
-  localIdentity   LocalIdentity   @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
-  IdentityAccount IdentityAccount @relation(fields: [identityAccountId], references: [id])
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant        Tenant        @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  localIdentity LocalIdentity @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
 
   @@unique([organizationId, tenantId, id])
   @@index([organizationId, tenantId, identityAccountId, purpose])
@@ -330,10 +425,9 @@ model LocalRecoveryCode {
   usedAt            DateTime?
   createdAt         DateTime  @default(now())
 
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant          Tenant          @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
-  localIdentity   LocalIdentity   @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
-  IdentityAccount IdentityAccount @relation(fields: [identityAccountId], references: [id])
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant        Tenant        @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  localIdentity LocalIdentity @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
 
   @@unique([organizationId, tenantId, id])
   @@unique([organizationId, tenantId, codeHash])

@@ -28,6 +28,7 @@ import {
   type UpstreamLogout,
   type VerifiedExternalIdentity,
 } from "../../lib/provider-adapters";
+import { createAuthenticationEvidence } from "../../lib/identity";
 
 type FakeMutation = Readonly<{
   fingerprint: string;
@@ -268,13 +269,25 @@ export class FakeProviderAdapter
         message: "Authentication challenge is invalid",
       });
     }
+    const authenticatedAt = new Date().toISOString();
+    const externalObjectId = request.response.externalObjectId ?? "fake:authenticated";
     return {
       identity: {
-        externalObjectId: request.response.externalObjectId ?? "fake:authenticated",
+        externalObjectId,
       },
       assuranceLevel: "FAKE_TEST_ONLY",
-      authenticatedAt: new Date().toISOString(),
+      authenticatedAt,
       attributes: {},
+      evidence: createAuthenticationEvidence({
+        organizationId: request.context.organizationId,
+        tenantId: request.context.tenantId,
+        providerConnectionId: request.context.providerConnectionId,
+        externalObjectId,
+        method: "CUSTOM",
+        reasonCode: "FAKE_TEST_VERIFIED",
+        assurance: { level: "LOW", profile: "fake-test", profileVersion: 1, phishingResistant: false, hardwareBound: false, userVerification: "NOT_VERIFIED" },
+        provenance: { schemaVersion: 1, source: "LOCAL_VERIFIER", sourceRef: this.type, verifierPolicyVersion: 1, operationId: request.context.operationId, occurredAt: authenticatedAt, offline: true },
+      }),
     };
   }
 

@@ -31,7 +31,7 @@ describe("LUXIA_LOCAL authentication security", () => {
     const authData = Buffer.alloc(37); createHash("sha256").update("local.luxia").digest().copy(authData); authData[32] = 1; authData.writeUInt32BE(1, 33);
     const signed = Buffer.concat([authData, createHash("sha256").update(Buffer.from(clientDataJSON, "base64url")).digest()]);
     const response = { externalObjectId: created.identity!.externalObjectId, challenge, authenticatorId, credentialId: "credential-1", clientDataJSON, authenticatorData: authData.toString("base64url"), signature: sign("sha256", signed, pair.privateKey).toString("base64url"), credentialType: "PASSKEY" };
-    await expect(adapter.completeAuthentication({ context: context("complete-passkey"), transactionId: start.transactionId, response })).resolves.toMatchObject({ assuranceLevel: "LOCAL_PASSKEY" });
+    await expect(adapter.completeAuthentication({ context: context("complete-passkey"), transactionId: start.transactionId, response })).resolves.toMatchObject({ assuranceLevel: "LOCAL_PASSKEY", evidence: { method: "PASSKEY", outcome: "VERIFIED", assurance: { phishingResistant: true }, provenance: { source: "LOCAL_VERIFIER", offline: true } } });
     await expect(adapter.completeAuthentication({ context: context("replay-passkey"), transactionId: start.transactionId, response })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
   });
 

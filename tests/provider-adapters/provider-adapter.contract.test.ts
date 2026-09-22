@@ -84,5 +84,12 @@ describe("Phase 6A provider framework", () => {
 
     expect(verified.identity.externalObjectId).toBe("fake:alice");
     expect(verified.assuranceLevel).toBe("FAKE_TEST_ONLY");
+    expect(verified.evidence).toMatchObject({
+      evidenceType: "AUTHENTICATION",
+      outcome: "VERIFIED",
+      organizationId: operationContext.organizationId,
+      tenantId: operationContext.tenantId,
+      providerConnectionId: operationContext.providerConnectionId,
+    });
   });
 });

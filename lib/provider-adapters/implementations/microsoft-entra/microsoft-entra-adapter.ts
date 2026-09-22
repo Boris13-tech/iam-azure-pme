@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createAuthenticationEvidence } from "../../../identity";
 import {
   PROVIDER_ADAPTER_CONTRACT_VERSION,
   ProviderAdapterError,
@@ -109,10 +110,11 @@ export class MicrosoftEntraAdapter
       expectedNonce: request.response.expectedNonce,
     });
     this.validateClaims(config.directoryTenantId, claims);
+    const authenticatedAt = new Date().toISOString();
     return {
       identity: { externalObjectId: claims.oid },
       assuranceLevel: "ENTRA_OIDC",
-      authenticatedAt: new Date().toISOString(),
+      authenticatedAt,
       attributes: {
         tid: claims.tid,
         iss: claims.iss,
@@ -120,6 +122,31 @@ export class MicrosoftEntraAdapter
         preferredUsername: claims.preferredUsername ?? null,
         name: claims.name ?? null,
       },
+      evidence: createAuthenticationEvidence({
+        organizationId: context.organizationId,
+        tenantId: context.tenantId,
+        providerConnectionId: context.providerConnectionId,
+        externalObjectId: claims.oid,
+        method: "FEDERATED_OIDC",
+        reasonCode: "ENTRA_OIDC_VERIFIED",
+        assurance: {
+          level: "LOW",
+          profile: "entra-oidc",
+          profileVersion: 1,
+          phishingResistant: false,
+          hardwareBound: false,
+          userVerification: "PROVIDER_ASSERTED",
+        },
+        provenance: {
+          schemaVersion: 1,
+          source: "EXTERNAL_PROVIDER",
+          sourceRef: this.type,
+          verifierPolicyVersion: 1,
+          operationId: context.operationId,
+          occurredAt: authenticatedAt,
+          offline: false,
+        },
+      }),
     };
   }
 

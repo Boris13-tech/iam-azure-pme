@@ -1,4 +1,5 @@
 import type { ProviderOperationContext, ExternalIdentityRef } from "./types";
+import type { AuthenticationEvidenceEnvelope } from "../identity";
 
 export type BeginAuthentication = Readonly<{
   context: ProviderOperationContext;
@@ -24,9 +25,11 @@ export type CompleteAuthentication = Readonly<{
 
 export type VerifiedExternalIdentity = Readonly<{
   identity: ExternalIdentityRef;
+  /** Compatibility label retained while callers migrate to typed evidence. */
   assuranceLevel: string;
   authenticatedAt: string;
   attributes: Readonly<Record<string, string | number | boolean | null>>;
+  evidence: AuthenticationEvidenceEnvelope;
 }>;
 
 export type BeginLogout = Readonly<{

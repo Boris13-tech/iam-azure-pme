@@ -1,5 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
+  createAuthenticationEvidence,
+  type AuthenticationAssurance,
+  type AuthenticationMethod,
+} from "../../../identity";
+import {
   PROVIDER_ADAPTER_CONTRACT_VERSION,
   ProviderAdapterError,
   ProviderIdempotencyConflictError,
@@ -92,13 +97,34 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
     if (!identity || identity.identityAccountId !== challenge.identityAccountId) authFailed("IDENTITY_SCOPE_MISMATCH");
     const authenticators = await this.store.listAuthenticators(request.context, identity.identityAccountId);
     try {
-      const assurance = await this.verifyCredential(request.context, request.response, rawChallenge, identity.identityAccountId, authenticators);
+      const verified = await this.verifyCredential(request.context, request.response, rawChallenge, identity.identityAccountId, authenticators);
       if (!await this.store.consumeChallenge(request.context, challenge.id, this.now().toISOString())) authFailed("CHALLENGE_ALREADY_USED");
       await this.store.recordSuccess(request.context, identity.identityAccountId);
+      const authenticatedAt = this.now().toISOString();
       return {
-        identity: { externalObjectId: identity.externalObjectId }, assuranceLevel: assurance,
-        authenticatedAt: this.now().toISOString(),
+        identity: { externalObjectId: identity.externalObjectId }, assuranceLevel: verified.compatibilityLabel,
+        authenticatedAt,
         attributes: { subjectId: identity.subjectId, identityAccountId: identity.identityAccountId, provider: this.type },
+        evidence: createAuthenticationEvidence({
+          organizationId: request.context.organizationId,
+          tenantId: request.context.tenantId,
+          providerConnectionId: request.context.providerConnectionId,
+          subjectId: identity.subjectId,
+          identityAccountId: identity.identityAccountId,
+          externalObjectId: identity.externalObjectId,
+          method: verified.method,
+          reasonCode: verified.reasonCode,
+          assurance: verified.assurance,
+          provenance: {
+            schemaVersion: 1,
+            source: "LOCAL_VERIFIER",
+            sourceRef: this.type,
+            verifierPolicyVersion: 1,
+            operationId: request.context.operationId,
+            occurredAt: authenticatedAt,
+            offline: true,
+          },
+        }),
       };
     } catch (error) {
       const lock = identity.failedAttempts + 1 >= 5
@@ -204,10 +230,13 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
     catch (error) { return { status: "MISCONFIGURED", checkedAt: this.now().toISOString(), safeMessage: error instanceof Error ? error.message : "Local provider unavailable" }; }
   }
 
-  private async verifyCredential(context: ProviderOperationContext, response: Readonly<Record<string, string>>, challenge: string, identityAccountId: string, authenticators: ReadonlyArray<LocalAuthenticatorRecord>): Promise<string> {
+  private async verifyCredential(context: ProviderOperationContext, response: Readonly<Record<string, string>>, challenge: string, identityAccountId: string, authenticators: ReadonlyArray<LocalAuthenticatorRecord>): Promise<VerifiedLocalMethod> {
     if (response.credentialType === "RECOVERY_CODE") {
       if (!response.recoveryCode || !await this.store.consumeRecoveryCode(context, identityAccountId, hash(response.recoveryCode), this.now().toISOString())) authFailed("RECOVERY_CODE_INVALID");
-      return "LOCAL_RECOVERY";
+      return localMethod("LOCAL_RECOVERY", "CUSTOM", "LOCAL_RECOVERY_CODE_VERIFIED", {
+        level: "LOW", profile: "local-recovery", profileVersion: 1,
+        phishingResistant: false, hardwareBound: false, userVerification: "NOT_VERIFIED",
+      });
     }
     const authenticator = authenticators.find((item) => item.id === response.authenticatorId && item.status === "ACTIVE");
     if (!authenticator) authFailed("AUTHENTICATOR_UNAVAILABLE");
@@ -216,13 +245,22 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
       const step = await this.secrets.withSecret<number | null>(context, authenticator.secretRef, async (lease) =>
         lease.read((secret) => verifyTotp(secret, response.totp, this.now().getTime(), authenticator.lastTotpStep)));
       if (step === null || !await this.store.advanceAuthenticator(context, authenticator.id, { lastTotpStep: step })) authFailed("TOTP_INVALID_OR_REPLAYED");
-      return "LOCAL_TOTP";
+      return localMethod("LOCAL_TOTP", "TOTP", "LOCAL_TOTP_VERIFIED", {
+        level: "SUBSTANTIAL", profile: "local-totp", profileVersion: 1,
+        phishingResistant: false, hardwareBound: false, userVerification: "NOT_VERIFIED",
+      });
     }
     if (authenticator.type === "PASSKEY" || authenticator.type === "SECURITY_KEY") {
       const assertion = parsePasskey(response);
       const next = verifyPasskeyAssertion({ assertion, authenticator, expectedChallenge: challenge });
       if (!await this.store.advanceAuthenticator(context, authenticator.id, { signCount: next })) authFailed("PASSKEY_REPLAY_DETECTED");
-      return authenticator.type === "PASSKEY" ? "LOCAL_PASSKEY" : "LOCAL_SECURITY_KEY";
+      const securityKey = authenticator.type === "SECURITY_KEY";
+      return localMethod(securityKey ? "LOCAL_SECURITY_KEY" : "LOCAL_PASSKEY", securityKey ? "SECURITY_KEY" : "PASSKEY", securityKey ? "LOCAL_SECURITY_KEY_ASSERTION_VERIFIED" : "LOCAL_PASSKEY_ASSERTION_VERIFIED", {
+        level: "SUBSTANTIAL", profile: securityKey ? "local-security-key" : "local-passkey", profileVersion: 1,
+        phishingResistant: true,
+        // Hardware binding and user verification require attestation/UV evidence, which Phase 6C does not yet collect.
+        hardwareBound: false, userVerification: "NOT_VERIFIED",
+      });
     }
     throw new UnsupportedProviderCapabilityError(this.type, "AUTHENTICATION");
   }
@@ -263,3 +301,14 @@ function parsePasskey(response: Readonly<Record<string, string>>): PasskeyAssert
 }
 function invalid(message: string): never { throw new ProviderAdapterError({ code: "INVALID_REQUEST", message }); }
 function authFailed(reason: string): never { throw new ProviderAdapterError({ code: "AUTHENTICATION_FAILED", message: "Local authentication failed", safeDetails: { reason } }); }
+
+type VerifiedLocalMethod = Readonly<{
+  compatibilityLabel: string;
+  method: AuthenticationMethod;
+  reasonCode: string;
+  assurance: AuthenticationAssurance;
+}>;
+
+function localMethod(compatibilityLabel: string, method: AuthenticationMethod, reasonCode: string, assurance: AuthenticationAssurance): VerifiedLocalMethod {
+  return { compatibilityLabel, method, reasonCode, assurance };
+}

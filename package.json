@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:security": "vitest run tests/security",
     "test:provider-adapters": "vitest run tests/provider-adapters",
+    "test:identity": "vitest run tests/identity",
     "test:entra-parity": "vitest run tests/provider-adapters/microsoft-entra-adapter.contract.test.ts tests/provider-adapters/microsoft-entra-architecture.test.ts",
     "test:security:watch": "vitest tests/security",
     "postinstall": "prisma generate",
