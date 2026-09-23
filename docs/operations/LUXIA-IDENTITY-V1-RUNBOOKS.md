@@ -21,6 +21,13 @@ Every action must record tenant scope, deployment profile, operator, timestamps,
 2. Do not read secrets from generic provider metadata or substitute environment values from another scope.
 3. Restore the scoped custody service, verify key version/state, then retry only idempotent operations.
 
+## Credential or key incident
+
+1. Identify the exact tenant, credential, key version, evidence usages, and affected sessions without copying secret material.
+2. Mark the credential/key `REVOKED` or `COMPROMISED`, revoke affected sessions, and activate a new version under custody.
+3. Preserve old public verification material where safe; distrust new evidence from the compromised version and require verified re-enrollment.
+4. Reconcile disconnected nodes before clearing the incident and retain signed incident evidence.
+
 ## Edge node offline
 
 1. Enter `OFFLINE` or `PARTITIONED` from measured connectivity state.
@@ -28,12 +35,26 @@ Every action must record tenant scope, deployment profile, operator, timestamps,
 3. Deny privilege increases and reject stale, replayed, cross-tenant, tampered, or unsupported evidence.
 4. On reconnect enter `RECOVERING`, reconcile conflicts without silent overwrite, then return to `CONNECTED`.
 
+## Network partition
+
+1. Establish which side retains authoritative write capability and increment the local partition epoch.
+2. Allow only bounded existing access backed by fresh local proof; deny privilege increases and cross-tenant snapshots.
+3. Queue idempotent evidence, never last-write-wins security state, and surface conflicts as alerts.
+4. Reconnect in `RECOVERING`, reject stale epochs, quarantine conflicting revocation/lifecycle state, then explicitly complete reconciliation.
+
 ## Restore and sovereign recovery
 
 1. Restore only an encrypted package into an isolated environment; verify signed manifest, tenant, integrity, and recovery epoch.
 2. Quarantine duplicates/conflicts and keep revoked credentials revoked.
 3. Complete the multi-authority recovery ceremony and mark credentials requiring verified re-enrollment.
 4. Activate the new epoch; reject replayed artifacts and invalidate stale pre-recovery state.
+
+## Backup restore
+
+1. Select an encrypted backup and verify its signed manifest, tenant, format/crypto versions, package ID, epoch, and completeness.
+2. Decrypt only through scoped custody into an isolated environment; fail closed on any integrity or scope mismatch.
+3. Run migrations forward, RLS/isolation, canonical ID, revoked credential, and evidence provenance checks.
+4. Promote only through the recovery ceremony; record restore evidence and retain the prior environment until acceptance.
 
 ## Key rotation
 
@@ -63,12 +84,33 @@ Every action must record tenant scope, deployment profile, operator, timestamps,
 3. Reconcile idempotent operations and verify canonical identity, RLS, sessions, audit, and provider parity.
 4. Use sovereign restore only for demonstrated corruption, with the recovery ceremony and a new epoch.
 
+## Failed deployment
+
+1. Mark the deployment unavailable, stop promotion, keep the previous READY alias, and capture build/runtime evidence.
+2. If already exposed, restore the prior compatible application artifact without reversing additive migrations.
+3. Verify health, RLS, authentication fail-closed behavior, provider parity, and cutover readiness.
+4. Correct only the demonstrated cause, rerun complete CI, and require a new immutable deployment before promotion.
+
 ## Compromised credential
 
 1. Revoke the exact tenant-scoped credential/key version and all affected sessions; record evidence provenance.
 2. If a signing key is affected, mark it compromised, rotate the trust anchor, and reject new evidence from it.
 3. Reconcile partitions before restoring connected mode; never silently reactivate revoked state.
 4. Require phishing-resistant re-enrollment or the controlled recovery ceremony.
+
+## Compromised provider credentials
+
+1. Disable the affected `ProviderConnection` or secret reference and enter `DEGRADED`; canonical subjects remain unchanged.
+2. Revoke the provider credential at its source, create a least-privilege replacement, and rotate the connection-scoped reference.
+3. Audit provider operations during the exposure window, quarantine suspicious projections, and reconcile idempotently.
+4. Restore connector health only after scoped validation; never grant access solely from provider claims observed during the incident.
+
+## Tenant isolation incident
+
+1. Set affected operations to `NOT_READY`, preserve evidence, and revoke sessions that may have crossed scope.
+2. Confirm runtime role posture, forced RLS, organization/tenant context, provider-connection scope, and bridge mappings.
+3. Quarantine ambiguous records; do not repair by broad administrative queries or by weakening RLS.
+4. Restore from verified evidence, run the complete cross-tenant suite, notify affected owners, and record containment and recurrence controls.
 
 ## Alerts and evidence retention
 
