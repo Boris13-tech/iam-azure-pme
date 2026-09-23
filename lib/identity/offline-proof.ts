@@ -10,13 +10,13 @@ import type { ContinuityScope, IdentityContinuityStore, LocalCredentialCheckpoin
 export type OfflineChallengePayload = Readonly<{
   schemaVersion: 1; challengeId: string; organizationId: string; tenantId: string; subjectId: string;
   verifierId: string; audience: string; purpose: string; nonce: string; continuityMode: ContinuityState["mode"];
-  partitionEpoch: number; issuedAt: string; expiresAt: string;
+  partitionEpoch: number; recoveryEpoch: number; issuedAt: string; expiresAt: string;
 }>;
 export type SignedOfflineChallenge = Readonly<{ payload: OfflineChallengePayload; signature: DetachedContinuitySignature }>;
 export type OfflineProofPayload = Readonly<{
   schemaVersion: 1; challengeId: string; organizationId: string; tenantId: string; subjectId: string;
   credentialId: string; verifierId: string; audience: string; purpose: string; nonce: string;
-  partitionEpoch: number; signedAt: string; snapshotDigest?: string;
+  partitionEpoch: number; recoveryEpoch: number; signedAt: string; snapshotDigest?: string;
   tokenSemantics: "ONE_TIME_CHALLENGE_RESPONSE";
 }>;
 export type SignedOfflineProof = Readonly<{ payload: OfflineProofPayload; signature: DetachedContinuitySignature }>;
@@ -24,7 +24,7 @@ export type SignedOfflineProof = Readonly<{ payload: OfflineProofPayload; signat
 export type VerifiedOfflineIdentityEvidence = Readonly<{
   evidenceType: "OFFLINE_IDENTITY_PROOF"; evidenceVersion: 1; organizationId: string; tenantId: string;
   subjectId: string; credentialId: string; challengeId: string; snapshotId?: string;
-  partitionEpoch: number; verifiedAt: string; expiresAt: string; evidenceDigest: string;
+  partitionEpoch: number; recoveryEpoch: number; verifiedAt: string; expiresAt: string; evidenceDigest: string;
   authorizationUse: "EVIDENCE_ONLY"; privilegeConstraint: "NO_PRIVILEGE_INCREASE"; reusableBearer: false;
 }>;
 
@@ -42,13 +42,15 @@ export async function issueOfflineChallenge(input: Readonly<{
   const payload: OfflineChallengePayload = Object.freeze({ schemaVersion: 1, challengeId: randomUUID(), ...input.scope,
     subjectId: input.subjectId, verifierId: input.verifierId, audience: input.audience, purpose: input.purpose,
     nonce, continuityMode: input.state.mode,
-    partitionEpoch: input.state.partitionEpoch, issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + ttl).toISOString() });
+    partitionEpoch: input.state.partitionEpoch, recoveryEpoch: input.state.recoveryEpoch,
+    issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + ttl).toISOString() });
   const signature = await signer.sign(canonicalBytes(payload), "OFFLINE_CHALLENGE");
   validateSignatureVersion(signature, "OFFLINE_CHALLENGE");
   await store.saveChallenge(input.scope, toStoredChallenge(payload, signature));
-  const sequence = await store.reserveSequence(input.scope, input.state.partitionEpoch);
+  const sequence = await store.reserveSequence(input.scope, input.state.partitionEpoch, input.state.recoveryEpoch);
   await store.appendEvent(input.scope, { id: randomUUID(), ...input.scope, subjectId: input.subjectId,
     eventType: "OFFLINE_CHALLENGE_ISSUED", mode: input.state.mode, partitionEpoch: input.state.partitionEpoch,
+    recoveryEpoch: input.state.recoveryEpoch,
     sequence, operationId: payload.challengeId, reasonCode: "FRESH_SIGNED_CHALLENGE_ISSUED",
     evidenceDigest: continuityDigest({ challengeId: payload.challengeId, signature }), occurredAt: now.toISOString() });
   return Object.freeze({ payload, signature });
@@ -65,7 +67,7 @@ export async function createOfflineProof(challenge: SignedOfflineChallenge, cred
   const payload: OfflineProofPayload = Object.freeze({ schemaVersion: 1, challengeId: challenge.payload.challengeId,
     organizationId: challenge.payload.organizationId, tenantId: challenge.payload.tenantId, subjectId: challenge.payload.subjectId,
     credentialId, verifierId: challenge.payload.verifierId, audience: challenge.payload.audience, purpose: challenge.payload.purpose,
-    nonce: challenge.payload.nonce, partitionEpoch: challenge.payload.partitionEpoch,
+    nonce: challenge.payload.nonce, partitionEpoch: challenge.payload.partitionEpoch, recoveryEpoch: challenge.payload.recoveryEpoch,
     signedAt: now.toISOString(),
     ...(options.snapshot ? { snapshotDigest: continuityDigest(options.snapshot) } : {}), tokenSemantics: "ONE_TIME_CHALLENGE_RESPONSE" });
   const signature = await signer.sign(canonicalBytes(payload), "OFFLINE_PROOF", credentialId);
@@ -85,13 +87,13 @@ export async function issueAssuranceSnapshot(input: Readonly<Omit<AssuranceSnaps
   if (input.evidenceDigests.length === 0 || input.evidenceDigests.some((digest) => !digest.startsWith("sha256:") || digest.length <= 7))
     throw new ContinuitySecurityError("STALE_EVIDENCE");
   const now = input.now ?? new Date(); const scope = { organizationId: input.organizationId, tenantId: input.tenantId };
-  const sequence = await store.reserveSequence(scope, input.partitionEpoch);
+  const sequence = await store.reserveSequence(scope, input.partitionEpoch, input.recoveryEpoch);
   const payload: AssuranceSnapshotPayload = Object.freeze({ schemaVersion: 1, snapshotId: randomUUID(),
     organizationId: input.organizationId, tenantId: input.tenantId, subjectId: input.subjectId, issuer: input.issuer,
     audience: input.audience, purpose: input.purpose, scope: normalizeSnapshotScope(input.scope), assurance: input.assurance,
     evidenceDigests: [...input.evidenceDigests].sort(), lifecycleState: input.lifecycleState,
     lifecycleVersion: input.lifecycleVersion, credentialStateVersion: input.credentialStateVersion,
-    continuityMode: input.continuityMode, partitionEpoch: input.partitionEpoch, sequence,
+    continuityMode: input.continuityMode, partitionEpoch: input.partitionEpoch, recoveryEpoch: input.recoveryEpoch, sequence,
     issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + ttl).toISOString(),
     authorizationUse: "EVIDENCE_ONLY", privilegeConstraint: "NO_PRIVILEGE_INCREASE" });
   const signature = await signer.sign(canonicalBytes(payload), "ASSURANCE_SNAPSHOT");
@@ -99,7 +101,7 @@ export async function issueAssuranceSnapshot(input: Readonly<Omit<AssuranceSnaps
   const snapshot = Object.freeze({ payload, signature });
   await store.saveSnapshot(scope, snapshot);
   await store.appendEvent(scope, { id: randomUUID(), ...scope, subjectId: input.subjectId, eventType: "SNAPSHOT_ISSUED",
-    mode: input.continuityMode, partitionEpoch: input.partitionEpoch, sequence, operationId: payload.snapshotId,
+    mode: input.continuityMode, partitionEpoch: input.partitionEpoch, recoveryEpoch: input.recoveryEpoch, sequence, operationId: payload.snapshotId,
     reasonCode: "BOUNDED_ASSURANCE_SNAPSHOT_ISSUED", evidenceDigest: continuityDigest(snapshot), occurredAt: now.toISOString() });
   return snapshot;
 }
@@ -122,6 +124,7 @@ export async function verifyOfflineProof(input: Readonly<{
     throw new ContinuitySecurityError("SIGNATURE_INVALID");
   const persistedState = await store.getState(input.scope);
   if (!persistedState || challenge.partitionEpoch !== input.state.partitionEpoch || persistedState.partitionEpoch !== input.state.partitionEpoch ||
+      challenge.recoveryEpoch !== input.state.recoveryEpoch || persistedState.recoveryEpoch !== input.state.recoveryEpoch ||
       persistedState.mode !== input.state.mode) throw new ContinuitySecurityError("EPOCH_MISMATCH");
   const checkpoint = await store.getLocalCredentialCheckpoint(input.scope, proof.subjectId, proof.credentialId, now.toISOString());
   if (!checkpoint || checkpoint.lifecycleState !== "ACTIVE" || checkpoint.credentialState !== "ACTIVE" ||
@@ -145,12 +148,13 @@ export async function verifyOfflineProof(input: Readonly<{
     ? input.snapshot.payload.expiresAt : challenge.expiresAt;
   const evidenceBase = { evidenceType: "OFFLINE_IDENTITY_PROOF" as const, evidenceVersion: 1 as const, ...input.scope,
     subjectId: proof.subjectId, credentialId: proof.credentialId, challengeId: proof.challengeId, ...(snapshotId ? { snapshotId } : {}),
-    partitionEpoch: proof.partitionEpoch, verifiedAt: now.toISOString(), expiresAt: evidenceExpiresAt,
+    partitionEpoch: proof.partitionEpoch, recoveryEpoch: proof.recoveryEpoch, verifiedAt: now.toISOString(), expiresAt: evidenceExpiresAt,
     authorizationUse: "EVIDENCE_ONLY" as const, privilegeConstraint: "NO_PRIVILEGE_INCREASE" as const, reusableBearer: false as const };
   const evidence = Object.freeze({ ...evidenceBase, evidenceDigest: continuityDigest(evidenceBase) });
-  const sequence = await store.reserveSequence(input.scope, input.state.partitionEpoch);
+  const sequence = await store.reserveSequence(input.scope, input.state.partitionEpoch, input.state.recoveryEpoch);
   await store.appendEvent(input.scope, { id: randomUUID(), ...input.scope, subjectId: proof.subjectId,
     eventType: "OFFLINE_PROOF_VERIFIED", mode: input.state.mode, partitionEpoch: input.state.partitionEpoch,
+    recoveryEpoch: input.state.recoveryEpoch,
     sequence, operationId: input.operationId, reasonCode: "FRESH_LOCAL_PROOF_VERIFIED",
     evidenceDigest: evidence.evidenceDigest, occurredAt: now.toISOString() });
   return evidence;
@@ -186,12 +190,13 @@ function proofMatchesChallenge(proof: OfflineProofPayload, challenge: OfflineCha
   return proof.challengeId === challenge.challengeId && proof.organizationId === challenge.organizationId &&
     proof.tenantId === challenge.tenantId && proof.subjectId === challenge.subjectId && proof.verifierId === challenge.verifierId &&
     proof.audience === challenge.audience && proof.purpose === challenge.purpose && proof.nonce === challenge.nonce &&
-    proof.partitionEpoch === challenge.partitionEpoch && proof.tokenSemantics === "ONE_TIME_CHALLENGE_RESPONSE";
+    proof.partitionEpoch === challenge.partitionEpoch && proof.recoveryEpoch === challenge.recoveryEpoch &&
+    proof.tokenSemantics === "ONE_TIME_CHALLENGE_RESPONSE";
 }
 function storedMatches(stored: StoredOfflineChallenge, challenge: OfflineChallengePayload, signature: DetachedContinuitySignature): boolean {
   return stored.organizationId === challenge.organizationId && stored.tenantId === challenge.tenantId && stored.subjectId === challenge.subjectId &&
     stored.verifierId === challenge.verifierId && stored.audience === challenge.audience && stored.purpose === challenge.purpose &&
-    stored.partitionEpoch === challenge.partitionEpoch && stored.continuityMode === challenge.continuityMode &&
+    stored.partitionEpoch === challenge.partitionEpoch && stored.recoveryEpoch === challenge.recoveryEpoch && stored.continuityMode === challenge.continuityMode &&
     stored.algorithmId === signature.algorithmId && stored.algorithmVersion === signature.algorithmVersion &&
     stored.issuerKeyId === signature.keyId && stored.issuerKeyVersion === signature.keyVersion && stored.challengeSignature === signature.value;
 }
@@ -202,7 +207,8 @@ function verifySnapshotBinding(snapshot: SignedAssuranceSnapshot, proof: Offline
   if (proof.snapshotDigest !== continuityDigest(snapshot) || payload.organizationId !== input.scope.organizationId ||
       payload.tenantId !== input.scope.tenantId || payload.subjectId !== proof.subjectId || payload.audience !== proof.audience ||
       payload.purpose !== proof.purpose) throw new ContinuitySecurityError("INVALID_SCOPE");
-  if (payload.partitionEpoch !== input.state.partitionEpoch) throw new ContinuitySecurityError("EPOCH_MISMATCH");
+  if (payload.partitionEpoch !== input.state.partitionEpoch || payload.recoveryEpoch !== input.state.recoveryEpoch)
+    throw new ContinuitySecurityError("EPOCH_MISMATCH");
   if (payload.lifecycleState !== "ACTIVE" || checkpoint.lifecycleState !== "ACTIVE" || checkpoint.credentialState !== "ACTIVE" ||
       payload.lifecycleVersion !== checkpoint.lifecycleVersion || payload.credentialStateVersion !== checkpoint.credentialStateVersion ||
       (payload.scope.credentialIds.length > 0 && !payload.scope.credentialIds.includes(proof.credentialId)))
@@ -217,7 +223,8 @@ function normalizeSnapshotScope(scope: AssuranceSnapshotPayload["scope"]): Assur
 function toStoredChallenge(payload: OfflineChallengePayload, signature: DetachedContinuitySignature): StoredOfflineChallenge {
   return { id: payload.challengeId, organizationId: payload.organizationId, tenantId: payload.tenantId, subjectId: payload.subjectId,
     verifierId: payload.verifierId, audience: payload.audience, purpose: payload.purpose, nonceDigest: continuityDigest(payload.nonce),
-    partitionEpoch: payload.partitionEpoch, continuityMode: payload.continuityMode, algorithmId: signature.algorithmId,
+    partitionEpoch: payload.partitionEpoch, recoveryEpoch: payload.recoveryEpoch, continuityMode: payload.continuityMode,
+    algorithmId: signature.algorithmId,
     algorithmVersion: signature.algorithmVersion, issuerKeyId: signature.keyId, issuerKeyVersion: signature.keyVersion,
     challengeSignature: signature.value, issuedAt: payload.issuedAt, expiresAt: payload.expiresAt };
 }

@@ -3,7 +3,7 @@ import type { ContinuityMode, ContinuityState, SignedAssuranceSnapshot } from ".
 export type ContinuityScope = Readonly<{ organizationId: string; tenantId: string }>;
 export type StoredOfflineChallenge = Readonly<{
   id: string; organizationId: string; tenantId: string; subjectId: string; verifierId: string;
-  audience: string; purpose: string; nonceDigest: string; partitionEpoch: number; continuityMode: ContinuityMode;
+  audience: string; purpose: string; nonceDigest: string; partitionEpoch: number; recoveryEpoch: number; continuityMode: ContinuityMode;
   algorithmId: string; algorithmVersion: number; issuerKeyId: string; issuerKeyVersion: number;
   challengeSignature: string; issuedAt: string; expiresAt: string; consumedAt?: string;
 }>;
@@ -11,7 +11,7 @@ export type ContinuityEvent = Readonly<{
   id: string; organizationId: string; tenantId: string; subjectId?: string;
   eventType: "MODE_TRANSITION" | "OFFLINE_CHALLENGE_ISSUED" | "OFFLINE_PROOF_VERIFIED" | "SNAPSHOT_ISSUED" |
     "SNAPSHOT_REJECTED" | "RECONCILIATION_STARTED" | "RECONCILIATION_APPLIED" | "RECONCILIATION_CONFLICT" | "RECONCILIATION_COMPLETED";
-  mode: ContinuityMode; partitionEpoch: number; sequence: number; operationId: string;
+  mode: ContinuityMode; partitionEpoch: number; recoveryEpoch: number; sequence: number; operationId: string;
   reasonCode: string; evidenceDigest?: string; occurredAt: string;
 }>;
 export type StoredContinuityConflict = Readonly<{
@@ -28,7 +28,7 @@ export interface IdentityContinuityStore {
   getState(scope: ContinuityScope): Promise<ContinuityState | null>;
   saveState(scope: ContinuityScope, expectedSequence: number, next: ContinuityState): Promise<boolean>;
   commitStateTransition(scope: ContinuityScope, expectedSequence: number, next: ContinuityState, event: ContinuityEvent): Promise<boolean>;
-  reserveSequence(scope: ContinuityScope, expectedPartitionEpoch: number): Promise<number>;
+  reserveSequence(scope: ContinuityScope, expectedPartitionEpoch: number, expectedRecoveryEpoch: number): Promise<number>;
   saveChallenge(scope: ContinuityScope, challenge: StoredOfflineChallenge): Promise<void>;
   getChallenge(scope: ContinuityScope, challengeId: string): Promise<StoredOfflineChallenge | null>;
   consumeChallenge(scope: ContinuityScope, challengeId: string, consumedAt: string): Promise<boolean>;

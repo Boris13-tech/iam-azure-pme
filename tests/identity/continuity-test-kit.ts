@@ -5,7 +5,7 @@ import type {
 } from "../../lib/identity";
 
 export const scope = Object.freeze({ organizationId: "org-a", tenantId: "tenant-a" });
-export const offlineState = (): ContinuityState => ({ ...scope, mode: "OFFLINE", partitionEpoch: 3, sequence: 0,
+export const offlineState = (): ContinuityState => ({ ...scope, mode: "OFFLINE", partitionEpoch: 3, recoveryEpoch: 0, sequence: 0,
   enteredAt: "2026-09-23T12:00:00.000Z", lastConnectedAt: "2026-09-23T11:00:00.000Z" });
 
 export class MemoryContinuityStore implements IdentityContinuityStore {
@@ -22,8 +22,8 @@ export class MemoryContinuityStore implements IdentityContinuityStore {
     if (!matches(s, next) || !matches(s, event) || !this.state || this.state.sequence !== expected) return false;
     this.state = next; this.events.push(event); return true;
   }
-  async reserveSequence(s: ContinuityScope, epoch: number) {
-    if (!this.state || !matches(s, this.state) || this.state.partitionEpoch !== epoch) throw new Error("EPOCH_MISMATCH");
+  async reserveSequence(s: ContinuityScope, epoch: number, recoveryEpoch: number) {
+    if (!this.state || !matches(s, this.state) || this.state.partitionEpoch !== epoch || this.state.recoveryEpoch !== recoveryEpoch) throw new Error("EPOCH_MISMATCH");
     this.state = { ...this.state, sequence: this.state.sequence + 1 }; return this.state.sequence;
   }
   async saveChallenge(s: ContinuityScope, value: StoredOfflineChallenge) { assertScope(s, value); this.challenges.set(key(s, value.id), value); }
@@ -45,9 +45,9 @@ export class TestContinuityCrypto implements ContinuitySignatureProvider {
   private readonly keys = new Map<string, { privateKey: KeyObject; publicKey: KeyObject }>();
   constructor() { this.add("continuity-issuer"); this.add("credential-a"); }
   add(id: string) { this.keys.set(id, generateKeyPairSync("ec", { namedCurve: "prime256v1" })); }
-  async sign(payload: Uint8Array, _usage: ContinuitySignatureUsage, keyId = "continuity-issuer"): Promise<DetachedContinuitySignature> {
+  async sign(payload: Uint8Array, usage: ContinuitySignatureUsage, keyId = "continuity-issuer"): Promise<DetachedContinuitySignature> {
     const pair = this.keys.get(keyId); if (!pair) throw new Error("KEY_UNAVAILABLE");
-    return { algorithmId: "EVIDENCE_ES256", algorithmVersion: 1, keyId, keyVersion: 1,
+    return { algorithmId: usage === "RECOVERY_MANIFEST" ? "RECOVERY_ES256" : "EVIDENCE_ES256", algorithmVersion: 1, keyId, keyVersion: 1,
       value: sign("sha256", payload, pair.privateKey).toString("base64url") };
   }
   async verify(payload: Uint8Array, signature: DetachedContinuitySignature, _usage: ContinuitySignatureUsage) {

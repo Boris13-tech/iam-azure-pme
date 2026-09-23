@@ -113,22 +113,27 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenants                Tenant[]
-  providerConnections    ProviderConnection[]
-  subjects               Subject[]
-  resources              Resource[]
-  localIdentities        LocalIdentity[]
-  localAuthenticators    LocalAuthenticator[]
-  localAuthChallenges    LocalAuthChallenge[]
-  localRecoveryCodes     LocalRecoveryCode[]
-  authenticationEvidence AuthenticationEvidence[]
-  cryptoKeyVersions      CryptoKeyVersion[]
-  trustAnchorVersions    TrustAnchorVersion[]
-  continuityStates       IdentityContinuityState[]
-  offlineChallenges      OfflineIdentityChallenge[]
-  assuranceSnapshots     IdentityAssuranceSnapshot[]
-  continuityEvents       IdentityContinuityEvent[]
-  continuityConflicts    IdentityContinuityConflict[]
+  tenants                  Tenant[]
+  providerConnections      ProviderConnection[]
+  subjects                 Subject[]
+  resources                Resource[]
+  localIdentities          LocalIdentity[]
+  localAuthenticators      LocalAuthenticator[]
+  localAuthChallenges      LocalAuthChallenge[]
+  localRecoveryCodes       LocalRecoveryCode[]
+  authenticationEvidence   AuthenticationEvidence[]
+  cryptoKeyVersions        CryptoKeyVersion[]
+  trustAnchorVersions      TrustAnchorVersion[]
+  continuityStates         IdentityContinuityState[]
+  offlineChallenges        OfflineIdentityChallenge[]
+  assuranceSnapshots       IdentityAssuranceSnapshot[]
+  continuityEvents         IdentityContinuityEvent[]
+  continuityConflicts      IdentityContinuityConflict[]
+  portabilityReceipts      IdentityPortabilityReceipt[]
+  recoveryCeremonies       IdentityRecoveryCeremony[]
+  recoveryApprovals        IdentityRecoveryApproval[]
+  portabilityConflicts     IdentityPortabilityConflict[]
+  reenrollmentRequirements CredentialReenrollmentRequirement[]
 }
 
 model Tenant {
@@ -138,23 +143,28 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  subjects               Subject[]
-  resources              Resource[]
-  Session                Session[]
-  Entitlement            Entitlement[]
-  localIdentities        LocalIdentity[]
-  localAuthenticators    LocalAuthenticator[]
-  localAuthChallenges    LocalAuthChallenge[]
-  localRecoveryCodes     LocalRecoveryCode[]
-  authenticationEvidence AuthenticationEvidence[]
-  cryptoKeyVersions      CryptoKeyVersion[]
-  trustAnchorVersions    TrustAnchorVersion[]
-  continuityState        IdentityContinuityState?
-  offlineChallenges      OfflineIdentityChallenge[]
-  assuranceSnapshots     IdentityAssuranceSnapshot[]
-  continuityEvents       IdentityContinuityEvent[]
-  continuityConflicts    IdentityContinuityConflict[]
+  organization             Organization                        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subjects                 Subject[]
+  resources                Resource[]
+  Session                  Session[]
+  Entitlement              Entitlement[]
+  localIdentities          LocalIdentity[]
+  localAuthenticators      LocalAuthenticator[]
+  localAuthChallenges      LocalAuthChallenge[]
+  localRecoveryCodes       LocalRecoveryCode[]
+  authenticationEvidence   AuthenticationEvidence[]
+  cryptoKeyVersions        CryptoKeyVersion[]
+  trustAnchorVersions      TrustAnchorVersion[]
+  continuityState          IdentityContinuityState?
+  offlineChallenges        OfflineIdentityChallenge[]
+  assuranceSnapshots       IdentityAssuranceSnapshot[]
+  continuityEvents         IdentityContinuityEvent[]
+  continuityConflicts      IdentityContinuityConflict[]
+  portabilityReceipts      IdentityPortabilityReceipt[]
+  recoveryCeremonies       IdentityRecoveryCeremony[]
+  recoveryApprovals        IdentityRecoveryApproval[]
+  portabilityConflicts     IdentityPortabilityConflict[]
+  reenrollmentRequirements CredentialReenrollmentRequirement[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -191,18 +201,19 @@ model Subject {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
-  organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant                 Tenant                       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
-  identities             IdentityAccount[]
-  legacyBridge           LegacyUserBridge?
-  Session                Session[]
-  Assignment             Assignment[]
-  authenticationEvidence AuthenticationEvidence[]
-  boundAuthenticators    LocalAuthenticator[]         @relation("DeviceBoundAuthenticators")
-  offlineChallenges      OfflineIdentityChallenge[]
-  assuranceSnapshots     IdentityAssuranceSnapshot[]
-  continuityEvents       IdentityContinuityEvent[]
-  continuityConflicts    IdentityContinuityConflict[]
+  organization             Organization                        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant                   Tenant                              @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  identities               IdentityAccount[]
+  legacyBridge             LegacyUserBridge?
+  Session                  Session[]
+  Assignment               Assignment[]
+  authenticationEvidence   AuthenticationEvidence[]
+  boundAuthenticators      LocalAuthenticator[]                @relation("DeviceBoundAuthenticators")
+  offlineChallenges        OfflineIdentityChallenge[]
+  assuranceSnapshots       IdentityAssuranceSnapshot[]
+  continuityEvents         IdentityContinuityEvent[]
+  continuityConflicts      IdentityContinuityConflict[]
+  reenrollmentRequirements CredentialReenrollmentRequirement[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -559,6 +570,7 @@ model IdentityContinuityState {
   tenantId        String
   mode            IdentityContinuityMode @default(CONNECTED)
   partitionEpoch  BigInt                 @default(0)
+  recoveryEpoch   BigInt                 @default(0)
   sequence        BigInt                 @default(0)
   enteredAt       DateTime               @default(now())
   lastConnectedAt DateTime?
@@ -582,6 +594,7 @@ model OfflineIdentityChallenge {
   purpose            String
   nonceDigest        String
   partitionEpoch     BigInt
+  recoveryEpoch      BigInt                 @default(0)
   continuityMode     IdentityContinuityMode
   algorithmId        String
   algorithmVersion   Int
@@ -618,6 +631,7 @@ model IdentityAssuranceSnapshot {
   assuranceProfile       String
   assuranceLevel         AuthenticationAssuranceLevel
   partitionEpoch         BigInt
+  recoveryEpoch          BigInt                       @default(0)
   sequence               BigInt
   lifecycleVersion       BigInt
   credentialStateVersion BigInt
@@ -648,6 +662,7 @@ model IdentityContinuityEvent {
   eventType      IdentityContinuityEventType
   mode           IdentityContinuityMode
   partitionEpoch BigInt
+  recoveryEpoch  BigInt                      @default(0)
   sequence       BigInt
   operationId    String
   reasonCode     String
@@ -688,6 +703,144 @@ model IdentityContinuityConflict {
   @@unique([organizationId, tenantId, id])
   @@index([organizationId, tenantId, status, detectedAt])
   @@index([organizationId, tenantId, entityType, entityId])
+}
+
+enum IdentityPortabilityDirection {
+  EXPORT
+  IMPORT
+}
+
+enum IdentityPortabilityStatus {
+  STAGED
+  APPLIED
+  REJECTED
+}
+
+enum IdentityRecoveryCeremonyState {
+  REQUESTED
+  APPROVED
+  VERIFIED
+  RESTORED_ISOLATED
+  ACTIVATED
+  FAILED
+}
+
+enum CredentialReenrollmentStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+/// Durable idempotency/replay receipt. Package content remains encrypted outside the database.
+model IdentityPortabilityReceipt {
+  id                 String                       @id @default(uuid())
+  organizationId     String
+  tenantId           String
+  packageId          String
+  direction          IdentityPortabilityDirection
+  manifestDigest     String
+  recoveryEpoch      BigInt
+  status             IdentityPortabilityStatus    @default(STAGED)
+  sourceDeploymentId String?
+  targetDeploymentId String?
+  createdAt          DateTime                     @default(now())
+  appliedAt          DateTime?
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant                        @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  conflicts    IdentityPortabilityConflict[]
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, packageId, direction])
+  @@index([organizationId, tenantId, status, createdAt])
+}
+
+model IdentityRecoveryCeremony {
+  id                  String                        @id @default(uuid())
+  organizationId      String
+  tenantId            String
+  packageId           String
+  manifestDigest      String
+  epochFrom           BigInt
+  epochTo             BigInt
+  state               IdentityRecoveryCeremonyState @default(REQUESTED)
+  requiredApprovals   Int
+  isolatedEnvironment Boolean                       @default(true)
+  requestedAt         DateTime                      @default(now())
+  verifiedAt          DateTime?
+  restoredAt          DateTime?
+  activatedAt         DateTime?
+  failedAt            DateTime?
+
+  organization Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant                     @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  approvals    IdentityRecoveryApproval[]
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, packageId])
+  @@index([organizationId, tenantId, state, requestedAt])
+}
+
+model IdentityRecoveryApproval {
+  id             String   @id @default(uuid())
+  organizationId String
+  tenantId       String
+  ceremonyId     String
+  authorityId    String
+  evidenceDigest String
+  approvedAt     DateTime @default(now())
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant                   @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  ceremony     IdentityRecoveryCeremony @relation(fields: [organizationId, tenantId, ceremonyId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, ceremonyId, authorityId])
+  @@index([organizationId, tenantId, ceremonyId])
+}
+
+model IdentityPortabilityConflict {
+  id             String    @id @default(uuid())
+  organizationId String
+  tenantId       String
+  receiptId      String
+  entityType     String
+  entityId       String
+  existingDigest String
+  incomingDigest String
+  reasonCode     String
+  quarantinedAt  DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  organization Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant                     @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  receipt      IdentityPortabilityReceipt @relation(fields: [organizationId, tenantId, receiptId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, receiptId, entityType, entityId])
+  @@index([organizationId, tenantId, receiptId])
+}
+
+model CredentialReenrollmentRequirement {
+  id                    String                       @id @default(uuid())
+  organizationId        String
+  tenantId              String
+  subjectId             String
+  originalCredentialId  String
+  recoveryEpoch         BigInt
+  reasonCode            String
+  status                CredentialReenrollmentStatus @default(PENDING)
+  completedCredentialId String?
+  createdAt             DateTime                     @default(now())
+  completedAt           DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  subject      Subject      @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, originalCredentialId, recoveryEpoch])
+  @@index([organizationId, tenantId, subjectId, status])
 }
 
 /// Stores only a hash of the challenge; challenges are expiring and single-use.
@@ -815,6 +968,7 @@ model Session {
   tenantId          String
   subjectId         String
   identityAccountId String
+  recoveryEpoch     BigInt @default(0)
 
   expiresAt  DateTime
   revokedAt  DateTime?

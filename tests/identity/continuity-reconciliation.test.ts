@@ -5,7 +5,7 @@ import { scope } from "./continuity-test-kit";
 const entity = (overrides: Partial<ReconciliationEntity> = {}): ReconciliationEntity => ({ entityType: "CREDENTIAL", entityId: "credential-a",
   subjectId: "subject-a", version: 1, securityState: "ACTIVE", digest: "sha256:one", source: "LOCAL", ...overrides });
 const reconcile = (local: ReconciliationEntity[], remote: ReconciliationEntity[]) => reconcileIdentityContinuity({
-  scope, mode: "RECOVERING", partitionEpoch: 4, sequence: 10, operationId: "reconcile", local, remote,
+  scope, mode: "RECOVERING", partitionEpoch: 4, recoveryEpoch: 0, sequence: 10, operationId: "reconcile", local, remote,
   now: new Date("2026-09-23T13:00:00.000Z"),
 });
 

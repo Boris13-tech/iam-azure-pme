@@ -10,7 +10,7 @@ export async function commitContinuityModeTransition(input: Readonly<{
   const next = transitionContinuityMode(input.current, input.nextMode, occurredAt, input.reconciliationComplete);
   if (next === input.current) return next;
   const event = { id: randomUUID(), ...input.scope, eventType: "MODE_TRANSITION" as const, mode: next.mode,
-    partitionEpoch: next.partitionEpoch, sequence: next.sequence, operationId: input.operationId,
+    partitionEpoch: next.partitionEpoch, recoveryEpoch: next.recoveryEpoch, sequence: next.sequence, operationId: input.operationId,
     reasonCode: `${input.current.mode}_TO_${next.mode}`, evidenceDigest: continuityDigest({ from: input.current, to: next }), occurredAt };
   if (!await store.commitStateTransition(input.scope, input.current.sequence, next, event))
     throw new ContinuitySecurityError("CONFLICT_QUARANTINED");

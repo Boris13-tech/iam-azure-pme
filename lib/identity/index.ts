@@ -6,3 +6,7 @@ export * from "./continuity-store";
 export * from "./offline-proof";
 export * from "./continuity-reconciliation";
 export * from "./continuity-coordinator";
+export * from "./portability";
+export * from "./encrypted-backup";
+export * from "./portability-import";
+export * from "./sovereign-recovery";

@@ -63,7 +63,7 @@ describe("Phase 6F signed offline proof", () => {
       purpose: "interactive-authentication", scope: { providerConnectionIds: ["luxia-local"], credentialIds: ["credential-a"] },
       assurance: { level: "HIGH", profile: "offline-passkey", profileVersion: 1, phishingResistant: true, hardwareBound: true, userVerification: "VERIFIED" },
       evidenceDigests: ["sha256:authentication-evidence"], lifecycleState: "ACTIVE", lifecycleVersion: 4,
-      credentialStateVersion: 8, continuityMode: "OFFLINE", partitionEpoch: 3, ttlMs: 60_000, now }, store, crypto);
+      credentialStateVersion: 8, continuityMode: "OFFLINE", partitionEpoch: 3, recoveryEpoch: 0, ttlMs: 60_000, now }, store, crypto);
     const challenge = await issueOfflineChallenge(challengeInput({ ...state, sequence: store.state!.sequence }), store, crypto);
     const proof = await createOfflineProof(challenge, "credential-a", crypto, { now: new Date(now.getTime() + 1_000), snapshot });
     const request = { scope, expectedSubjectId: "subject-a", expectedVerifierId: "edge-a", expectedAudience: "local-app",

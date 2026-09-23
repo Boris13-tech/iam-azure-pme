@@ -8,6 +8,8 @@ export type CryptoPurpose =
   | "OFFLINE_CHALLENGE"
   | "OFFLINE_PROOF"
   | "ASSURANCE_SNAPSHOT"
+  | "RECOVERY_MANIFEST"
+  | "BACKUP_ENCRYPTION"
   | "SECRET_ENCRYPTION"
   | "TRUST_ANCHOR";
 export type CryptoAlgorithmStatus = "ACTIVE" | "VERIFY_ONLY" | "DISABLED";
@@ -20,6 +22,7 @@ export type CryptoAlgorithmDefinition = Readonly<{
   nodeSignatureDigest?: "sha256";
   hashDigest?: "sha256";
   nodeHmacDigest?: "sha1";
+  nodeCipher?: "aes-256-gcm";
 }>;
 
 export class CryptoPolicyError extends Error {
@@ -51,12 +54,16 @@ export const LUXIA_CRYPTO_ALGORITHMS = new CryptoAlgorithmRegistry([
   { id: "WEBAUTHN_ES256", version: 1, purposes: new Set(["WEBAUTHN_ASSERTION"]), status: "ACTIVE", nodeSignatureDigest: "sha256", hashDigest: "sha256" },
   { id: "TOTP_HMAC_SHA1", version: 1, purposes: new Set(["TOTP"]), status: "ACTIVE", nodeHmacDigest: "sha1" },
   { id: "EVIDENCE_ES256", version: 1, purposes: new Set(["EVIDENCE_SIGNATURE", "OFFLINE_CHALLENGE", "OFFLINE_PROOF", "ASSURANCE_SNAPSHOT"]), status: "ACTIVE", nodeSignatureDigest: "sha256", hashDigest: "sha256" },
+  { id: "RECOVERY_ES256", version: 1, purposes: new Set(["RECOVERY_MANIFEST"]), status: "ACTIVE", nodeSignatureDigest: "sha256", hashDigest: "sha256" },
+  { id: "AES_256_GCM", version: 1, purposes: new Set(["BACKUP_ENCRYPTION"]), status: "ACTIVE", nodeCipher: "aes-256-gcm" },
   { id: "SHA256", version: 1, purposes: new Set(["EVIDENCE_DIGEST", "TRUST_ANCHOR"]), status: "ACTIVE", hashDigest: "sha256" },
 ]);
 
 export const CURRENT_WEBAUTHN_CRYPTO = Object.freeze({ algorithmId: "WEBAUTHN_ES256", algorithmVersion: 1 });
 export const CURRENT_TOTP_CRYPTO = Object.freeze({ algorithmId: "TOTP_HMAC_SHA1", algorithmVersion: 1 });
 export const CURRENT_EVIDENCE_SIGNATURE_CRYPTO = Object.freeze({ algorithmId: "EVIDENCE_ES256", algorithmVersion: 1 });
+export const CURRENT_RECOVERY_SIGNATURE_CRYPTO = Object.freeze({ algorithmId: "RECOVERY_ES256", algorithmVersion: 1 });
+export const CURRENT_BACKUP_ENCRYPTION_CRYPTO = Object.freeze({ algorithmId: "AES_256_GCM", algorithmVersion: 1 });
 
 export type CryptoKeyLifecycleState = "PENDING" | "ACTIVE" | "VERIFY_ONLY" | "REVOKED" | "COMPROMISED" | "RETIRED";
 export type VersionedKeyDescriptor = Readonly<{

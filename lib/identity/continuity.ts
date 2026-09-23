@@ -9,6 +9,7 @@ export type ContinuityState = Readonly<{
   tenantId: string;
   mode: ContinuityMode;
   partitionEpoch: number;
+  recoveryEpoch: number;
   sequence: number;
   enteredAt: string;
   lastConnectedAt?: string;
@@ -81,7 +82,7 @@ export function assessContinuityUse(mode: ContinuityMode, risk: ContinuityRisk, 
 export type DetachedContinuitySignature = Readonly<{
   algorithmId: string; algorithmVersion: number; keyId: string; keyVersion: number; value: string;
 }>;
-export type ContinuitySignatureUsage = "OFFLINE_CHALLENGE" | "OFFLINE_PROOF" | "ASSURANCE_SNAPSHOT";
+export type ContinuitySignatureUsage = "OFFLINE_CHALLENGE" | "OFFLINE_PROOF" | "ASSURANCE_SNAPSHOT" | "RECOVERY_MANIFEST";
 /**
  * Implementations operate on locally available custody/trust material. Verify
  * must reject unknown, revoked or compromised key versions and must not fetch
@@ -115,6 +116,7 @@ export type AssuranceSnapshotPayload = Readonly<{
   credentialStateVersion: number;
   continuityMode: ContinuityMode;
   partitionEpoch: number;
+  recoveryEpoch: number;
   sequence: number;
   issuedAt: string;
   expiresAt: string;

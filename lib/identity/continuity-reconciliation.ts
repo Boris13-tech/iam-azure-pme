@@ -30,7 +30,7 @@ const restrictionRank: Readonly<Record<ReconciliationSecurityState, number>> = {
 };
 
 export function reconcileIdentityContinuity(input: Readonly<{
-  scope: ContinuityScope; mode: ContinuityMode; partitionEpoch: number; sequence: number; operationId: string;
+  scope: ContinuityScope; mode: ContinuityMode; partitionEpoch: number; recoveryEpoch: number; sequence: number; operationId: string;
   local: ReadonlyArray<ReconciliationEntity>; remote: ReadonlyArray<ReconciliationEntity>; now?: Date;
 }>): ContinuityReconciliationResult {
   if (input.mode !== "RECOVERING") throw new ContinuitySecurityError("INVALID_MODE_TRANSITION");
@@ -76,7 +76,8 @@ export function reconcileIdentityContinuity(input: Readonly<{
   const now = (input.now ?? new Date()).toISOString(); const readyForConnected = conflicts.length === 0;
   const summary = { actions, conflictIds: conflicts.map((item) => item.id), readyForConnected };
   const event: ContinuityEvent = { id: randomUUID(), ...input.scope, eventType: readyForConnected ? "RECONCILIATION_COMPLETED" : "RECONCILIATION_CONFLICT",
-      mode: "RECOVERING", partitionEpoch: input.partitionEpoch, sequence: input.sequence + 1, operationId: input.operationId,
+      mode: "RECOVERING", partitionEpoch: input.partitionEpoch, recoveryEpoch: input.recoveryEpoch,
+      sequence: input.sequence + 1, operationId: input.operationId,
       reasonCode: readyForConnected ? "DETERMINISTIC_RECONCILIATION_COMPLETE" : "SECURITY_CONFLICTS_QUARANTINED",
       evidenceDigest: continuityDigest(summary), occurredAt: now };
   return Object.freeze({ actions, conflicts, readyForConnected, privilegeIncreaseApplied: false, event });
