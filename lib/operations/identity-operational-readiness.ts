@@ -154,3 +154,21 @@ function safeErrorCode(error: unknown): string {
   if (error && typeof error === "object" && "code" in error && typeof error.code === "string") return error.code;
   return "OPERATION_FAILED";
 }
+
+export type OperationalReadResult<T> = Readonly<
+  | { state: "AVAILABLE"; value: T }
+  | { state: "UNAVAILABLE"; reasonCode: "DEPENDENCY_UNAVAILABLE" }
+>;
+
+/** Converts a dependency read failure into an explicit, fail-closed UI state. */
+export async function safeOperationalRead<T>(
+  read: () => Promise<T>,
+  observe?: (event: Readonly<{ state: "UNAVAILABLE"; reasonCode: "DEPENDENCY_UNAVAILABLE" }>) => void,
+): Promise<OperationalReadResult<T>> {
+  try { return Object.freeze({ state: "AVAILABLE", value: await read() }); }
+  catch {
+    const event = Object.freeze({ state: "UNAVAILABLE" as const, reasonCode: "DEPENDENCY_UNAVAILABLE" as const });
+    observe?.(event);
+    return event;
+  }
+}

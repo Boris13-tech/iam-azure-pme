@@ -6,6 +6,7 @@ import {
   evaluateIdentityReadiness,
   executeWithBoundedRetry,
   sanitizeOperationalFields,
+  safeOperationalRead,
   type ComponentSignal,
 } from "../../lib/operations/identity-operational-readiness";
 
@@ -61,6 +62,14 @@ describe("LUXIA Identity v1 operational certification", () => {
   it("redacts secrets from structured telemetry", () => {
     expect(sanitizeOperationalFields({ tenantId: "t1", token: "no", nested: { password: "no", state: "READY" } }))
       .toEqual({ tenantId: "t1", token: "[REDACTED]", nested: { password: "[REDACTED]", state: "READY" } });
+  });
+
+  it("renders dependency failures as an explicit fail-closed state without leaking the error", async () => {
+    const observed: unknown[] = [];
+    const result = await safeOperationalRead(async () => { throw new Error("postgresql://secret"); }, (event) => observed.push(event));
+    expect(result).toEqual({ state: "UNAVAILABLE", reasonCode: "DEPENDENCY_UNAVAILABLE" });
+    expect(observed).toEqual([{ state: "UNAVAILABLE", reasonCode: "DEPENDENCY_UNAVAILABLE" }]);
+    expect(JSON.stringify({ result, observed })).not.toContain("postgresql");
   });
 
   it("meets the deterministic evaluation capacity baseline", () => {
