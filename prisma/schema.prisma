@@ -124,6 +124,11 @@ model Organization {
   authenticationEvidence AuthenticationEvidence[]
   cryptoKeyVersions      CryptoKeyVersion[]
   trustAnchorVersions    TrustAnchorVersion[]
+  continuityStates       IdentityContinuityState[]
+  offlineChallenges      OfflineIdentityChallenge[]
+  assuranceSnapshots     IdentityAssuranceSnapshot[]
+  continuityEvents       IdentityContinuityEvent[]
+  continuityConflicts    IdentityContinuityConflict[]
 }
 
 model Tenant {
@@ -133,7 +138,7 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   subjects               Subject[]
   resources              Resource[]
   Session                Session[]
@@ -145,6 +150,11 @@ model Tenant {
   authenticationEvidence AuthenticationEvidence[]
   cryptoKeyVersions      CryptoKeyVersion[]
   trustAnchorVersions    TrustAnchorVersion[]
+  continuityState        IdentityContinuityState?
+  offlineChallenges      OfflineIdentityChallenge[]
+  assuranceSnapshots     IdentityAssuranceSnapshot[]
+  continuityEvents       IdentityContinuityEvent[]
+  continuityConflicts    IdentityContinuityConflict[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -181,14 +191,18 @@ model Subject {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
-  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant                 Tenant                   @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant                 Tenant                       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   identities             IdentityAccount[]
   legacyBridge           LegacyUserBridge?
   Session                Session[]
   Assignment             Assignment[]
   authenticationEvidence AuthenticationEvidence[]
-  boundAuthenticators    LocalAuthenticator[]     @relation("DeviceBoundAuthenticators")
+  boundAuthenticators    LocalAuthenticator[]         @relation("DeviceBoundAuthenticators")
+  offlineChallenges      OfflineIdentityChallenge[]
+  assuranceSnapshots     IdentityAssuranceSnapshot[]
+  continuityEvents       IdentityContinuityEvent[]
+  continuityConflicts    IdentityContinuityConflict[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -398,6 +412,7 @@ model LocalAuthenticator {
   trustAnchorId               String?
   trustAnchorVersion          Int?
   verifierPolicyVersion       Int                      @default(1)
+  stateVersion                Int                      @default(1)
   hardwareBound               Boolean                  @default(false)
   deviceSubjectId             String?
   userVerificationRequired    Boolean                  @default(false)
@@ -509,6 +524,170 @@ model TrustAnchorVersion {
   @@unique([organizationId, tenantId, trustAnchorId, version])
   @@unique([organizationId, tenantId, fingerprint])
   @@index([organizationId, tenantId, status])
+}
+
+enum IdentityContinuityMode {
+  CONNECTED
+  DEGRADED
+  PARTITIONED
+  OFFLINE
+  RECOVERING
+}
+
+enum IdentityContinuityEventType {
+  MODE_TRANSITION
+  OFFLINE_CHALLENGE_ISSUED
+  OFFLINE_PROOF_VERIFIED
+  SNAPSHOT_ISSUED
+  SNAPSHOT_REJECTED
+  RECONCILIATION_STARTED
+  RECONCILIATION_APPLIED
+  RECONCILIATION_CONFLICT
+  RECONCILIATION_COMPLETED
+}
+
+enum IdentityContinuityConflictStatus {
+  QUARANTINED
+  RESOLVED_KEEP_LOCAL
+  RESOLVED_APPLY_RESTRICTIVE
+  RESOLVED_REVIEWED
+}
+
+/// Tenant-local continuity checkpoint. Canonical Subject state is never provider-owned.
+model IdentityContinuityState {
+  organizationId  String
+  tenantId        String
+  mode            IdentityContinuityMode @default(CONNECTED)
+  partitionEpoch  BigInt                 @default(0)
+  sequence        BigInt                 @default(0)
+  enteredAt       DateTime               @default(now())
+  lastConnectedAt DateTime?
+  updatedAt       DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([organizationId, tenantId])
+  @@index([organizationId, tenantId, mode])
+}
+
+/// Fresh, signed, single-use challenge metadata. Only the nonce digest is persisted.
+model OfflineIdentityChallenge {
+  id                 String                 @id @default(uuid())
+  organizationId     String
+  tenantId           String
+  subjectId          String
+  verifierId         String
+  audience           String
+  purpose            String
+  nonceDigest        String
+  partitionEpoch     BigInt
+  continuityMode     IdentityContinuityMode
+  algorithmId        String
+  algorithmVersion   Int
+  issuerKeyId        String
+  issuerKeyVersion   Int
+  challengeSignature String
+  issuedAt           DateTime
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime               @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  subject      Subject      @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, nonceDigest])
+  @@index([organizationId, tenantId, subjectId, expiresAt])
+  @@index([organizationId, tenantId, consumedAt])
+}
+
+/// Signed identity assurance only; it is never an access token or authorization decision.
+model IdentityAssuranceSnapshot {
+  id                     String                       @id @default(uuid())
+  organizationId         String
+  tenantId               String
+  subjectId              String
+  schemaVersion          Int                          @default(1)
+  issuer                 String
+  audience               String
+  purpose                String
+  scopeDigest            String
+  evidenceDigest         String
+  assuranceProfile       String
+  assuranceLevel         AuthenticationAssuranceLevel
+  partitionEpoch         BigInt
+  sequence               BigInt
+  lifecycleVersion       BigInt
+  credentialStateVersion BigInt
+  algorithmId            String
+  algorithmVersion       Int
+  issuerKeyId            String
+  issuerKeyVersion       Int
+  signature              String
+  issuedAt               DateTime
+  expiresAt              DateTime
+  revokedAt              DateTime?
+  createdAt              DateTime                     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  subject      Subject      @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, subjectId, partitionEpoch, sequence])
+  @@index([organizationId, tenantId, subjectId, expiresAt])
+}
+
+model IdentityContinuityEvent {
+  id             String                      @id @default(uuid())
+  organizationId String
+  tenantId       String
+  subjectId      String?
+  eventType      IdentityContinuityEventType
+  mode           IdentityContinuityMode
+  partitionEpoch BigInt
+  sequence       BigInt
+  operationId    String
+  reasonCode     String
+  evidenceDigest String?
+  occurredAt     DateTime
+  recordedAt     DateTime                    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  subject      Subject?     @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, partitionEpoch, sequence])
+  @@index([organizationId, tenantId, subjectId, occurredAt])
+}
+
+/// Conflicting security state is quarantined; it is never last-write-wins merged.
+model IdentityContinuityConflict {
+  id             String                           @id @default(uuid())
+  organizationId String
+  tenantId       String
+  subjectId      String?
+  entityType     String
+  entityId       String
+  localVersion   BigInt
+  remoteVersion  BigInt
+  localDigest    String
+  remoteDigest   String
+  reasonCode     String
+  status         IdentityContinuityConflictStatus @default(QUARANTINED)
+  detectedAt     DateTime                         @default(now())
+  resolvedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  subject      Subject?     @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@index([organizationId, tenantId, status, detectedAt])
+  @@index([organizationId, tenantId, entityType, entityId])
 }
 
 /// Stores only a hash of the challenge; challenges are expiring and single-use.

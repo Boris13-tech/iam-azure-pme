@@ -19,7 +19,7 @@ export function createScopedDb(scope: DataScope) {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          const modelsWithTenant = ['Subject', 'IdentityAccount', 'Resource', 'Session', 'Entitlement', 'Assignment', 'AuthorizationShadowObservation', 'LocalIdentity', 'LocalAuthenticator', 'LocalAuthChallenge', 'LocalRecoveryCode', 'AuthenticationEvidence', 'CryptoKeyVersion', 'TrustAnchorVersion'];
+          const modelsWithTenant = ['Subject', 'IdentityAccount', 'Resource', 'Session', 'Entitlement', 'Assignment', 'AuthorizationShadowObservation', 'LocalIdentity', 'LocalAuthenticator', 'LocalAuthChallenge', 'LocalRecoveryCode', 'AuthenticationEvidence', 'CryptoKeyVersion', 'TrustAnchorVersion', 'IdentityContinuityState', 'OfflineIdentityChallenge', 'IdentityAssuranceSnapshot', 'IdentityContinuityEvent', 'IdentityContinuityConflict'];
           const modelsWithOrg = ['Tenant', 'ProviderConnection', ...modelsWithTenant];
           
           if (!modelsWithOrg.includes(model)) {

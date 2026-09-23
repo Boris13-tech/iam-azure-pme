@@ -55,7 +55,7 @@ export class PrismaLocalIdentityStore implements LocalIdentityStore {
       const found = await this.find(tx, context, { externalObjectId });
       if (!found) throw new ProviderAdapterError({ code: "NOT_FOUND", message: "Local identity not found" });
       await tx.localIdentity.updateMany({ where: { organizationId: context.organizationId, tenantId: context.tenantId, identityAccountId: found.identityAccountId }, data: { status: "DISABLED" } });
-      await tx.localAuthenticator.updateMany({ where: { organizationId: context.organizationId, tenantId: context.tenantId, identityAccountId: found.identityAccountId }, data: { status: "REVOKED", revokedAt: new Date() } });
+      await tx.localAuthenticator.updateMany({ where: { organizationId: context.organizationId, tenantId: context.tenantId, identityAccountId: found.identityAccountId }, data: { status: "REVOKED", revokedAt: new Date(), stateVersion: { increment: 1 } } });
       await tx.session.updateMany({ where: { organizationId: context.organizationId, tenantId: context.tenantId, identityAccountId: found.identityAccountId, revokedAt: null }, data: { revokedAt: new Date() } });
       return { ...found, status: "DISABLED" };
     });
@@ -94,7 +94,7 @@ export class PrismaLocalIdentityStore implements LocalIdentityStore {
   async revokeAuthenticator(context: ProviderOperationContext, id: string): Promise<void> {
     await withTenantDb(scope(context), async (tx) => { const result = await tx.localAuthenticator.updateMany({ where: {
       id, organizationId: context.organizationId, tenantId: context.tenantId, status: "ACTIVE",
-    }, data: { status: "REVOKED", revokedAt: new Date() } }); if (result.count !== 1) throw new ProviderAdapterError({ code: "NOT_FOUND", message: "Local authenticator not found" }); });
+    }, data: { status: "REVOKED", revokedAt: new Date(), stateVersion: { increment: 1 } } }); if (result.count !== 1) throw new ProviderAdapterError({ code: "NOT_FOUND", message: "Local authenticator not found" }); });
   }
   async saveChallenge(context: ProviderOperationContext, value: LocalChallengeRecord): Promise<void> {
     await withTenantDb(scope(context), async (tx) => { await tx.localAuthChallenge.create({ data: {

@@ -5,6 +5,9 @@ export type CryptoPurpose =
   | "TOTP"
   | "EVIDENCE_DIGEST"
   | "EVIDENCE_SIGNATURE"
+  | "OFFLINE_CHALLENGE"
+  | "OFFLINE_PROOF"
+  | "ASSURANCE_SNAPSHOT"
   | "SECRET_ENCRYPTION"
   | "TRUST_ANCHOR";
 export type CryptoAlgorithmStatus = "ACTIVE" | "VERIFY_ONLY" | "DISABLED";
@@ -47,7 +50,7 @@ export class CryptoAlgorithmRegistry {
 export const LUXIA_CRYPTO_ALGORITHMS = new CryptoAlgorithmRegistry([
   { id: "WEBAUTHN_ES256", version: 1, purposes: new Set(["WEBAUTHN_ASSERTION"]), status: "ACTIVE", nodeSignatureDigest: "sha256", hashDigest: "sha256" },
   { id: "TOTP_HMAC_SHA1", version: 1, purposes: new Set(["TOTP"]), status: "ACTIVE", nodeHmacDigest: "sha1" },
-  { id: "EVIDENCE_ES256", version: 1, purposes: new Set(["EVIDENCE_SIGNATURE"]), status: "ACTIVE", nodeSignatureDigest: "sha256", hashDigest: "sha256" },
+  { id: "EVIDENCE_ES256", version: 1, purposes: new Set(["EVIDENCE_SIGNATURE", "OFFLINE_CHALLENGE", "OFFLINE_PROOF", "ASSURANCE_SNAPSHOT"]), status: "ACTIVE", nodeSignatureDigest: "sha256", hashDigest: "sha256" },
   { id: "SHA256", version: 1, purposes: new Set(["EVIDENCE_DIGEST", "TRUST_ANCHOR"]), status: "ACTIVE", hashDigest: "sha256" },
 ]);
 
