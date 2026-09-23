@@ -101,6 +101,9 @@ enum SubjectType {
 enum ProviderType {
   MICROSOFT_ENTRA
   LUXIA_LOCAL
+  LDAP
+  ACTIVE_DIRECTORY
+  SAMBA_AD
   AWS
   GOOGLE_WORKSPACE
   GITHUB
@@ -113,27 +116,28 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenants                  Tenant[]
-  providerConnections      ProviderConnection[]
-  subjects                 Subject[]
-  resources                Resource[]
-  localIdentities          LocalIdentity[]
-  localAuthenticators      LocalAuthenticator[]
-  localAuthChallenges      LocalAuthChallenge[]
-  localRecoveryCodes       LocalRecoveryCode[]
-  authenticationEvidence   AuthenticationEvidence[]
-  cryptoKeyVersions        CryptoKeyVersion[]
-  trustAnchorVersions      TrustAnchorVersion[]
-  continuityStates         IdentityContinuityState[]
-  offlineChallenges        OfflineIdentityChallenge[]
-  assuranceSnapshots       IdentityAssuranceSnapshot[]
-  continuityEvents         IdentityContinuityEvent[]
-  continuityConflicts      IdentityContinuityConflict[]
-  portabilityReceipts      IdentityPortabilityReceipt[]
-  recoveryCeremonies       IdentityRecoveryCeremony[]
-  recoveryApprovals        IdentityRecoveryApproval[]
-  portabilityConflicts     IdentityPortabilityConflict[]
-  reenrollmentRequirements CredentialReenrollmentRequirement[]
+  tenants                    Tenant[]
+  providerConnections        ProviderConnection[]
+  subjects                   Subject[]
+  resources                  Resource[]
+  localIdentities            LocalIdentity[]
+  localAuthenticators        LocalAuthenticator[]
+  localAuthChallenges        LocalAuthChallenge[]
+  localRecoveryCodes         LocalRecoveryCode[]
+  authenticationEvidence     AuthenticationEvidence[]
+  cryptoKeyVersions          CryptoKeyVersion[]
+  trustAnchorVersions        TrustAnchorVersion[]
+  continuityStates           IdentityContinuityState[]
+  offlineChallenges          OfflineIdentityChallenge[]
+  assuranceSnapshots         IdentityAssuranceSnapshot[]
+  continuityEvents           IdentityContinuityEvent[]
+  continuityConflicts        IdentityContinuityConflict[]
+  portabilityReceipts        IdentityPortabilityReceipt[]
+  recoveryCeremonies         IdentityRecoveryCeremony[]
+  recoveryApprovals          IdentityRecoveryApproval[]
+  portabilityConflicts       IdentityPortabilityConflict[]
+  reenrollmentRequirements   CredentialReenrollmentRequirement[]
+  providerIdentityCollisions ProviderIdentityCollision[]
 }
 
 model Tenant {
@@ -143,28 +147,29 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization             Organization                        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  subjects                 Subject[]
-  resources                Resource[]
-  Session                  Session[]
-  Entitlement              Entitlement[]
-  localIdentities          LocalIdentity[]
-  localAuthenticators      LocalAuthenticator[]
-  localAuthChallenges      LocalAuthChallenge[]
-  localRecoveryCodes       LocalRecoveryCode[]
-  authenticationEvidence   AuthenticationEvidence[]
-  cryptoKeyVersions        CryptoKeyVersion[]
-  trustAnchorVersions      TrustAnchorVersion[]
-  continuityState          IdentityContinuityState?
-  offlineChallenges        OfflineIdentityChallenge[]
-  assuranceSnapshots       IdentityAssuranceSnapshot[]
-  continuityEvents         IdentityContinuityEvent[]
-  continuityConflicts      IdentityContinuityConflict[]
-  portabilityReceipts      IdentityPortabilityReceipt[]
-  recoveryCeremonies       IdentityRecoveryCeremony[]
-  recoveryApprovals        IdentityRecoveryApproval[]
-  portabilityConflicts     IdentityPortabilityConflict[]
-  reenrollmentRequirements CredentialReenrollmentRequirement[]
+  organization               Organization                        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subjects                   Subject[]
+  resources                  Resource[]
+  Session                    Session[]
+  Entitlement                Entitlement[]
+  localIdentities            LocalIdentity[]
+  localAuthenticators        LocalAuthenticator[]
+  localAuthChallenges        LocalAuthChallenge[]
+  localRecoveryCodes         LocalRecoveryCode[]
+  authenticationEvidence     AuthenticationEvidence[]
+  cryptoKeyVersions          CryptoKeyVersion[]
+  trustAnchorVersions        TrustAnchorVersion[]
+  continuityState            IdentityContinuityState?
+  offlineChallenges          OfflineIdentityChallenge[]
+  assuranceSnapshots         IdentityAssuranceSnapshot[]
+  continuityEvents           IdentityContinuityEvent[]
+  continuityConflicts        IdentityContinuityConflict[]
+  portabilityReceipts        IdentityPortabilityReceipt[]
+  recoveryCeremonies         IdentityRecoveryCeremony[]
+  recoveryApprovals          IdentityRecoveryApproval[]
+  portabilityConflicts       IdentityPortabilityConflict[]
+  reenrollmentRequirements   CredentialReenrollmentRequirement[]
+  providerIdentityCollisions ProviderIdentityCollision[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -179,10 +184,11 @@ model ProviderConnection {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization           Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   identityAccounts       IdentityAccount[]
   resources              Resource[]
   authenticationEvidence AuthenticationEvidence[]
+  identityCollisions     ProviderIdentityCollision[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, providerType, externalScopeId])
@@ -243,6 +249,27 @@ model IdentityAccount {
   @@index([organizationId])
   @@index([organizationId, tenantId, subjectId])
   @@index([organizationId, providerConnectionId])
+}
+
+/// Quarantine evidence for ambiguous or duplicate provider projections.
+model ProviderIdentityCollision {
+  id                   String    @id @default(uuid())
+  organizationId       String
+  tenantId             String
+  providerConnectionId String
+  externalObjectId     String
+  reasonCode           String
+  evidence             Json
+  quarantinedAt        DateTime  @default(now())
+  resolvedAt           DateTime?
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant             Tenant             @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@index([organizationId, tenantId, providerConnectionId, externalObjectId])
+  @@index([organizationId, tenantId, resolvedAt, quarantinedAt])
 }
 
 enum SubjectLifecycleState {

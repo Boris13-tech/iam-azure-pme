@@ -60,6 +60,7 @@ export type ProviderGroup = Readonly<{
   attributes: ProviderAttributes;
   observedAt: string;
   version?: string;
+  members?: ReadonlyArray<ExternalIdentityRef | ExternalGroupRef>;
 }>;
 
 export type ProviderResource = Readonly<{

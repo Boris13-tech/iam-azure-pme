@@ -14,6 +14,7 @@ export type ProviderAdapterContractOptions = Readonly<{
 const allCapabilities: ProviderCapability[] = [
   "AUTHENTICATION",
   "IDENTITY_LIFECYCLE",
+  "DIRECTORY_DISCOVERY",
   "GROUP_DISCOVERY",
   "RESOURCE_DISCOVERY",
   "ACCESS_PROVISIONING",
@@ -151,6 +152,7 @@ function expectUnsupported(
   switch (capability) {
     case "AUTHENTICATION":
     case "OFFLINE_OPERATION":
+    case "DIRECTORY_DISCOVERY":
       return Promise.reject(
         new ProviderAdapterError({
           code: "UNSUPPORTED_CAPABILITY",
