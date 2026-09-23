@@ -107,6 +107,9 @@ jobs:
     - name: Run Phase 6D Identity Semantics Tests
       run: npm run test:identity
 
+    - name: Run Identity v1 Operational Certification
+      run: npm run test:operations
+
     - name: Run Microsoft Entra Parity Tests
       run: npm run test:entra-parity
 
