@@ -3,6 +3,7 @@ export * from "./capabilities";
 export * from "./errors";
 export * from "./operation";
 export * from "./provider-adapter";
+export * from "./projection-evidence";
 export * from "./registry";
 export * from "./secret-resolver";
 export * from "./types";

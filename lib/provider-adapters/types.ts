@@ -39,6 +39,22 @@ export type ProviderIdentityStatus =
   | "PENDING"
   | "UNKNOWN";
 
+export type ProviderSubjectKind = "HUMAN" | "DEVICE" | "WORKLOAD" | "SERVICE" | "AI_AGENT" | "UNKNOWN";
+export type ProviderProjectionEvidence = Readonly<{
+  schemaVersion: 1;
+  eventType: "DISCOVERED" | "LINKED";
+  organizationId: string;
+  tenantId: string;
+  providerConnectionId: string;
+  providerType: ProviderTypeId;
+  operationId: string;
+  externalObjectIdDigest: string;
+  projectionDigest: string;
+  normalizationVersion: number;
+  occurredAt: string;
+  subjectId?: string;
+}>;
+
 export type ProviderIdentity = Readonly<{
   ref: ExternalIdentityRef;
   displayName: string;
@@ -47,11 +63,13 @@ export type ProviderIdentity = Readonly<{
   attributes: ProviderAttributes;
   observedAt: string;
   version?: string;
+  suggestedSubjectKind?: ProviderSubjectKind;
 }>;
 
 export type DiscoveredIdentity = Readonly<{
   identity: ProviderIdentity;
   cursor?: SyncCursor;
+  evidence?: ProviderProjectionEvidence;
 }>;
 
 export type ProviderGroup = Readonly<{
