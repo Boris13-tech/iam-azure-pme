@@ -122,6 +122,8 @@ model Organization {
   localAuthChallenges    LocalAuthChallenge[]
   localRecoveryCodes     LocalRecoveryCode[]
   authenticationEvidence AuthenticationEvidence[]
+  cryptoKeyVersions      CryptoKeyVersion[]
+  trustAnchorVersions    TrustAnchorVersion[]
 }
 
 model Tenant {
@@ -141,6 +143,8 @@ model Tenant {
   localAuthChallenges    LocalAuthChallenge[]
   localRecoveryCodes     LocalRecoveryCode[]
   authenticationEvidence AuthenticationEvidence[]
+  cryptoKeyVersions      CryptoKeyVersion[]
+  trustAnchorVersions    TrustAnchorVersion[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -184,6 +188,7 @@ model Subject {
   Session                Session[]
   Assignment             Assignment[]
   authenticationEvidence AuthenticationEvidence[]
+  boundAuthenticators    LocalAuthenticator[]     @relation("DeviceBoundAuthenticators")
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -287,7 +292,12 @@ model AuthenticationEvidence {
   causationId             String?
   reasonCode              String
   algorithmId             String?
+  algorithmVersion        Int?
+  keyId                   String?
   keyVersion              String?
+  trustAnchorId           String?
+  trustAnchorVersion      Int?
+  cryptoSchemaVersion     Int                            @default(1)
   evidenceDigest          String?
   offline                 Boolean                        @default(false)
   partitionEpoch          BigInt?
@@ -324,8 +334,13 @@ enum LocalAuthenticatorType {
 }
 
 enum LocalAuthenticatorStatus {
+  PENDING
   ACTIVE
+  SUSPENDED
   REVOKED
+  COMPROMISED
+  EXPIRED
+  SUPERSEDED
 }
 
 enum LocalChallengePurpose {
@@ -363,31 +378,137 @@ model LocalIdentity {
 
 /// Public verification material and opaque secret references only. Never stores biometric templates.
 model LocalAuthenticator {
-  id                String                   @id @default(uuid())
-  organizationId    String
-  tenantId          String
-  identityAccountId String
-  type              LocalAuthenticatorType
-  status            LocalAuthenticatorStatus @default(ACTIVE)
-  credentialId      String?
-  publicKey         String?
-  secretRef         String?
-  secretVersion     String?
-  relyingPartyId    String?
-  allowedOrigin     String?
-  signCount         BigInt                   @default(0)
-  lastTotpStep      BigInt?
-  enrolledAt        DateTime                 @default(now())
-  lastUsedAt        DateTime?
-  revokedAt         DateTime?
+  id                          String                   @id @default(uuid())
+  organizationId              String
+  tenantId                    String
+  identityAccountId           String
+  type                        LocalAuthenticatorType
+  status                      LocalAuthenticatorStatus @default(ACTIVE)
+  credentialId                String?
+  publicKey                   String?
+  secretRef                   String?
+  secretVersion               String?
+  credentialSchemaVersion     Int                      @default(1)
+  credentialFormat            String                   @default("LUXIA_LOCAL_LEGACY")
+  credentialFormatVersion     Int                      @default(1)
+  algorithmId                 String                   @default("LEGACY_UNSPECIFIED")
+  algorithmVersion            Int                      @default(1)
+  keyId                       String?
+  keyVersion                  Int                      @default(1)
+  trustAnchorId               String?
+  trustAnchorVersion          Int?
+  verifierPolicyVersion       Int                      @default(1)
+  hardwareBound               Boolean                  @default(false)
+  deviceSubjectId             String?
+  userVerificationRequired    Boolean                  @default(false)
+  migratedFromAuthenticatorId String?
+  supersededByAuthenticatorId String?
+  relyingPartyId              String?
+  allowedOrigin               String?
+  signCount                   BigInt                   @default(0)
+  lastTotpStep                BigInt?
+  enrolledAt                  DateTime                 @default(now())
+  lastUsedAt                  DateTime?
+  revokedAt                   DateTime?
+  compromisedAt               DateTime?
+  expiresAt                   DateTime?
+  updatedAt                   DateTime                 @updatedAt
 
   organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   tenant        Tenant        @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   localIdentity LocalIdentity @relation(fields: [organizationId, tenantId, identityAccountId], references: [organizationId, tenantId, identityAccountId], onDelete: Restrict)
+  deviceSubject Subject?      @relation("DeviceBoundAuthenticators", fields: [organizationId, tenantId, deviceSubjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
 
   @@unique([organizationId, tenantId, id])
   @@unique([organizationId, tenantId, credentialId])
   @@index([organizationId, tenantId, identityAccountId, status])
+  @@index([organizationId, tenantId, deviceSubjectId])
+}
+
+enum CryptoKeyPurpose {
+  CREDENTIAL_VERIFICATION
+  EVIDENCE_SIGNING
+  SECRET_ENCRYPTION
+  RECOVERY
+  SYNCHRONIZATION
+  UPDATE_VERIFICATION
+}
+
+enum CryptoKeyStatus {
+  PENDING
+  ACTIVE
+  VERIFY_ONLY
+  REVOKED
+  COMPROMISED
+  RETIRED
+}
+
+enum TrustAnchorStatus {
+  PENDING
+  ACTIVE
+  VERIFY_ONLY
+  REVOKED
+  COMPROMISED
+  RETIRED
+}
+
+/// Version metadata only. Private key bytes remain inside the referenced custody service.
+model CryptoKeyVersion {
+  id               String           @id @default(uuid())
+  organizationId   String
+  tenantId         String
+  logicalKeyId     String
+  version          Int
+  purpose          CryptoKeyPurpose
+  algorithmId      String
+  algorithmVersion Int
+  status           CryptoKeyStatus  @default(PENDING)
+  publicMaterial   String?
+  custodyRef       String?
+  custodyVersion   String?
+  activatedAt      DateTime?
+  verifyUntil      DateTime?
+  revokedAt        DateTime?
+  compromisedAt    DateTime?
+  retiredAt        DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, logicalKeyId, version])
+  @@index([organizationId, tenantId, purpose, status])
+}
+
+/// Public trust material stays available for historical evidence verification after rotation.
+model TrustAnchorVersion {
+  id               String            @id @default(uuid())
+  organizationId   String
+  tenantId         String
+  trustAnchorId    String
+  version          Int
+  algorithmId      String
+  algorithmVersion Int
+  status           TrustAnchorStatus @default(PENDING)
+  publicMaterial   String
+  fingerprint      String
+  validFrom        DateTime
+  validUntil       DateTime?
+  revokedAt        DateTime?
+  compromisedAt    DateTime?
+  retiredAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, trustAnchorId, version])
+  @@unique([organizationId, tenantId, fingerprint])
+  @@index([organizationId, tenantId, status])
 }
 
 /// Stores only a hash of the challenge; challenges are expiring and single-use.

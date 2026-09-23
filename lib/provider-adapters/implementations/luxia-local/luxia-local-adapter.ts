@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
+  CURRENT_TOTP_CRYPTO,
+  CURRENT_WEBAUTHN_CRYPTO,
   createAuthenticationEvidence,
   type AuthenticationAssurance,
   type AuthenticationMethod,
@@ -119,9 +121,15 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
             schemaVersion: 1,
             source: "LOCAL_VERIFIER",
             sourceRef: this.type,
-            verifierPolicyVersion: 1,
+            verifierPolicyVersion: verified.crypto?.verifierPolicyVersion ?? 1,
             operationId: request.context.operationId,
             occurredAt: authenticatedAt,
+            algorithmId: verified.crypto?.algorithmId,
+            algorithmVersion: verified.crypto?.algorithmVersion,
+            keyId: verified.crypto?.keyId,
+            keyVersion: verified.crypto?.keyVersion?.toString(),
+            trustAnchorId: verified.crypto?.trustAnchorId,
+            trustAnchorVersion: verified.crypto?.trustAnchorVersion,
             offline: true,
           },
         }),
@@ -155,6 +163,9 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
     const id = randomUUID();
     await this.store.saveAuthenticator(context, {
       id, identityAccountId: input.identityAccountId, type: "PASSKEY", status: "ACTIVE",
+      credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", credentialFormatVersion: 1,
+      ...CURRENT_WEBAUTHN_CRYPTO, keyId: id, keyVersion: 1,
+      verifierPolicyVersion: 1, hardwareBound: false, userVerificationRequired: false,
       credentialId: input.credentialId, publicKey: input.publicKey,
       relyingPartyId: input.relyingPartyId, allowedOrigin: input.allowedOrigin, signCount: 0,
     });
@@ -170,6 +181,9 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
     const id = randomUUID();
     await this.store.saveAuthenticator(context, {
       id, identityAccountId: input.identityAccountId, type: "TOTP", status: "ACTIVE",
+      credentialSchemaVersion: 2, credentialFormat: "RFC6238_TOTP", credentialFormatVersion: 1,
+      ...CURRENT_TOTP_CRYPTO, keyId: id, keyVersion: 1,
+      verifierPolicyVersion: 1, hardwareBound: false, userVerificationRequired: false,
       secretRef: input.secretRef, signCount: 0,
     });
     return id;
@@ -243,12 +257,12 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
     if (authenticator.type === "TOTP") {
       if (!authenticator.secretRef || !response.totp) authFailed("TOTP_INVALID");
       const step = await this.secrets.withSecret<number | null>(context, authenticator.secretRef, async (lease) =>
-        lease.read((secret) => verifyTotp(secret, response.totp, this.now().getTime(), authenticator.lastTotpStep)));
+        lease.read((secret) => verifyTotp(secret, response.totp, this.now().getTime(), authenticator.lastTotpStep, authenticator)));
       if (step === null || !await this.store.advanceAuthenticator(context, authenticator.id, { lastTotpStep: step })) authFailed("TOTP_INVALID_OR_REPLAYED");
       return localMethod("LOCAL_TOTP", "TOTP", "LOCAL_TOTP_VERIFIED", {
         level: "SUBSTANTIAL", profile: "local-totp", profileVersion: 1,
         phishingResistant: false, hardwareBound: false, userVerification: "NOT_VERIFIED",
-      });
+      }, authenticator);
     }
     if (authenticator.type === "PASSKEY" || authenticator.type === "SECURITY_KEY") {
       const assertion = parsePasskey(response);
@@ -258,9 +272,9 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
       return localMethod(securityKey ? "LOCAL_SECURITY_KEY" : "LOCAL_PASSKEY", securityKey ? "SECURITY_KEY" : "PASSKEY", securityKey ? "LOCAL_SECURITY_KEY_ASSERTION_VERIFIED" : "LOCAL_PASSKEY_ASSERTION_VERIFIED", {
         level: "SUBSTANTIAL", profile: securityKey ? "local-security-key" : "local-passkey", profileVersion: 1,
         phishingResistant: true,
-        // Hardware binding and user verification require attestation/UV evidence, which Phase 6C does not yet collect.
-        hardwareBound: false, userVerification: "NOT_VERIFIED",
-      });
+        hardwareBound: authenticator.hardwareBound,
+        userVerification: authenticator.userVerificationRequired ? "VERIFIED" : "NOT_VERIFIED",
+      }, authenticator);
     }
     throw new UnsupportedProviderCapabilityError(this.type, "AUTHENTICATION");
   }
@@ -307,8 +321,14 @@ type VerifiedLocalMethod = Readonly<{
   method: AuthenticationMethod;
   reasonCode: string;
   assurance: AuthenticationAssurance;
+  crypto?: Readonly<Pick<LocalAuthenticatorRecord, "algorithmId" | "algorithmVersion" | "keyId" | "keyVersion" | "trustAnchorId" | "trustAnchorVersion" | "verifierPolicyVersion">>;
 }>;
 
-function localMethod(compatibilityLabel: string, method: AuthenticationMethod, reasonCode: string, assurance: AuthenticationAssurance): VerifiedLocalMethod {
-  return { compatibilityLabel, method, reasonCode, assurance };
+function localMethod(compatibilityLabel: string, method: AuthenticationMethod, reasonCode: string, assurance: AuthenticationAssurance, authenticator?: LocalAuthenticatorRecord): VerifiedLocalMethod {
+  return { compatibilityLabel, method, reasonCode, assurance, crypto: authenticator ? {
+    algorithmId: authenticator.algorithmId, algorithmVersion: authenticator.algorithmVersion,
+    keyId: authenticator.keyId, keyVersion: authenticator.keyVersion,
+    trustAnchorId: authenticator.trustAnchorId, trustAnchorVersion: authenticator.trustAnchorVersion,
+    verifierPolicyVersion: authenticator.verifierPolicyVersion,
+  } : undefined };
 }

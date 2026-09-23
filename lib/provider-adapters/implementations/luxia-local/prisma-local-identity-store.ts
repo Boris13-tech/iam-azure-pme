@@ -64,16 +64,31 @@ export class PrismaLocalIdentityStore implements LocalIdentityStore {
     return withTenantDb(scope(context), async (tx) => (await tx.localAuthenticator.findMany({ where: {
       organizationId: context.organizationId, tenantId: context.tenantId, identityAccountId,
     } })).map((row) => ({ id: row.id, identityAccountId: row.identityAccountId, type: row.type, status: row.status,
+      credentialSchemaVersion: row.credentialSchemaVersion, credentialFormat: row.credentialFormat,
+      credentialFormatVersion: row.credentialFormatVersion, algorithmId: row.algorithmId,
+      algorithmVersion: row.algorithmVersion, keyId: row.keyId ?? undefined,
+      keyVersion: row.keyVersion ?? undefined, trustAnchorId: row.trustAnchorId ?? undefined,
+      trustAnchorVersion: row.trustAnchorVersion ?? undefined, verifierPolicyVersion: row.verifierPolicyVersion,
+      hardwareBound: row.hardwareBound, deviceSubjectId: row.deviceSubjectId ?? undefined,
+      userVerificationRequired: row.userVerificationRequired,
       credentialId: row.credentialId ?? undefined, publicKey: row.publicKey ?? undefined,
       secretRef: row.secretRef ? { key: row.secretRef, version: row.secretVersion ?? undefined } : undefined, relyingPartyId: row.relyingPartyId ?? undefined,
-      allowedOrigin: row.allowedOrigin ?? undefined, signCount: Number(row.signCount), lastTotpStep: row.lastTotpStep === null ? undefined : Number(row.lastTotpStep) })));
+      allowedOrigin: row.allowedOrigin ?? undefined, signCount: Number(row.signCount),
+      lastTotpStep: row.lastTotpStep === null ? undefined : Number(row.lastTotpStep), expiresAt: row.expiresAt?.toISOString() })));
   }
   async saveAuthenticator(context: ProviderOperationContext, value: LocalAuthenticatorRecord): Promise<void> {
     await withTenantDb(scope(context), async (tx) => { await tx.localAuthenticator.create({ data: {
       id: value.id, organizationId: context.organizationId, tenantId: context.tenantId, identityAccountId: value.identityAccountId,
       type: value.type, status: value.status, credentialId: value.credentialId, publicKey: value.publicKey,
+      credentialSchemaVersion: value.credentialSchemaVersion, credentialFormat: value.credentialFormat,
+      credentialFormatVersion: value.credentialFormatVersion, algorithmId: value.algorithmId,
+      algorithmVersion: value.algorithmVersion, keyId: value.keyId, keyVersion: value.keyVersion,
+      trustAnchorId: value.trustAnchorId, trustAnchorVersion: value.trustAnchorVersion,
+      verifierPolicyVersion: value.verifierPolicyVersion, hardwareBound: value.hardwareBound,
+      deviceSubjectId: value.deviceSubjectId, userVerificationRequired: value.userVerificationRequired,
       secretRef: value.secretRef?.key, secretVersion: value.secretRef?.version, relyingPartyId: value.relyingPartyId, allowedOrigin: value.allowedOrigin,
       signCount: value.signCount, lastTotpStep: value.lastTotpStep,
+      expiresAt: value.expiresAt ? new Date(value.expiresAt) : undefined,
     } }); });
   }
   async revokeAuthenticator(context: ProviderOperationContext, id: string): Promise<void> {

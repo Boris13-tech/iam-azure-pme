@@ -40,9 +40,9 @@ export const CREDENTIAL_TYPES = [
   "FEDERATED", "DEVICE_KEY", "WORKLOAD_KEY", "SERVICE_KEY", "AGENT_KEY", "CUSTOM",
 ] as const;
 export type CredentialType = (typeof CREDENTIAL_TYPES)[number];
-export type CredentialStatus = "ACTIVE" | "SUSPENDED" | "REVOKED" | "COMPROMISED" | "EXPIRED";
+export type CredentialStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED" | "COMPROMISED" | "EXPIRED" | "SUPERSEDED";
 
-export type CredentialDescriptor = Readonly<{
+export type CredentialDescriptorV1 = Readonly<{
   schemaVersion: 1;
   credentialId: string;
   subjectId: string;
@@ -60,6 +60,38 @@ export type CredentialDescriptor = Readonly<{
   hardwareBound: boolean;
   exportability: "NON_EXPORTABLE" | "PUBLIC_ONLY" | "ENCRYPTED_RECOVERY_ONLY";
 }>;
+
+export type DeviceBinding = Readonly<{
+  deviceSubjectId: string;
+  bindingType: "PLATFORM_BOUND" | "HARDWARE_ATTESTED" | "MANAGED_DEVICE";
+  bindingVersion: number;
+  attestationEvidenceId?: string;
+}>;
+
+export type CredentialDescriptorV2 = Readonly<{
+  schemaVersion: 2;
+  credentialId: string;
+  subjectId: string;
+  identityAccountId?: string;
+  type: CredentialType;
+  format: string;
+  formatVersion: number;
+  status: CredentialStatus;
+  crypto: Readonly<{
+    algorithmId: string;
+    algorithmVersion: number;
+    keyId?: string;
+    keyVersion?: number;
+    trustAnchorId?: string;
+    trustAnchorVersion?: number;
+    verifierPolicyVersion: number;
+  }>;
+  deviceBinding?: DeviceBinding;
+  exportability: "NON_EXPORTABLE" | "PUBLIC_ONLY" | "ENCRYPTED_RECOVERY_ONLY";
+  supersedesCredentialId?: string;
+}>;
+
+export type CredentialDescriptor = CredentialDescriptorV1 | CredentialDescriptorV2;
 
 export const AUTHENTICATION_METHODS = [
   "PASSKEY", "SECURITY_KEY", "TOTP", "SMART_CARD", "MANAGED_DEVICE",
@@ -92,7 +124,11 @@ export type EvidenceProvenance = Readonly<{
   causationId?: string;
   occurredAt: string;
   algorithmId?: string;
+  algorithmVersion?: number;
+  keyId?: string;
   keyVersion?: string;
+  trustAnchorId?: string;
+  trustAnchorVersion?: number;
   evidenceDigest?: string;
   offline: boolean;
   partitionEpoch?: string;

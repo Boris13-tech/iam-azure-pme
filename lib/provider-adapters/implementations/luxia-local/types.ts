@@ -25,7 +25,20 @@ export type LocalAuthenticatorRecord = Readonly<{
   id: string;
   identityAccountId: string;
   type: LocalCredentialType;
-  status: "ACTIVE" | "REVOKED";
+  status: "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED" | "COMPROMISED" | "EXPIRED" | "SUPERSEDED";
+  credentialSchemaVersion: number;
+  credentialFormat: string;
+  credentialFormatVersion: number;
+  algorithmId: string;
+  algorithmVersion: number;
+  keyId?: string;
+  keyVersion?: number;
+  trustAnchorId?: string;
+  trustAnchorVersion?: number;
+  verifierPolicyVersion: number;
+  hardwareBound: boolean;
+  deviceSubjectId?: string;
+  userVerificationRequired: boolean;
   credentialId?: string;
   publicKey?: string;
   secretRef?: SecretReference;
@@ -33,6 +46,7 @@ export type LocalAuthenticatorRecord = Readonly<{
   allowedOrigin?: string;
   signCount: number;
   lastTotpStep?: number;
+  expiresAt?: string;
 }>;
 
 export type LocalChallengeRecord = Readonly<{
