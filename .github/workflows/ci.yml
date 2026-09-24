@@ -120,3 +120,9 @@ jobs:
       run: npx tsx scripts/generate-cutover-report.ts
       env:
         DATABASE_URL: ${{ env.DATABASE_URL }}
+
+  production-activation:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'ops: execute production activation gate'
+    needs: test-and-build
+    uses: ./.github/workflows/production-activation-gate.yml
+    secrets: inherit

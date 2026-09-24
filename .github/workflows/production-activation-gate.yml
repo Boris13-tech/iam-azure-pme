@@ -2,6 +2,7 @@ name: Production Activation Gate
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
