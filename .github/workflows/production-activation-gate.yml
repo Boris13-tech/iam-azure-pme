@@ -127,6 +127,33 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
         run: npx prisma migrate deploy
 
+      - name: Recreate unsafe runtime role without BYPASSRLS
+        shell: bash
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
+          bypass="$(psql "$PSQL_URL" -Atqc "SELECT rolbypassrls FROM pg_roles WHERE rolname='app_user'")"
+          if [ "$bypass" = "f" ]; then
+            echo "Runtime role already has NOBYPASSRLS."
+            exit 0
+          fi
+          if [ "$bypass" != "t" ]; then
+            echo "Runtime role app_user does not exist."
+            exit 1
+          fi
+
+          runtime_password="$(node -e 'process.stdout.write(new URL(process.env.DATABASE_URL).password)')"
+          test -n "$runtime_password" || { echo "Runtime password could not be resolved"; exit 1; }
+          psql -v ON_ERROR_STOP=1 --single-transaction \
+            -v runtime_password="$runtime_password" "$PSQL_URL" <<'SQL'
+          DROP OWNED BY app_user;
+          DROP ROLE app_user;
+          CREATE ROLE app_user LOGIN PASSWORD :'runtime_password'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+          SQL
+          unset runtime_password
+          echo "Runtime role recreated with NOBYPASSRLS."
+
       - name: Bootstrap least-privilege runtime grants
         shell: bash
         run: |
