@@ -133,7 +133,6 @@ jobs:
           set -euo pipefail
           PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
           psql -v ON_ERROR_STOP=1 "$PSQL_URL" <<'SQL'
-          ALTER ROLE app_user NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
           GRANT CONNECT ON DATABASE neondb TO app_user;
           GRANT USAGE ON SCHEMA public TO app_user;
           GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
