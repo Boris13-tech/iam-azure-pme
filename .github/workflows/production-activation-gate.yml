@@ -15,6 +15,20 @@ jobs:
   database-activation:
     runs-on: ubuntu-latest
     environment: Production
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: baseline
+          POSTGRES_PASSWORD: baseline_password
+          POSTGRES_DB: baseline_shadow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U baseline -d baseline_shadow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
@@ -51,6 +65,61 @@ jobs:
         run: |
           npx prisma validate
           npx prisma generate
+
+      - name: Reconcile verified legacy baseline
+        shell: bash
+        env:
+          BASELINE_SHADOW_URL: postgresql://baseline:baseline_password@127.0.0.1:5432/baseline_shadow?schema=public
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
+          has_history="$(psql "$PSQL_URL" -Atqc "SELECT to_regclass('public._prisma_migrations') IS NOT NULL")"
+          if [ "$has_history" = "t" ]; then
+            echo "Prisma migration history already exists; legacy reconciliation not required."
+            exit 0
+          fi
+
+          actual_tables="$(psql "$PSQL_URL" -Atqc "SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_tables WHERE schemaname='public'")"
+          expected_tables="AccessPolicy,AuditLog,Permission,Role,RolePermission,User,UserRole"
+          if [ "$actual_tables" != "$expected_tables" ]; then
+            echo "Legacy baseline rejected: unexpected Production table inventory."
+            exit 1
+          fi
+
+          index_drift="$(psql "$PSQL_URL" -Atqc "WITH expected(name) AS (SELECT unnest(ARRAY['AccessPolicy_pkey','AuditLog_pkey','Permission_action_resource_key','Permission_pkey','RolePermission_pkey','Role_name_key','Role_pkey','UserRole_pkey','User_azureId_key','User_email_key','User_pkey'])), actual(name) AS (SELECT indexname::text FROM pg_indexes WHERE schemaname='public') SELECT count(*) FROM ((SELECT name FROM expected EXCEPT SELECT name FROM actual) UNION ALL (SELECT name FROM actual EXCEPT SELECT name FROM expected)) drift")"
+          if [ "$index_drift" != "0" ]; then
+            echo "Legacy baseline rejected: unexpected Production index inventory."
+            exit 1
+          fi
+
+          constraint_drift="$(psql "$PSQL_URL" -Atqc "WITH expected(name) AS (SELECT unnest(ARRAY['AccessPolicy_pkey','AuditLog_actorId_fkey','AuditLog_pkey','Permission_pkey','RolePermission_permissionId_fkey','RolePermission_pkey','RolePermission_roleId_fkey','Role_pkey','UserRole_pkey','UserRole_roleId_fkey','UserRole_userId_fkey','User_pkey'])), actual(name) AS (SELECT conname::text FROM pg_constraint WHERE connamespace='public'::regnamespace) SELECT count(*) FROM ((SELECT name FROM expected EXCEPT SELECT name FROM actual) UNION ALL (SELECT name FROM actual EXCEPT SELECT name FROM expected)) drift")"
+          if [ "$constraint_drift" != "0" ]; then
+            echo "Legacy baseline rejected: unexpected Production constraint inventory."
+            exit 1
+          fi
+
+          mkdir -p /tmp/init-migrations/20260917000000_init
+          cp prisma/migrations/20260917000000_init/migration.sql /tmp/init-migrations/20260917000000_init/migration.sql
+
+          npx prisma migrate diff \
+            --from-url "$DATABASE_MIGRATION_URL" \
+            --to-migrations /tmp/init-migrations \
+            --shadow-database-url "$BASELINE_SHADOW_URL" \
+            --script > /tmp/legacy-baseline.sql
+
+          if grep -Eiq '\b(DROP|DELETE|TRUNCATE|RENAME)\b|ALTER[[:space:]]+COLUMN' /tmp/legacy-baseline.sql; then
+            echo "Legacy baseline rejected: generated delta contains a destructive operation."
+            sed -E 's#(postgresql://)[^[:space:]]+#\1***#g' /tmp/legacy-baseline.sql
+            exit 1
+          fi
+          if ! grep -Eq 'CREATE (TYPE|TABLE|UNIQUE INDEX|INDEX)|ADD CONSTRAINT' /tmp/legacy-baseline.sql; then
+            echo "Legacy baseline rejected: no additive schema delta was generated."
+            exit 1
+          fi
+
+          psql -v ON_ERROR_STOP=1 --single-transaction "$PSQL_URL" -f /tmp/legacy-baseline.sql
+          DATABASE_URL="$DATABASE_MIGRATION_URL" npx prisma migrate resolve --applied 20260917000000_init
+          echo "Verified legacy baseline reconciliation PASS"
 
       - name: Apply additive migrations
         env:
