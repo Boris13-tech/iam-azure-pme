@@ -99,6 +99,7 @@ jobs:
           fi
 
           mkdir -p /tmp/init-migrations/20260917000000_init
+          printf 'provider = "postgresql"\n' > /tmp/init-migrations/migration_lock.toml
           cp prisma/migrations/20260917000000_init/migration.sql /tmp/init-migrations/20260917000000_init/migration.sql
 
           npx prisma migrate diff \
