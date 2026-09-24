@@ -137,13 +137,27 @@ jobs:
             echo "Runtime role already has NOBYPASSRLS."
             exit 0
           fi
-          if [ "$bypass" != "t" ]; then
-            echo "Runtime role app_user does not exist."
-            exit 1
-          fi
 
           runtime_password="$(node -e 'process.stdout.write(new URL(process.env.DATABASE_URL).password)')"
           test -n "$runtime_password" || { echo "Runtime password could not be resolved"; exit 1; }
+
+          if [ -z "$bypass" ]; then
+            psql -v ON_ERROR_STOP=1 --single-transaction \
+              -v runtime_password="$runtime_password" "$PSQL_URL" <<'SQL'
+          CREATE ROLE app_user LOGIN PASSWORD :'runtime_password'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+          SQL
+            unset runtime_password
+            echo "Runtime role created with NOBYPASSRLS."
+            exit 0
+          fi
+
+          if [ "$bypass" != "t" ]; then
+            unset runtime_password
+            echo "Runtime role state is ambiguous."
+            exit 1
+          fi
+
           psql -v ON_ERROR_STOP=1 --single-transaction \
             -v runtime_password="$runtime_password" "$PSQL_URL" <<'SQL'
           DROP OWNED BY app_user;
