@@ -18,7 +18,8 @@ export async function requireAuth(): Promise<AuthContext> {
     // but Next.js `redirect()` works for Page components.
     
     // Simple heuristic: if request accepts json (typical API), throw error.
-    const acceptHeader = headers().get("accept") || "";
+    const headerStore = await headers();
+    const acceptHeader = headerStore.get("accept") || "";
     if (acceptHeader.includes("application/json")) {
       throw new Error("UNAUTHORIZED");
     }

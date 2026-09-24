@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { hasLegacyPermission, resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
-import { createAzureUser } from "@/lib/graph";
+import { checkPermission } from "@/lib/auth/authorization-gateway";
+import { resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
+import { dualWriteUpdateUserRole } from "@/lib/auth/dual-write-service";
+import { createAzureUser, hasMicrosoftGraphConfiguration } from "@/lib/graph";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,7 @@ export async function GET(req: Request) {
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "read", "users");
+    const allowed = await checkPermission(auth, { action: "read", resource: "users" });
     if (!allowed) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "create", "users");
+    const allowed = await checkPermission(auth, { action: "create", resource: "users" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const legacyUser = await resolveLegacyUser(auth);
@@ -65,14 +67,11 @@ export async function POST(req: Request) {
     const body = await req.json();
     let azureId = body.azureId || null;
 
-    const hasGraphConfig = 
-      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
-      process.env.GRAPH_CLIENT_SECRET && 
-      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+    const hasGraphConfig = hasMicrosoftGraphConfiguration();
 
     if (hasGraphConfig) {
       try {
-        const azureUser = await createAzureUser(body.name, body.email);
+        const azureUser = await createAzureUser(auth, body.name, body.email);
         azureId = azureUser.azureId;
       } catch (graphError: any) {
         console.error("Failed to create user in Azure AD:", graphError);
@@ -109,12 +108,7 @@ export async function POST(req: Request) {
 
     if (body.roleId) {
       try {
-        await rawPrisma.userRole.create({
-          data: {
-            userId: newUser.id,
-            roleId: body.roleId
-          }
-        });
+        await dualWriteUpdateUserRole(auth, newUser.id, body.roleId);
       } catch (e) {
         console.warn("Role assignment failed", e);
       }
@@ -138,3 +132,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }
+

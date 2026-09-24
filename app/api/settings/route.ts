@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { hasLegacyPermission } from "@/lib/auth/legacy-auth-adapter";
+import { checkPermission } from "@/lib/auth/authorization-gateway";
 
 export const dynamic = "force-dynamic";
 

@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "generatedFor": "phase-6j",
+  "profiles": {
+    "CLOUD": { "result": "PASS" },
+    "HYBRID": { "result": "PASS" },
+    "SOVEREIGN": { "result": "PASS" }
+  },
+  "gates": [
+    { "id": "provider-contracts", "required": true, "result": "PASS", "evidence": ["file:tests/provider-adapters/provider-adapter.contract.test.ts"] },
+    { "id": "provider-outage-and-retry", "required": true, "result": "PASS", "evidence": ["file:tests/provider-adapters/cloud-provider-adapters.test.ts", "file:lib/operations/identity-operational-readiness.ts"] },
+    { "id": "offline-and-partition-safety", "required": true, "result": "PASS", "evidence": ["file:tests/identity/offline-proof.test.ts", "file:tests/identity/continuity-reconciliation.test.ts"] },
+    { "id": "canonical-identity-preservation", "required": true, "result": "PASS", "evidence": ["file:tests/identity/universal-subject-semantics.test.ts"] },
+    { "id": "tenant-isolation-rls", "required": true, "result": "PASS", "evidence": ["file:tests/security/rls-enforcement.test.ts", "file:tests/cross-tenant-isolation.test.ts"] },
+    { "id": "backup-restore", "required": true, "result": "PASS", "evidence": ["file:tests/identity/sovereign-recovery.test.ts", "file:lib/identity/encrypted-backup.ts"] },
+    { "id": "upgrade-rollback", "required": true, "result": "PASS", "evidence": ["file:tests/security/rollback-drill.test.ts", "file:docs/operations/LUXIA-IDENTITY-V1-RUNBOOKS.md#upgrade"] },
+    { "id": "migration-safety", "required": true, "result": "PASS", "evidence": ["file:tests/identity/phase6g-architecture.test.ts", "file:.github/workflows/ci.yml"] },
+    { "id": "readiness-alerting", "required": true, "result": "PASS", "evidence": ["file:tests/operations/identity-v1-operational-certification.test.ts"] },
+    { "id": "telemetry-secret-redaction", "required": true, "result": "PASS", "evidence": ["file:tests/operations/identity-v1-operational-certification.test.ts"] },
+    { "id": "startup-shutdown-restart", "required": true, "result": "PASS", "evidence": ["file:tests/operations/identity-v1-operational-certification.test.ts"] },
+    { "id": "capacity-regression-baseline", "required": true, "result": "PASS", "evidence": ["file:tests/operations/identity-v1-operational-certification.test.ts"] },
+    { "id": "legacy-coupling-inventory", "required": true, "result": "PASS", "evidence": ["file:docs/architecture/PHASE-6J-LEGACY-COUPLING-INVENTORY.md"] },
+    { "id": "operational-runbooks", "required": true, "result": "PASS", "evidence": ["file:docs/operations/LUXIA-IDENTITY-V1-RUNBOOKS.md"] }
+  ]
+}

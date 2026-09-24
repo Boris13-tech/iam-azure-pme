@@ -1,8 +1,15 @@
+import { adminPrisma } from "../helpers/admin-prisma";
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { POST } from "../../app/auth/logout/route";
 import { NextRequest } from "next/server";
 import { SessionStore } from "../../lib/auth/session-store";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+
+vi.mock("../../lib/auth/providers/entra", () => ({
+  getEntraLogoutUrl: vi.fn().mockResolvedValue(
+    "https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Flogin"
+  )
+}));
 
 describe("Logout Security", () => {
   let orgId: string;
@@ -11,19 +18,19 @@ describe("Logout Security", () => {
   let identityAccountId: string;
 
   beforeAll(async () => {
-    const org = await rawPrisma.organization.create({ data: { name: "Test Org 3" } });
+    const org = await adminPrisma.organization.create({ data: { name: "Test Org 3" } });
     orgId = org.id;
-    const tenant = await rawPrisma.tenant.create({ data: { organizationId: orgId, name: "Test Tenant 3" } });
+    const tenant = await adminPrisma.tenant.create({ data: { organizationId: orgId, name: "Test Tenant 3" } });
     tenantId = tenant.id;
-    const subject = await rawPrisma.subject.create({
+    const subject = await adminPrisma.subject.create({
       data: { organizationId: orgId, tenantId, type: "HUMAN", name: "Test User 3" }
     });
     subjectId = subject.id;
-    const provider = await rawPrisma.providerConnection.create({
-      data: { organizationId: orgId, providerType: "MICROSOFT_ENTRA", externalScopeId: "tid-789", name: "Entra 3" }
+    const provider = await adminPrisma.providerConnection.create({
+      data: { organizationId: orgId, name: "Entra", providerType: "MICROSOFT_ENTRA", externalScopeId: `scope-${orgId}`}
     });
-    const identity = await rawPrisma.identityAccount.create({
-      data: { organizationId: orgId, subjectId, providerConnectionId: provider.id, externalObjectId: "oid-789" }
+    const identity = await adminPrisma.identityAccount.create({
+      data: { organizationId: orgId, tenantId, subjectId, providerConnectionId: provider.id, externalObjectId: "oid-789" }
     });
     identityAccountId = identity.id;
     
@@ -32,12 +39,12 @@ describe("Logout Security", () => {
   });
 
   afterAll(async () => {
-    await rawPrisma.session.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.subject.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
-    await rawPrisma.organization.deleteMany({ where: { id: orgId } });
+    await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
+    await adminPrisma.organization.deleteMany({ where: { id: orgId } });
   });
 
   const createMockRequest = (origin: string, token: string | undefined, federated: boolean = false) => {
@@ -101,17 +108,6 @@ describe("Logout Security", () => {
     const { rawToken } = await SessionStore.createSession({
       organizationId: orgId, tenantId, subjectId, identityAccountId
     });
-
-    // Mock getEntraOIDCConfig
-    vi.mock("../../lib/auth/providers/entra", () => ({
-      getEntraOIDCConfig: vi.fn().mockResolvedValue({
-        config: {
-          serverMetadata: () => ({
-            end_session_endpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/logout"
-          })
-        }
-      })
-    }));
 
     const req = createMockRequest("http://localhost:3000", rawToken, true);
     const response = await POST(req);

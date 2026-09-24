@@ -54,6 +54,7 @@ export async function migrateLegacyUser(user: User, context: LegacyMigrationCont
         await tx.identityAccount.create({
           data: {
             organizationId: context.organizationId,
+            tenantId: context.tenantId,
             subjectId: subjectId,
             providerConnectionId: context.providerConnectionId,
             externalObjectId: user.azureId

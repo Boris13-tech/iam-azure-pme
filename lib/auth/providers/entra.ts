@@ -1,27 +1,91 @@
-import * as client from 'openid-client';
-import { ProviderConnection } from '@prisma/client';
+import { randomUUID } from "node:crypto";
+import type { ProviderConnection } from "@prisma/client";
+import type {
+  AuthChallenge,
+  ProviderOperationContext,
+  VerifiedExternalIdentity,
+} from "../../provider-adapters";
+import { getMicrosoftEntraAdapter } from "../../provider-adapters/implementations/microsoft-entra/runtime";
 
-export async function getEntraOIDCConfig(providerConnection: ProviderConnection) {
-  const clientId = process.env.ENTRA_AUTH_CLIENT_ID;
-  const clientSecret = process.env.ENTRA_AUTH_CLIENT_SECRET;
-  
-  if (!clientId || !clientSecret) {
-    throw new Error("Missing ENTRA_AUTH_CLIENT configuration in environment variables");
+type EntraProviderConnection = Pick<
+  ProviderConnection,
+  "id" | "organizationId" | "providerType"
+>;
+
+export async function beginEntraAuthentication(input: {
+  providerConnection: EntraProviderConnection;
+  tenantId: string;
+  returnTo?: string;
+}): Promise<AuthChallenge> {
+  assertEntra(input.providerConnection);
+  return getMicrosoftEntraAdapter().beginAuthentication({
+    context: context(
+      input.providerConnection,
+      input.tenantId,
+      `oidc-login:${randomUUID()}`,
+    ),
+    returnTo: input.returnTo,
+  });
+}
+
+export async function completeEntraAuthentication(input: {
+  providerConnection: EntraProviderConnection;
+  tenantId: string;
+  state: string;
+  nonce: string;
+  codeVerifier: string;
+  currentUrl: string;
+}): Promise<VerifiedExternalIdentity> {
+  assertEntra(input.providerConnection);
+  return getMicrosoftEntraAdapter().completeAuthentication({
+    context: context(
+      input.providerConnection,
+      input.tenantId,
+      `oidc-callback:${input.state}`,
+    ),
+    transactionId: input.state,
+    response: {
+      currentUrl: input.currentUrl,
+      expectedState: input.state,
+      expectedNonce: input.nonce,
+      codeVerifier: input.codeVerifier,
+    },
+  });
+}
+
+export async function getEntraLogoutUrl(input: {
+  providerConnection: EntraProviderConnection;
+  tenantId: string;
+  postLogoutRedirectUri: string;
+}): Promise<string | null> {
+  assertEntra(input.providerConnection);
+  const result = await getMicrosoftEntraAdapter().beginLogout({
+    context: context(
+      input.providerConnection,
+      input.tenantId,
+      `oidc-logout:${randomUUID()}`,
+    ),
+    identity: { externalObjectId: "session-bound" },
+    postLogoutRedirectUri: input.postLogoutRedirectUri,
+  });
+  return result?.redirectUrl ?? null;
+}
+
+function context(
+  provider: EntraProviderConnection,
+  tenantId: string,
+  operationId: string,
+): ProviderOperationContext {
+  return {
+    organizationId: provider.organizationId,
+    tenantId,
+    providerConnectionId: provider.id,
+    operationId,
+  };
+}
+
+function assertEntra(provider: EntraProviderConnection): void {
+  if (provider.providerType !== "MICROSOFT_ENTRA") {
+    throw new Error("Unsupported provider type");
   }
-
-  // Ensure redirect URI points to the callback route
-  const redirectUri = process.env.NEXT_PUBLIC_APP_URL 
-    ? `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback` 
-    : 'http://localhost:3000/auth/callback';
-
-  // OIDC Discovery on tenant-specific endpoint
-  // ProviderConnection.externalScopeId holds the Entra tenant ID (tid)
-  const issuerUrl = new URL(`https://login.microsoftonline.com/${providerConnection.externalScopeId}/v2.0`);
-  const config = await client.discovery(
-    issuerUrl,
-    clientId,
-    clientSecret
-  );
-
-  return { config, redirectUri };
 }
