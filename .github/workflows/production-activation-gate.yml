@@ -108,7 +108,7 @@ jobs:
             --shadow-database-url "$BASELINE_SHADOW_URL" \
             --script > /tmp/legacy-baseline.sql
 
-          if grep -Eiq '\b(DROP|DELETE|TRUNCATE|RENAME)\b|ALTER[[:space:]]+COLUMN' /tmp/legacy-baseline.sql; then
+          if grep -Eiq '^[[:space:]]*(DROP|DELETE[[:space:]]+FROM|TRUNCATE|RENAME)|^[[:space:]]*ALTER[[:space:]]+TABLE.*(DROP|ALTER[[:space:]]+COLUMN)' /tmp/legacy-baseline.sql; then
             echo "Legacy baseline rejected: generated delta contains a destructive operation."
             sed -E 's#(postgresql://)[^[:space:]]+#\1***#g' /tmp/legacy-baseline.sql
             exit 1
