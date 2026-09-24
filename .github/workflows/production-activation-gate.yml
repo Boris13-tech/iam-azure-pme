@@ -1,0 +1,176 @@
+name: Production Activation Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-activation
+  cancel-in-progress: false
+
+jobs:
+  database-activation:
+    runs-on: ubuntu-latest
+    environment: Production
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+      PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+      PRODUCTION_BACKUP_BRANCH_ID: ${{ vars.PRODUCTION_BACKUP_BRANCH_ID }}
+    steps:
+      - name: Checkout immutable baseline
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate activation inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL" || { echo "Missing Production DATABASE_URL"; exit 1; }
+          test -n "$DATABASE_MIGRATION_URL" || { echo "Missing Production DATABASE_MIGRATION_URL"; exit 1; }
+          test -n "$PRODUCTION_BASE_URL" || { echo "Missing PRODUCTION_BASE_URL"; exit 1; }
+          test -n "$PRODUCTION_BACKUP_BRANCH_ID" || { echo "Missing PRODUCTION_BACKUP_BRANCH_ID"; exit 1; }
+          [[ "$DATABASE_URL" == postgresql://app_user:* ]] || { echo "Production runtime URL is not app_user"; exit 1; }
+          [[ "$DATABASE_URL" == *-pooler.* ]] || { echo "Production runtime URL is not pooled"; exit 1; }
+          [[ "$DATABASE_MIGRATION_URL" == postgresql://neondb_owner:* ]] || { echo "Production migration URL is not neondb_owner"; exit 1; }
+          [[ "$DATABASE_MIGRATION_URL" != *-pooler.* ]] || { echo "Production migration URL must be direct"; exit 1; }
+          echo "Production activation inputs PASS"
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Validate and generate Prisma client
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Apply additive migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Bootstrap least-privilege runtime grants
+        shell: bash
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
+          psql -v ON_ERROR_STOP=1 "$PSQL_URL" <<'SQL'
+          ALTER ROLE app_user NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          GRANT CONNECT ON DATABASE neondb TO app_user;
+          GRANT USAGE ON SCHEMA public TO app_user;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
+          GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO app_user;
+          SQL
+
+      - name: Verify migration state
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: npx prisma migrate status
+
+      - name: Verify runtime role and RLS posture
+        run: |
+          cat > verify-production.ts <<'TS'
+          import { PrismaClient } from "@prisma/client";
+
+          const requiredRlsTables = [
+            "Subject",
+            "IdentityAccount",
+            "Resource",
+            "Session",
+            "Entitlement",
+            "Assignment",
+            "AuthorizationShadowObservation",
+            "LocalIdentity",
+            "LocalAuthenticator",
+            "LocalAuthChallenge",
+            "LocalRecoveryCode",
+            "AuthenticationEvidence",
+            "CryptoKeyVersion",
+            "TrustAnchorVersion",
+            "IdentityContinuityState",
+            "OfflineIdentityChallenge",
+            "IdentityAssuranceSnapshot",
+            "IdentityContinuityEvent",
+            "IdentityContinuityConflict",
+            "IdentityPortabilityReceipt",
+            "IdentityRecoveryCeremony",
+            "IdentityRecoveryApproval",
+            "IdentityPortabilityConflict",
+            "CredentialReenrollmentRequirement",
+            "ProviderIdentityCollision",
+          ];
+
+          async function main() {
+            const db = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+            try {
+              const posture = await db.$queryRaw<Array<{
+                current_user: string;
+                rolsuper: boolean;
+                rolbypassrls: boolean;
+                resolver_execute: boolean;
+              }>>`
+                SELECT current_user, r.rolsuper, r.rolbypassrls,
+                  has_function_privilege(current_user, 'public.resolve_session(text)', 'EXECUTE') AS resolver_execute
+                FROM pg_roles r WHERE r.rolname = current_user
+              `;
+              if (posture.length !== 1) throw new Error("Runtime role not resolved");
+              const role = posture[0];
+              if (role.current_user !== "app_user") throw new Error(`Unexpected runtime role: ${role.current_user}`);
+              if (role.rolsuper) throw new Error("Runtime role is SUPERUSER");
+              if (role.rolbypassrls) throw new Error("Runtime role has BYPASSRLS");
+              if (!role.resolver_execute) throw new Error("Runtime role cannot execute resolve_session");
+
+              const rls = await db.$queryRaw<Array<{ relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>>`
+                SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname = ANY(${requiredRlsTables})
+              `;
+              const byName = new Map(rls.map((row) => [row.relname, row]));
+              for (const table of requiredRlsTables) {
+                const row = byName.get(table);
+                if (!row) throw new Error(`Missing required table: ${table}`);
+                if (!row.relrowsecurity || !row.relforcerowsecurity) {
+                  throw new Error(`RLS is not enabled and forced on ${table}`);
+                }
+              }
+
+              console.log("Runtime role PASS: app_user / NOSUPERUSER / NOBYPASSRLS / resolve_session EXECUTE");
+              console.log(`RLS PASS: ${requiredRlsTables.length} tenant-scoped tables enabled and forced`);
+            } finally {
+              await db.$disconnect();
+            }
+          }
+
+          main().catch((error) => {
+            console.error(error instanceof Error ? error.message : error);
+            process.exit(1);
+          });
+          TS
+          npx tsx verify-production.ts
+
+      - name: Verify production smoke surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --location --output /tmp/login.html --write-out '%{http_code}' "$PRODUCTION_BASE_URL/login")"
+          test "$code" = "200" || { echo "Production /login returned HTTP $code"; exit 1; }
+          echo "Production HTTP smoke PASS"
+
+      - name: Activation evidence
+        run: |
+          echo "Production database activation PASS"
+          echo "Commit: $GITHUB_SHA"
+          echo "Rollback branch: $PRODUCTION_BACKUP_BRANCH_ID"
