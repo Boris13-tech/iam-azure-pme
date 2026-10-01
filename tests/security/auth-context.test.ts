@@ -65,12 +65,12 @@ describe("AuthContext Security", () => {
     expect(auth).toBeNull();
   });
 
-  it("requireAuth should throw NEXT_REDIRECT if no cookie", async () => {
+  it("requireAuth should fail with UNAUTHORIZED if no cookie", async () => {
     (cookies as any).mockReturnValue({
       get: () => undefined
     });
 
-    await expect(requireAuth()).rejects.toThrow("NEXT_REDIRECT");
+    await expect(requireAuth()).rejects.toThrow("UNAUTHORIZED");
   });
 
   it("should return valid AuthContext with correct boundaries", async () => {
