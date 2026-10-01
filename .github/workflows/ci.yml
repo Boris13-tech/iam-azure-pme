@@ -126,3 +126,20 @@ jobs:
     needs: test-and-build
     uses: ./.github/workflows/production-activation-gate.yml
     secrets: inherit
+
+  production-identity-preflight:
+    if: "github.event_name == 'push' && github.event.head_commit.message == 'ops(identity): execute production identity preflight'"
+    needs: test-and-build
+    uses: ./.github/workflows/production-activation-gate.yml
+    with:
+      operation: identity-preflight
+    secrets: inherit
+
+  production-identity-apply:
+    if: "github.event_name == 'push' && github.event.head_commit.message == 'ops(identity): execute production identity apply'"
+    needs: test-and-build
+    uses: ./.github/workflows/production-activation-gate.yml
+    with:
+      operation: identity-apply
+      confirmation: APPLY_CANONICAL_IDENTITY_BOOTSTRAP_PRODUCTION
+    secrets: inherit
