@@ -9,6 +9,9 @@ export async function GET(req: Request) {
   try {
     const auth = await requireAuth();
 
+    const allowed = await checkPermission(auth, { action: "read", resource: "settings" });
+    if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
     let policy = await rawPrisma.accessPolicy.findUnique({
       where: { id: "global" }
     });

@@ -44,4 +44,15 @@ describe("Phase 5D.3 - Entitlement Contract Test", () => {
 
     expect(unmappedKeys, `Found requested capabilities not mapped in ENTITLEMENT_CATALOG_V1: ${unmappedKeys.join(", ")}`).toEqual([]);
   });
+
+  it("settings reads are protected by the native settings.read entitlement", () => {
+    const route = fs.readFileSync(
+      path.resolve(__dirname, "../../app/api/settings/route.ts"),
+      "utf8",
+    );
+
+    expect(route).toMatch(
+      /checkPermission\(auth,\s*\{\s*action:\s*["']read["'],\s*resource:\s*["']settings["']\s*\}\)/,
+    );
+  });
 });
