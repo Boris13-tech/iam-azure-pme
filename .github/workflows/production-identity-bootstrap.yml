@@ -15,6 +15,15 @@ on:
         description: Required only for apply
         required: false
         type: string
+  workflow_call:
+    inputs:
+      mode:
+        required: true
+        type: string
+      confirmation:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read

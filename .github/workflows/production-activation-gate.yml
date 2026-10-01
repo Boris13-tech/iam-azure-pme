@@ -2,7 +2,30 @@ name: Production Activation Gate
 
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Activation gate or canonical identity bootstrap operation
+        required: true
+        type: choice
+        default: activation
+        options:
+          - activation
+          - identity-preflight
+          - identity-apply
+      confirmation:
+        description: Required only for identity-apply
+        required: false
+        type: string
   workflow_call:
+    inputs:
+      operation:
+        required: false
+        type: string
+        default: activation
+      confirmation:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -13,6 +36,7 @@ concurrency:
 
 jobs:
   database-activation:
+    if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
     runs-on: ubuntu-latest
     environment: Production
     services:
@@ -285,3 +309,11 @@ jobs:
           echo "Production database activation PASS"
           echo "Commit: $GITHUB_SHA"
           echo "Rollback branch: $PRODUCTION_BACKUP_BRANCH_ID"
+
+  canonical-identity-bootstrap:
+    if: ${{ inputs.operation == 'identity-preflight' || inputs.operation == 'identity-apply' }}
+    uses: ./.github/workflows/production-identity-bootstrap.yml
+    with:
+      mode: ${{ inputs.operation == 'identity-apply' && 'apply' || 'preflight' }}
+      confirmation: ${{ inputs.confirmation }}
+    secrets: inherit
