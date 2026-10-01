@@ -1,0 +1,155 @@
+name: Production Identity Bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only preflight or approved canonical bootstrap apply
+        required: true
+        type: choice
+        default: preflight
+        options:
+          - preflight
+          - apply
+      confirmation:
+        description: Required only for apply
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-identity-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  canonical-identity-bootstrap:
+    runs-on: ubuntu-latest
+    environment: Production
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+    steps:
+      - name: Checkout requested revision
+        uses: actions/checkout@v4
+
+      - name: Validate connection posture and requested mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL" || { echo "Missing Production DATABASE_URL"; exit 1; }
+          test -n "$DATABASE_MIGRATION_URL" || { echo "Missing Production DATABASE_MIGRATION_URL"; exit 1; }
+          [[ "$DATABASE_URL" == postgresql://app_user:* ]] || { echo "Runtime URL is not app_user"; exit 1; }
+          [[ "$DATABASE_URL" == *-pooler.* ]] || { echo "Runtime URL is not pooled"; exit 1; }
+          [[ "$DATABASE_MIGRATION_URL" == postgresql://neondb_owner:* ]] || { echo "Migration URL is not neondb_owner"; exit 1; }
+          [[ "$DATABASE_MIGRATION_URL" != *-pooler.* ]] || { echo "Migration URL must be direct"; exit 1; }
+          if [ "${{ inputs.mode }}" = "apply" ]; then
+            test "${{ inputs.confirmation }}" = "APPLY_CANONICAL_IDENTITY_BOOTSTRAP_PRODUCTION" || {
+              echo "Apply confirmation phrase missing";
+              exit 1;
+            }
+          fi
+          echo "Bootstrap inputs PASS"
+
+      - name: Execute read-only preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
+          psql -v ON_ERROR_STOP=1 "$PSQL_URL" -f scripts/production-identity-bootstrap-preflight.sql | tee /tmp/preflight.txt
+
+          grep -q "app_user" /tmp/preflight.txt || {
+            echo "Runtime role evidence missing from preflight";
+            exit 1;
+          }
+          echo "Production identity preflight completed"
+
+      - name: Enforce collision and isolation gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
+          gate="$(psql "$PSQL_URL" -Atqc "
+            WITH checks AS (
+              SELECT NOT EXISTS (
+                SELECT 1 FROM \"Organization\"
+                WHERE (id='4841428a-80b4-4f07-bb3f-c94612dfd4a2' OR name='Legrand Tech')
+                  AND NOT (id='4841428a-80b4-4f07-bb3f-c94612dfd4a2' AND name='Legrand Tech')
+              ) AS organization_ok,
+              NOT EXISTS (
+                SELECT 1 FROM \"Tenant\"
+                WHERE (id='c68ae9ee-11a8-42f9-bc9c-b19c42ec7914' OR (\"organizationId\"='4841428a-80b4-4f07-bb3f-c94612dfd4a2' AND name='Production'))
+                  AND NOT (id='c68ae9ee-11a8-42f9-bc9c-b19c42ec7914' AND \"organizationId\"='4841428a-80b4-4f07-bb3f-c94612dfd4a2' AND name='Production')
+              ) AS tenant_ok,
+              NOT EXISTS (
+                SELECT 1 FROM \"ProviderConnection\"
+                WHERE (id='fde0704e-0d1c-4c47-b53e-f19a60f1748d' OR (\"organizationId\"='4841428a-80b4-4f07-bb3f-c94612dfd4a2' AND \"providerType\"='MICROSOFT_ENTRA' AND \"externalScopeId\"='b8f6e875-25cd-4d75-90ec-e6dd206057e5'))
+                  AND NOT (id='fde0704e-0d1c-4c47-b53e-f19a60f1748d' AND \"organizationId\"='4841428a-80b4-4f07-bb3f-c94612dfd4a2' AND \"providerType\"='MICROSOFT_ENTRA' AND \"externalScopeId\"='b8f6e875-25cd-4d75-90ec-e6dd206057e5' AND name='Microsoft Entra — Legrand Tech')
+              ) AS provider_ok,
+              NOT EXISTS (
+                SELECT 1 FROM \"Subject\"
+                WHERE id='30a15eda-24d3-40ef-8705-11c2e6e1b929'
+                  AND NOT (\"organizationId\"='4841428a-80b4-4f07-bb3f-c94612dfd4a2' AND \"tenantId\"='c68ae9ee-11a8-42f9-bc9c-b19c42ec7914' AND type='HUMAN' AND name='Legrand Boris Ohandja Edimo' AND \"lifecycleState\"='ACTIVE')
+              ) AS subject_ok,
+              NOT EXISTS (
+                SELECT 1 FROM \"IdentityAccount\"
+                WHERE (id='211fd18b-62cd-4fdf-85b1-731ae3c1cf24' OR \"externalObjectId\"='e6ac473c-0e9a-4d04-bd02-4954b3caa6d2')
+                  AND NOT (id='211fd18b-62cd-4fdf-85b1-731ae3c1cf24' AND \"organizationId\"='4841428a-80b4-4f07-bb3f-c94612dfd4a2' AND \"tenantId\"='c68ae9ee-11a8-42f9-bc9c-b19c42ec7914' AND \"subjectId\"='30a15eda-24d3-40ef-8705-11c2e6e1b929' AND \"providerConnectionId\"='fde0704e-0d1c-4c47-b53e-f19a60f1748d' AND \"externalObjectId\"='e6ac473c-0e9a-4d04-bd02-4954b3caa6d2')
+              ) AS identity_ok,
+              NOT EXISTS (
+                SELECT 1 FROM \"LegacyUserBridge\" bridge
+                JOIN \"User\" u ON u.id=bridge.\"legacyUserId\"
+                WHERE u.email IN ('admin@demo.com','jean.dupont@gmail.com')
+              ) AS demos_ok,
+              EXISTS (
+                SELECT 1 FROM pg_roles
+                WHERE rolname='app_user' AND NOT rolsuper AND NOT rolbypassrls
+              ) AS runtime_ok
+            )
+            SELECT organization_ok AND tenant_ok AND provider_ok AND subject_ok
+                   AND identity_ok AND demos_ok AND runtime_ok
+            FROM checks
+          ")"
+          test "$gate" = "t" || {
+            echo "Production identity preflight gate FAIL";
+            exit 1;
+          }
+          echo "Production identity collision/isolation gate PASS"
+
+      - name: Apply approved canonical bootstrap
+        if: ${{ inputs.mode == 'apply' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
+          psql -v ON_ERROR_STOP=1 "$PSQL_URL" -f scripts/production-identity-bootstrap-apply.sql
+          echo "Canonical identity bootstrap transaction PASS"
+
+      - name: Verify canonical records and legacy exclusions
+        if: ${{ inputs.mode == 'apply' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
+          result="$(psql "$PSQL_URL" -Atqc "
+            SELECT
+              (SELECT count(*) FROM \"Organization\" WHERE id='4841428a-80b4-4f07-bb3f-c94612dfd4a2'),
+              (SELECT count(*) FROM \"Tenant\" WHERE id='c68ae9ee-11a8-42f9-bc9c-b19c42ec7914'),
+              (SELECT count(*) FROM \"ProviderConnection\" WHERE id='fde0704e-0d1c-4c47-b53e-f19a60f1748d'),
+              (SELECT count(*) FROM \"Subject\" WHERE id='30a15eda-24d3-40ef-8705-11c2e6e1b929'),
+              (SELECT count(*) FROM \"IdentityAccount\" WHERE id='211fd18b-62cd-4fdf-85b1-731ae3c1cf24'),
+              (SELECT count(*) FROM \"LegacyUserBridge\" bridge JOIN \"User\" u ON u.id=bridge.\"legacyUserId\" WHERE u.email IN ('admin@demo.com','jean.dupont@gmail.com')),
+              (SELECT count(*) FROM \"Assignment\" WHERE \"subjectId\"='30a15eda-24d3-40ef-8705-11c2e6e1b929')
+          ")"
+          test "$result" = "1|1|1|1|1|0|0" || {
+            echo "Post-bootstrap invariants FAIL: $result";
+            exit 1;
+          }
+          echo "Post-bootstrap invariants PASS: canonical=1/1/1/1/1 demo_bridges=0 assignments=0"
+
+      - name: Evidence summary
+        run: |
+          echo "Mode: ${{ inputs.mode }}"
+          echo "Commit: $GITHUB_SHA"
+          echo "No Vercel deployment performed"
