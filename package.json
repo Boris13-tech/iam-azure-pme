@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "tsc --noEmit && next lint && prisma validate && prisma generate && next build",
+    "build": "tsc --noEmit && next lint && prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
