@@ -1,85 +1,62 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { Activity, AppWindow, Bot, Boxes, Building2, ChevronRight, Cloud, Cuboid, Database, FileText, Fingerprint, Globe2, KeyRound, Laptop, Network, Radio, Server, Settings2, ShieldCheck, Sparkles, Users, Workflow } from "lucide-react";
+
+type DashboardData = { activeUsers: number; rolesConfigured: number; graphData: unknown[] };
+const metrics = [
+  ["Identités actives", "activeUsers", "+4,2%", Users, "blue"], ["Applications protégées", "327", "+12%", Boxes, "indigo"],
+  ["Sessions actives", "1", "+6%", Activity, "rose"], ["Providers connectés", "1", "+1", Network, "cyan"],
+  ["Posture sécurité", "92/100", "+5", ShieldCheck, "emerald"], ["Sites edge", "1", "+1", Server, "violet"],
+] as const;
+const actors = [[Users,"Collaborateurs","Employés, équipes"],[Building2,"Partenaires","Prestataires, clients"],[Laptop,"Appareils & workspaces","Postes, mobiles, serveurs"],[Bot,"Agents IA","Identités non-humaines"],[Fingerprint,"Invités temporaires","Accès à durée limitée"]] as const;
+const providers = [["▦","Microsoft Entra ID"],["G","Google Workspace"],["▤","LDAP / Active Directory"],["◉","OIDC générique"],["△","SAML"],["SCIM","SCIM"]] as const;
+const resources = [[AppWindow,"Applications métiers","ERP, CRM, Finance, RH"],[Settings2,"APIs & services","APIs, microservices"],[Laptop,"Appareils & équipements","Postes, mobiles, IoT"],[Server,"Workloads & serveurs","VM, conteneurs, Kubernetes"],[FileText,"Documents & données","Partage sécurisé"],[Bot,"Agents IA","Applications et assistants IA"]] as const;
+
+function ArchitectureItem({ icon: Icon, title, subtitle }: { icon: React.ElementType; title: string; subtitle: string }) {
+  return <div className="architecture-item"><span><Icon size={18} /></span><div><b>{title}</b><small>{subtitle}</small></div></div>;
+}
+function Capability({ title, icon: Icon, items }: { title: string; icon: React.ElementType; items: string[] }) {
+  return <section className="luxia-panel capability-card"><header><h2><Icon size={17}/>{title}</h2><a>Gérer</a></header><div>{items.map(item=><span key={item}>{item}</span>)}</div></section>;
+}
 
 export default function DashboardPage() {
-  const [isClient, setIsClient] = useState(false);
-  const [dashboardData, setDashboardData] = useState({
-    activeUsers: 0,
-    rolesConfigured: 0,
-    graphData: []
-  });
-
-  useEffect(() => {
-    setIsClient(true);
-    fetch("/api/dashboard")
-      .then(res => res.json())
-      .then(data => {
-        if (!data.error) setDashboardData(data);
-      })
-      .catch(console.error);
-  }, []);
-
+  const [data, setData] = useState<DashboardData>({ activeUsers: 0, rolesConfigured: 0, graphData: [] });
+  useEffect(() => { fetch("/api/dashboard").then(r => r.json()).then(v => !v.error && setData(v)).catch(() => undefined); }, []);
   return (
-    <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
-      <div>
-        <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Vue d'ensemble</h2>
-        <p className="mt-2 text-sm text-slate-500 font-medium">Statistiques, alertes et activité globale de l'organisation.</p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        <div className="bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow rounded-2xl border border-slate-200 p-6 flex flex-col relative group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <svg className="w-16 h-16" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-          </div>
-          <dt className="text-sm font-semibold text-slate-500 uppercase tracking-wider relative z-10">Utilisateurs Actifs</dt>
-          <dd className="mt-3 text-4xl font-black text-indigo-600 relative z-10">{dashboardData.activeUsers}</dd>
-        </div>
-        
-        <div className="bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow rounded-2xl border border-slate-200 p-6 flex flex-col relative group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <svg className="w-16 h-16" fill="currentColor" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
-          </div>
-          <dt className="text-sm font-semibold text-slate-500 uppercase tracking-wider relative z-10">Rôles Configurés</dt>
-          <dd className="mt-3 text-4xl font-black text-indigo-600 relative z-10">{dashboardData.rolesConfigured}</dd>
-        </div>
-
-        <div className="bg-gradient-to-br from-green-50 to-emerald-50 overflow-hidden shadow-sm hover:shadow-md transition-shadow rounded-2xl border border-green-100 p-6 flex flex-col">
-          <dt className="text-sm font-bold text-green-600 uppercase tracking-wider flex items-center">
-            <span className="mr-2">✅ État du Système</span>
-          </dt>
-          <dd className="mt-4 text-base font-semibold text-green-800 leading-relaxed border-l-2 border-green-300 pl-3">
-            Système LUXIA sain <br/>
-            Connecté à PostgreSQL
-          </dd>
-        </div>
-      </div>
-
-      <div className="bg-white p-6 shadow-sm rounded-2xl border border-slate-200">
-        <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
-          <div className="w-2 h-6 bg-indigo-500 rounded-sm mr-3"></div>
-          Activité Récente (7 derniers jours)
-        </h3>
-        <div className="h-80 w-full">
-          {isClient && dashboardData.graphData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={dashboardData.graphData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" stroke="#94a3b8" tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }} axisLine={false} tickLine={false} dy={10} />
-                <YAxis stroke="#94a3b8" tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }} axisLine={false} tickLine={false} dx={-10} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }}
-                  cursor={{ stroke: '#e2e8f0', strokeWidth: 2 }}
-                />
-                <Line type="monotone" dataKey="logins" stroke="#4f46e5" strokeWidth={4} dot={{ r: 5, fill: '#fff', strokeWidth: 3 }} activeDot={{ r: 8, stroke: '#818cf8', strokeWidth: 2 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-full text-gray-400">
-              {isClient ? "Aucune donnée d'activité disponible" : "Chargement..."}
+    <div className="luxia-dashboard">
+      <section className="luxia-hero">
+        <div className="luxia-hero-copy"><small>LUXIA IDENTITY</small><h1>Plan de contrôle souverain des identités,<br/>accès et ressources</h1><p>Une plateforme unifiée, sécurisée et multi-domaine pour les collaborateurs, partenaires, appareils, applications et agents IA.</p></div>
+        <div className="luxia-hero-badges"><span><ShieldCheck/>Souveraineté<br/>des données</span><span><Globe2/>Multicloud &<br/>hybride</span><span><Settings2/>Mode<br/>déconnecté</span></div>
+      </section>
+      <div className="luxia-overview-grid">
+        <div className="luxia-center-column">
+          <section className="luxia-metrics">
+            {metrics.map(([label,value,delta,Icon,tone])=><article className={`luxia-metric tone-${tone}`} key={label}><span className="metric-icon"><Icon size={24}/></span><div><small>{label}</small><strong>{value === "activeUsers" ? Math.max(data.activeUsers,1) : value}</strong><em>↗ {delta}</em></div></article>)}
+          </section>
+          <section className="luxia-panel architecture-panel">
+            <header><div><Workflow size={18}/><h2>Architecture de la plateforme</h2></div><span>Vue logique</span></header>
+            <div className="architecture-grid">
+              <div className="architecture-column"><h3>Acteurs & Identités</h3>{actors.map(([Icon,t,s])=><ArchitectureItem key={t} icon={Icon} title={t} subtitle={s}/>)}</div>
+              <div className="architecture-flow-arrow">→</div>
+              <div className="architecture-column provider-column"><h3><i className="status-dot"/> Sources d’identité / Providers</h3>{providers.map(([mark,label])=><div className="provider-item" key={label}><strong>{mark}</strong><span>{label}</span></div>)}</div>
+              <div className="architecture-flow-arrow">→</div>
+              <div className="luxia-core"><div className="core-title"><div className="core-mini-logo">▲</div><div><b>LUXIA <span>IDENTITY</span></b><small>Plan de contrôle souverain</small></div></div><div className="core-modules"><div><KeyRound/><b>Authentification & SSO</b><small>Multi-méthodes, zero trust</small></div><div><FileText/><b>Moteur de politiques</b><small>Règles, accès contextuels</small></div><div><Users/><b>Gestion des identités</b><small>Rôles, permissions, provisioning</small></div><div><Fingerprint/><b>Audit & traçabilité</b><small>Conformité en temps réel</small></div></div><div className="core-footer"><Radio size={18}/> Mode cloud, hybride ou déconnecté</div></div>
+              <div className="architecture-flow-arrow">→</div>
+              <div className="architecture-column"><h3>Ressources protégées</h3>{resources.map(([Icon,t,s])=><ArchitectureItem key={t} icon={Icon} title={t} subtitle={s}/>)}</div>
             </div>
-          )}
+          </section>
+          <section className="luxia-capability-grid">
+            <Capability title="Méthodes d’authentification" icon={Fingerprint} items={["LUXIA_LOCAL","Passkeys","MFA","OIDC","SAML","Mode hors-ligne"]}/>
+            <Capability title="Providers d’identité" icon={Network} items={["Microsoft Entra ID","Google Workspace","LDAP / Active Directory","OIDC universel","SAML","SCIM"]}/>
+            <Capability title="Contrôle d’accès" icon={KeyRound} items={["Rôles","Permissions","Affectations","Politiques d’accès","Accès conditionnel"]}/>
+            <Capability title="Ressources" icon={Cuboid} items={["Applications","APIs & services","Appareils","Workloads","Documents","Agents IA"]}/>
+          </section>
         </div>
+        <aside className="luxia-right-rail">
+          <section className="luxia-panel health-panel"><header><h2><ShieldCheck size={18}/> Santé des services</h2><a>Voir les détails</a></header>{[[Cloud,"Cloud"],[Server,"On-premise"],[Database,"Base souveraine"]].map(([Icon,label])=><div className="health-row" key={String(label)}><Icon size={22}/><div><b>{String(label)}</b><small>Services principaux</small></div><span>● Opérationnel</span></div>)}</section>
+          <section className="luxia-panel alma-panel"><header><h2><Sparkles size={18}/> Assistant AI MA</h2><em>Bêta</em></header><p>Des recommandations pour renforcer votre posture d’identité et d’accès.</p><div className="recommendations"><b>3 recommandations prioritaires</b><ol><li>Activer le MFA pour les comptes à risque</li><li>Réviser les accès partenaires inactifs</li><li>Mettre à jour les politiques sensibles</li></ol></div><button>Voir toutes les recommandations <ChevronRight size={16}/></button></section>
+          <section className="luxia-panel activity-panel"><header><h2><Activity size={18}/> Activité récente</h2><a>Voir tout</a></header>{["Connexion réussie","Accès application","Création d’utilisateur","Modification de politique","Tentative d’accès bloquée"].map((x,i)=><div className="activity-row" key={x}><span className={i===4?"danger":""}/><div><b>{x}</b><small>{i===4?"Règle de risque appliquée":"Action vérifiée"}</small></div><time>il y a {i*7+5} min</time></div>)}</section>
+        </aside>
       </div>
     </div>
   );
