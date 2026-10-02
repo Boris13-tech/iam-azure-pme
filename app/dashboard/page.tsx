@@ -2,11 +2,11 @@
 import React, { useEffect, useState } from "react";
 import { Activity, AppWindow, Bot, Boxes, Building2, ChevronRight, Cloud, Cuboid, Database, FileText, Fingerprint, Globe2, KeyRound, Laptop, Network, Radio, Server, Settings2, ShieldCheck, Sparkles, Users, Workflow } from "lucide-react";
 
-type DashboardData = { activeUsers: number; rolesConfigured: number; graphData: unknown[] };
+type DashboardData = { activeUsers: number; activeSessions: number; protectedResources: number; providerScopes: number; rolesConfigured: number; graphData: unknown[] };
 const metrics = [
-  ["Identités actives", "activeUsers", "+4,2%", Users, "blue"], ["Applications protégées", "327", "+12%", Boxes, "indigo"],
-  ["Sessions actives", "1", "+6%", Activity, "rose"], ["Providers connectés", "1", "+1", Network, "cyan"],
-  ["Posture sécurité", "92/100", "+5", ShieldCheck, "emerald"], ["Sites edge", "1", "+1", Server, "violet"],
+  ["Identités actives", "activeUsers", Users, "blue"], ["Ressources protégées", "protectedResources", Boxes, "indigo"],
+  ["Sessions actives", "activeSessions", Activity, "rose"], ["Providers connectés", "providerScopes", Network, "cyan"],
+  ["Rôles canoniques", "rolesConfigured", ShieldCheck, "emerald"],
 ] as const;
 const actors = [[Users,"Collaborateurs","Employés, équipes"],[Building2,"Partenaires","Prestataires, clients"],[Laptop,"Appareils & workspaces","Postes, mobiles, serveurs"],[Bot,"Agents IA","Identités non-humaines"],[Fingerprint,"Invités temporaires","Accès à durée limitée"]] as const;
 const providers = [["▦","Microsoft Entra ID"],["G","Google Workspace"],["▤","LDAP / Active Directory"],["◉","OIDC générique"],["△","SAML"],["SCIM","SCIM"]] as const;
@@ -20,7 +20,7 @@ function Capability({ title, icon: Icon, items }: { title: string; icon: React.E
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData>({ activeUsers: 0, rolesConfigured: 0, graphData: [] });
+  const [data, setData] = useState<DashboardData>({ activeUsers: 0, activeSessions: 0, protectedResources: 0, providerScopes: 0, rolesConfigured: 0, graphData: [] });
   useEffect(() => { fetch("/api/dashboard").then(r => r.json()).then(v => !v.error && setData(v)).catch(() => undefined); }, []);
   return (
     <div className="luxia-dashboard">
@@ -31,7 +31,7 @@ export default function DashboardPage() {
       <div className="luxia-overview-grid">
         <div className="luxia-center-column">
           <section className="luxia-metrics">
-            {metrics.map(([label,value,delta,Icon,tone])=><article className={`luxia-metric tone-${tone}`} key={label}><span className="metric-icon"><Icon size={24}/></span><div><small>{label}</small><strong>{value === "activeUsers" ? Math.max(data.activeUsers,1) : value}</strong><em>↗ {delta}</em></div></article>)}
+            {metrics.map(([label,value,Icon,tone])=><article className={`luxia-metric tone-${tone}`} key={label}><span className="metric-icon"><Icon size={24}/></span><div><small>{label}</small><strong>{data[value]}</strong></div></article>)}
           </section>
           <section className="luxia-panel architecture-panel">
             <header><div><Workflow size={18}/><h2>Architecture de la plateforme</h2></div><span>Vue logique</span></header>
