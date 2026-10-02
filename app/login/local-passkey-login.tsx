@@ -17,7 +17,10 @@ export function LocalPasskeyLogin({ providerConnectionId, tenantId }: { provider
         return;
       }
       const begin = await fetch("/api/auth/local/begin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ principalName, providerConnectionId, tenantId }) });
-      if (!begin.ok) throw new Error();
+      if (!begin.ok) {
+        const failure = await begin.json().catch(() => ({ error: "AUTH_BEGIN_FAILED" }));
+        throw new Error(`SERVER_BEGIN:${failure.error ?? "AUTH_BEGIN_FAILED"}`);
+      }
       const challenge = await begin.json();
       const credential = await navigator.credentials.get({ publicKey: {
         challenge: decode(challenge.challenge), rpId: challenge.rpId,
@@ -31,12 +34,15 @@ export function LocalPasskeyLogin({ providerConnectionId, tenantId }: { provider
         externalObjectId: challenge.externalObjectId, credentialId: encode(credential.rawId), clientDataJSON: encode(assertion.clientDataJSON),
         authenticatorData: encode(assertion.authenticatorData), signature: encode(assertion.signature),
       }) });
-      if (!complete.ok) throw new Error();
+      if (!complete.ok) {
+        const failure = await complete.json().catch(() => ({ error: "AUTH_COMPLETE_FAILED" }));
+        throw new Error(`SERVER_COMPLETE:${failure.error ?? "AUTH_COMPLETE_FAILED"}`);
+      }
       window.location.assign("/dashboard");
     } catch (error) {
       setStatus(error instanceof DOMException && error.name === "NotAllowedError"
         ? "La vérification biométrique a été annulée ou a expiré."
-        : "Connexion locale refusée. Vérifiez d’abord que la passkey a bien été enrôlée.");
+        : `Connexion locale refusée. Code sûr : ${error instanceof Error ? `${error.name}:${error.message}` : "UNKNOWN"}`);
     }
   }
   return <div className="space-y-3 border-t border-slate-700 pt-5">
