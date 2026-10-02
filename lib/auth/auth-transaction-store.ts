@@ -1,5 +1,5 @@
 import { rawPrisma } from "../db/raw-prisma";
-import crypto from "crypto";
+import * as crypto from "crypto";
 
 export type AuthTransactionData = {
   stateHash: string;

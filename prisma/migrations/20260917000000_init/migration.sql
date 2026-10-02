@@ -1,4 +1,4 @@
-﻿-- CreateEnum
+-- CreateEnum
 CREATE TYPE "SubjectType" AS ENUM ('HUMAN', 'WORKLOAD', 'SERVICE', 'DEVICE', 'AI_AGENT');
 
 -- CreateEnum

@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 import { rawPrisma } from "@/lib/db/raw-prisma";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { hasLegacyPermission, resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
-import { updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
+import { checkPermission } from "@/lib/auth/authorization-gateway";
+import { resolveLegacyUser } from "@/lib/auth/legacy-auth-adapter";
+import { dualWriteUpdateUserRole } from "@/lib/auth/dual-write-service";
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+import { hasMicrosoftGraphConfiguration, updateAzureUserStatus, updateAzureUser } from "@/lib/graph";
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "update", "users");
+    const allowed = await checkPermission(auth, { action: "update", resource: "users" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const legacyUser = await resolveLegacyUser(auth);
@@ -18,7 +22,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     const bridge = await rawPrisma.legacyUserBridge.findFirst({
       where: {
-        legacyUserId: params.id,
+        legacyUserId: id,
         organizationId: auth.organizationId,
         status: "VALIDATED"
       }
@@ -26,47 +30,38 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     if (!bridge) return NextResponse.json({ error: "Not found or not in this organization" }, { status: 404 });
 
-    if (params.id === legacyUser.id && body.status === "SUSPENDED") {
+    if (id === legacyUser.id && body.status === "SUSPENDED") {
       return NextResponse.json({ error: "Cannot suspend yourself" }, { status: 400 });
     }
 
     const updatedUser = await rawPrisma.user.update({
-      where: { id: params.id },
+      where: { id: id },
       data: {
         status: body.status,
         name: body.name,
       }
     });
 
-    const hasGraphConfig = 
-      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
-      process.env.GRAPH_CLIENT_SECRET && 
-      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+    const hasGraphConfig = hasMicrosoftGraphConfiguration();
 
     if (updatedUser.azureId && hasGraphConfig) {
       if (body.status !== undefined) {
-        await updateAzureUserStatus(updatedUser.azureId, body.status === "ACTIVE");
+        await updateAzureUserStatus(auth, updatedUser.azureId, body.status === "ACTIVE");
       }
       if (body.name !== undefined) {
-        await updateAzureUser(updatedUser.azureId, body.name);
+        await updateAzureUser(auth, updatedUser.azureId, body.name);
       }
     }
 
     if (body.roleId) {
-      await rawPrisma.userRole.deleteMany({
-        where: { userId: params.id }
-      });
-      
-      await rawPrisma.userRole.create({
-        data: { userId: params.id, roleId: body.roleId },
-      });
+      await dualWriteUpdateUserRole(auth, id, body.roleId);
     }
 
     await rawPrisma.auditLog.create({
       data: {
         actorId: legacyUser.id,
         action: "UPDATE_USER",
-        target: params.id,
+        target: id,
         ip: req.headers.get("x-forwarded-for") || "unknown",
         result: "SUCCESS"
       }
@@ -81,23 +76,24 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
     const auth = await requireAuth();
 
-    const allowed = await hasLegacyPermission(auth, "delete", "users");
+    const allowed = await checkPermission(auth, { action: "delete", resource: "users" });
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const legacyUser = await resolveLegacyUser(auth);
     if (!legacyUser) return NextResponse.json({ error: "Forbidden - No legacy mapping" }, { status: 403 });
 
-    if (params.id === legacyUser.id) {
+    if (id === legacyUser.id) {
       return NextResponse.json({ error: "Cannot delete yourself" }, { status: 400 });
     }
 
     const bridge = await rawPrisma.legacyUserBridge.findFirst({
       where: {
-        legacyUserId: params.id,
+        legacyUserId: id,
         organizationId: auth.organizationId,
         status: "VALIDATED"
       }
@@ -106,24 +102,21 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     if (!bridge) return NextResponse.json({ error: "Not found or not in this organization" }, { status: 404 });
 
     const deletedUser = await rawPrisma.user.update({
-      where: { id: params.id },
+      where: { id: id },
       data: { status: "INACTIVE" }
     });
 
-    const hasGraphConfig = 
-      (process.env.GRAPH_CLIENT_ID || process.env.NEXT_PUBLIC_GRAPH_CLIENT_ID) && 
-      process.env.GRAPH_CLIENT_SECRET && 
-      process.env.GRAPH_CLIENT_SECRET !== "dummy_secret_to_prevent_build_crash";
+    const hasGraphConfig = hasMicrosoftGraphConfiguration();
 
     if (deletedUser.azureId && hasGraphConfig) {
-      await updateAzureUserStatus(deletedUser.azureId, false);
+      await updateAzureUserStatus(auth, deletedUser.azureId, false);
     }
 
     await rawPrisma.auditLog.create({
       data: {
         actorId: legacyUser.id,
         action: "SOFT_DELETE_USER",
-        target: params.id,
+        target: id,
         ip: req.headers.get("x-forwarded-for") || "unknown",
         result: "SUCCESS"
       }

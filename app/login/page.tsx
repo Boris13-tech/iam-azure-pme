@@ -2,12 +2,14 @@ import React from 'react';
 import { ShieldCheck, Lock, AlertCircle } from 'lucide-react';
 import { rawPrisma } from '@/lib/db/raw-prisma';
 import Link from 'next/link';
+import { safeOperationalRead } from '@/lib/operations/identity-operational-readiness';
 
 export const dynamic = 'force-dynamic';
 
-export default async function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const sp = await searchParams;
   // For the mono-tenant prototype, fetch the first available Entra ID connection
-  const provider = await rawPrisma.providerConnection.findFirst({
+  const discovery = await safeOperationalRead(() => rawPrisma.providerConnection.findFirst({
     where: { providerType: 'MICROSOFT_ENTRA' },
     include: {
       organization: {
@@ -18,11 +20,12 @@ export default async function LoginPage({ searchParams }: { searchParams: { erro
         }
       }
     }
-  });
+  }), () => console.error('LOGIN_PROVIDER_DISCOVERY_UNAVAILABLE'));
+  const provider = discovery.state === 'AVAILABLE' ? discovery.value : null;
 
   const defaultTenantId = provider?.organization?.tenants?.[0]?.id;
 
-  const errorMsg = searchParams?.error || "";
+  const errorMsg = sp?.error || "";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4 relative overflow-hidden">
@@ -49,7 +52,11 @@ export default async function LoginPage({ searchParams }: { searchParams: { erro
 
         <div className="space-y-6">
           <div className="space-y-4">
-            {provider && defaultTenantId ? (
+            {discovery.state === 'UNAVAILABLE' ? (
+              <div className="p-4 bg-red-500/20 border border-red-500/50 rounded-xl text-red-200 text-sm text-center">
+                Service d’identité temporairement indisponible. Aucun accès n’a été accordé.
+              </div>
+            ) : provider && defaultTenantId ? (
               <Link 
                 href={`/auth/login?tenant=${defaultTenantId}&connection=${provider.id}`}
                 className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-300 shadow-lg shadow-blue-600/20 hover:shadow-blue-500/40 group"

@@ -1,3 +1,4 @@
+import { adminPrisma } from "./helpers/admin-prisma";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -16,11 +17,9 @@ async function main() {
   // 3. Create ProviderConnection B
   const providerB = await prisma.providerConnection.create({
     data: {
-      name: "Entra B",
+      name: "Entra B", providerType: "MICROSOFT_ENTRA", externalScopeId: "scope_b",
       organizationId: orgB.id,
-      providerType: "MICROSOFT_ENTRA",
-      externalScopeId: "tenant-b-id"
-    }
+      }
   });
 
   console.log("Setup complete. Testing composite boundaries...");
@@ -60,7 +59,8 @@ async function main() {
     await prisma.identityAccount.create({
       data: {
         organizationId: orgA.id,
-        subjectId: subjectA.id,
+          tenantId: tenantA.id,
+          subjectId: subjectA.id,
         providerConnectionId: providerB.id, // Provider B is in Org B
         externalObjectId: "oid-123"
       }

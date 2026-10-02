@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "mode": "PREPARATION_ONLY",
+  "target": "production",
+  "sourceCommit": "21ee6323719c828817fa6785194f72dd8a29da7c",
+  "writeAuthorized": false,
+  "entra": {
+    "directoryTenantId": "b8f6e875-25cd-4d75-90ec-e6dd206057e5",
+    "clientId": "811ded0e-7a03-4c10-9bfc-9f24efdb972b",
+    "clientSecret": "[MASKED: VERCEL_PRODUCTION/ENTRA_AUTH_CLIENT_SECRET]",
+    "oid": "e6ac473c-0e9a-4d04-bd02-4954b3caa6d2",
+    "upn": "Contact_legrand-tech.com#EXT#@Contactlegrandtech.onmicrosoft.com"
+  },
+  "records": {
+    "organization": {
+      "id": "4841428a-80b4-4f07-bb3f-c94612dfd4a2",
+      "name": "Legrand Tech"
+    },
+    "tenant": {
+      "id": "c68ae9ee-11a8-42f9-bc9c-b19c42ec7914",
+      "organizationId": "4841428a-80b4-4f07-bb3f-c94612dfd4a2",
+      "name": "Production"
+    },
+    "providerConnection": {
+      "id": "fde0704e-0d1c-4c47-b53e-f19a60f1748d",
+      "organizationId": "4841428a-80b4-4f07-bb3f-c94612dfd4a2",
+      "providerType": "MICROSOFT_ENTRA",
+      "externalScopeId": "b8f6e875-25cd-4d75-90ec-e6dd206057e5",
+      "name": "Microsoft Entra — Legrand Tech"
+    },
+    "subject": {
+      "id": "30a15eda-24d3-40ef-8705-11c2e6e1b929",
+      "organizationId": "4841428a-80b4-4f07-bb3f-c94612dfd4a2",
+      "tenantId": "c68ae9ee-11a8-42f9-bc9c-b19c42ec7914",
+      "type": "HUMAN",
+      "name": "Legrand Boris Ohandja Edimo",
+      "lifecycleState": "ACTIVE",
+      "lifecycleVersion": 1
+    },
+    "identityAccount": {
+      "id": "211fd18b-62cd-4fdf-85b1-731ae3c1cf24",
+      "organizationId": "4841428a-80b4-4f07-bb3f-c94612dfd4a2",
+      "tenantId": "c68ae9ee-11a8-42f9-bc9c-b19c42ec7914",
+      "subjectId": "30a15eda-24d3-40ef-8705-11c2e6e1b929",
+      "providerConnectionId": "fde0704e-0d1c-4c47-b53e-f19a60f1748d",
+      "externalObjectId": "e6ac473c-0e9a-4d04-bd02-4954b3caa6d2"
+    }
+  },
+  "excluded": {
+    "legacyUsers": [
+      "admin@demo.com",
+      "jean.dupont@gmail.com"
+    ],
+    "legacyUserBridgeCount": 0,
+    "assignmentCount": 0,
+    "legacyRoleTransfer": false
+  }
+}

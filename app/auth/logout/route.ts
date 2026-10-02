@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SessionStore } from "../../../lib/auth/session-store";
-import { getEntraOIDCConfig } from "../../../lib/auth/providers/entra";
+import { getEntraLogoutUrl } from "../../../lib/auth/providers/entra";
 
 export const runtime = "nodejs";
 
@@ -45,16 +45,16 @@ export async function POST(req: NextRequest) {
     const providerConnection = session.identityAccount?.providerConnection;
     if (providerConnection && providerConnection.providerType === "MICROSOFT_ENTRA") {
       try {
-        const { config } = await getEntraOIDCConfig(providerConnection);
-        const endSessionEndpoint = config.serverMetadata().end_session_endpoint;
+        const redirectUrl = await getEntraLogoutUrl({
+          providerConnection,
+          tenantId: session.tenantId,
+          postLogoutRedirectUri: `${expectedOrigin}/login`,
+        });
 
-        if (endSessionEndpoint) {
-          const postLogoutUri = `${expectedOrigin}/login`;
-          const redirectUrl = new URL(endSessionEndpoint);
-          redirectUrl.searchParams.set("post_logout_redirect_uri", postLogoutUri);
+        if (redirectUrl) {
 
           // We create a new redirect response pointing to Entra, but keeping our cookie deletion
-          const federatedResponse = NextResponse.redirect(redirectUrl, 303);
+          const federatedResponse = NextResponse.redirect(new URL(redirectUrl), 303);
           federatedResponse.cookies.set("luxia_session", "", {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",

@@ -14,7 +14,8 @@ export type AuthContext = {
  * Returns null if not authenticated or session is invalid.
  */
 export async function getAuthContext(): Promise<AuthContext | null> {
-  const sessionCookie = cookies().get("luxia_session");
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get("luxia_session");
   
   if (!sessionCookie || !sessionCookie.value) {
     return null;

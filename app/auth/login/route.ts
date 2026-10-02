@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import * as client from "openid-client";
-import { getEntraOIDCConfig } from "../../../lib/auth/providers/entra";
+import { beginEntraAuthentication } from "../../../lib/auth/providers/entra";
 import { AuthTransactionStore } from "../../../lib/auth/auth-transaction-store";
 import { rawPrisma } from "../../../lib/db/raw-prisma";
 
@@ -38,21 +37,24 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unsupported provider type" }, { status: 400 });
     }
 
-    // 2. Get Entra Configuration specific to this tenant
-    const { config, redirectUri } = await getEntraOIDCConfig(provider);
-
-    // 3. Generate PKCE values, state, and nonce
-    const code_verifier = client.randomPKCECodeVerifier();
-    const code_challenge = await client.calculatePKCECodeChallenge(code_verifier);
-    
-    const state = client.randomState();
-    const nonce = client.randomNonce();
+    // 2. Build the provider request behind the adapter boundary.
+    const challenge = await beginEntraAuthentication({
+      providerConnection: provider,
+      tenantId: tenant.id,
+      returnTo,
+    });
+    const state = challenge.transactionId;
+    const nonce = challenge.continuation?.nonce;
+    const codeVerifier = challenge.continuation?.codeVerifier;
+    if (!challenge.redirectUrl || !nonce || !codeVerifier) {
+      throw new Error("Invalid Microsoft Entra authentication challenge");
+    }
 
     // 4. Persist the auth transaction securely
     await AuthTransactionStore.createTransaction({
       stateHash: state,
       nonce,
-      codeVerifier: code_verifier,
+      codeVerifier,
       expectedOrganizationId: provider.organizationId,
       expectedTenantId: tenant.id,
       expectedProviderConnectionId: provider.id,
@@ -60,18 +62,8 @@ export async function GET(request: Request) {
       expiresInMinutes: 10
     });
 
-    // 5. Build the Authorization Request URL
-    const authorizationUrl = client.buildAuthorizationUrl(config, {
-      redirect_uri: redirectUri,
-      scope: "openid profile email", // Explicitly avoiding User.Read for now
-      code_challenge,
-      code_challenge_method: "S256",
-      state,
-      nonce,
-    });
-
-    // 6. Redirect the user to Microsoft Entra
-    return NextResponse.redirect(authorizationUrl.href);
+    // 5. Redirect to the URL validated and produced by the adapter.
+    return NextResponse.redirect(challenge.redirectUrl);
 
   } catch (error) {
     console.error("Login Error:", error);

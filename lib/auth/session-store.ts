@@ -1,5 +1,6 @@
 import { rawPrisma } from "../db/raw-prisma";
-import crypto from "crypto";
+import { withTenantDb } from "../db/scoped-client";
+import * as crypto from "crypto";
 
 export type SessionContext = {
   organizationId: string;
@@ -7,6 +8,13 @@ export type SessionContext = {
   subjectId: string;
   identityAccountId: string;
 };
+
+export class SessionCreationDeniedError extends Error {
+  constructor(public readonly reason: "IDENTITY_ACCOUNT_DISABLED" | "SUBJECT_NOT_ACTIVE") {
+    super(reason);
+    this.name = "SessionCreationDeniedError";
+  }
+}
 
 export class SessionStore {
   /**
@@ -20,19 +28,34 @@ export class SessionStore {
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24);
 
-    const session = await rawPrisma.session.create({
-      data: {
-        id: hashedToken,
-        organizationId: ctx.organizationId,
-        tenantId: ctx.tenantId,
-        subjectId: ctx.subjectId,
-        identityAccountId: ctx.identityAccountId,
-        expiresAt,
-        ipHash: ip ? crypto.createHash('sha256').update(ip).digest('hex') : null,
-        userAgentHash: userAgent ? crypto.createHash('sha256').update(userAgent).digest('hex') : null,
-        lastSeenAt: new Date()
+    const session = await withTenantDb(
+      { organizationId: ctx.organizationId, tenantId: ctx.tenantId },
+      async (tx) => {
+        const account = await tx.identityAccount.findFirst({
+          where: { id: ctx.identityAccountId, subjectId: ctx.subjectId },
+          include: { subject: { select: { lifecycleState: true } } },
+        });
+        if (!account || account.status !== "ACTIVE") {
+          throw new SessionCreationDeniedError("IDENTITY_ACCOUNT_DISABLED");
+        }
+        if (account.subject.lifecycleState !== "ACTIVE") {
+          throw new SessionCreationDeniedError("SUBJECT_NOT_ACTIVE");
+        }
+        return tx.session.create({
+        data: {
+          id: hashedToken,
+          organizationId: ctx.organizationId,
+          tenantId: ctx.tenantId,
+          subjectId: ctx.subjectId,
+          identityAccountId: ctx.identityAccountId,
+          expiresAt,
+          ipHash: ip ? crypto.createHash('sha256').update(ip).digest('hex') : null,
+          userAgentHash: userAgent ? crypto.createHash('sha256').update(userAgent).digest('hex') : null,
+          lastSeenAt: new Date()
+        }
+        });
       }
-    });
+    );
 
     return { session, rawToken };
   }
@@ -42,11 +65,21 @@ export class SessionStore {
    */
   static async getSession(rawToken: string) {
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-    const session = await rawPrisma.session.findUnique({
-      where: { id: hashedToken }
-    });
+    
+    // Resolve session securely bypassing RLS via DB primitive
+    const sessions = await rawPrisma.$queryRaw<Array<{
+      id: string;
+      organizationId: string;
+      tenantId: string;
+      subjectId: string;
+      identityAccountId: string;
+      expiresAt: Date;
+      revokedAt: Date | null;
+      lastSeenAt: Date | null;
+    }>>`SELECT * FROM resolve_session(${hashedToken})`;
 
-    if (!session) return null;
+    if (!sessions || sessions.length === 0) return null;
+    const session = sessions[0];
     
     if (session.revokedAt || session.expiresAt < new Date()) {
       return null;
@@ -55,10 +88,14 @@ export class SessionStore {
     // Refresh lastSeenAt only if older than 5 minutes
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     if (!session.lastSeenAt || session.lastSeenAt < fiveMinutesAgo) {
-      await rawPrisma.session.update({
-        where: { id: hashedToken },
-        data: { lastSeenAt: new Date() }
-      });
+      // Re-enter Tenant DB with correct scope to update
+      await withTenantDb(
+        { organizationId: session.organizationId, tenantId: session.tenantId },
+        async (tx) => tx.session.update({
+          where: { id: hashedToken },
+          data: { lastSeenAt: new Date() }
+        })
+      );
     }
 
     return session;
@@ -71,35 +108,55 @@ export class SessionStore {
   static async revokeByToken(rawToken: string) {
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     
-    // We fetch it first to return it (useful for federated logout)
-    const session = await rawPrisma.session.findUnique({
-      where: { id: hashedToken },
-      include: {
-        identityAccount: {
-          include: {
-            providerConnection: true
+    // Resolve first using primitive
+    const sessions = await rawPrisma.$queryRaw<Array<{
+      id: string;
+      organizationId: string;
+      tenantId: string;
+      subjectId: string;
+      identityAccountId: string;
+      revokedAt: Date | null;
+    }>>`SELECT * FROM resolve_session(${hashedToken})`;
+
+    if (!sessions || sessions.length === 0) return null;
+    const sessionBootstrap = sessions[0];
+    
+    const scope = { organizationId: sessionBootstrap.organizationId, tenantId: sessionBootstrap.tenantId };
+    
+    return await withTenantDb(scope, async (tx) => {
+      // We fetch it first to return it (useful for federated logout)
+      const session = await tx.session.findUnique({
+        where: { id: hashedToken },
+        include: {
+          identityAccount: {
+            include: {
+              providerConnection: true
+            }
           }
         }
-      }
-    });
-
-    if (session && !session.revokedAt) {
-      await rawPrisma.session.update({
-        where: { id: hashedToken },
-        data: { revokedAt: new Date() }
       });
-    }
 
-    return session;
+      if (session && !session.revokedAt) {
+        await tx.session.update({
+          where: { id: hashedToken },
+          data: { revokedAt: new Date() }
+        });
+      }
+
+      return session;
+    });
   }
 
   /**
    * Revokes all sessions for a given subject securely within their organization.
    */
-  static async revokeAllForSubject(organizationId: string, subjectId: string) {
-    await rawPrisma.session.updateMany({
-      where: { organizationId, subjectId, revokedAt: null },
-      data: { revokedAt: new Date() }
-    });
+  static async revokeAllForSubject(organizationId: string, tenantId: string, subjectId: string) {
+    await withTenantDb(
+      { organizationId, tenantId },
+      async (tx) => tx.session.updateMany({
+        where: { organizationId, subjectId, revokedAt: null },
+        data: { revokedAt: new Date() }
+      })
+    );
   }
 }

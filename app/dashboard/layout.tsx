@@ -1,8 +1,14 @@
-"use client";
 import React from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getAuthContext } from "@/lib/auth/auth-context";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const auth = await getAuthContext();
+  if (!auth) {
+    redirect("/login");
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans">
       <aside className="w-64 bg-[#0f172a] text-slate-300 flex-col hidden md:flex shadow-xl z-10">

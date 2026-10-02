@@ -19,7 +19,7 @@ export function createScopedDb(scope: DataScope) {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          const modelsWithTenant = ['Subject', 'IdentityAccount', 'Resource', 'Session'];
+          const modelsWithTenant = ['Subject', 'IdentityAccount', 'Resource', 'Session', 'Entitlement', 'Assignment', 'AuthorizationShadowObservation', 'LocalIdentity', 'LocalAuthenticator', 'LocalAuthChallenge', 'LocalRecoveryCode', 'AuthenticationEvidence', 'CryptoKeyVersion', 'TrustAnchorVersion', 'IdentityContinuityState', 'OfflineIdentityChallenge', 'IdentityAssuranceSnapshot', 'IdentityContinuityEvent', 'IdentityContinuityConflict', 'IdentityPortabilityReceipt', 'IdentityRecoveryCeremony', 'IdentityRecoveryApproval', 'IdentityPortabilityConflict', 'CredentialReenrollmentRequirement', 'ProviderIdentityCollision', 'CanonicalAdminAuditEvent', 'ProviderConnectionTenantScope'];
           const modelsWithOrg = ['Tenant', 'ProviderConnection', ...modelsWithTenant];
           
           if (!modelsWithOrg.includes(model)) {
@@ -109,9 +109,12 @@ export async function withTenantDb<T>(
   scope: { organizationId: string; tenantId: string },
   work: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<T> {
-  return rawPrisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT set_config('app.organization_id', ${scope.organizationId}, true)`;
-    await tx.$queryRaw`SELECT set_config('app.tenant_id', ${scope.tenantId}, true)`;
-    return work(tx);
-  });
+  return rawPrisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${scope.organizationId}, true)`;
+      await tx.$queryRaw`SELECT set_config('app.tenant_id', ${scope.tenantId}, true)`;
+      return work(tx);
+    },
+    { maxWait: 10_000, timeout: 30_000 },
+  );
 }
