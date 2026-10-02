@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getLuxiaLocalAdapter, localProviderContext } from "@/lib/auth/providers/luxia-local";
 import { withTenantDb } from "@/lib/db/scoped-client";
@@ -60,6 +61,34 @@ export async function POST(request: Request) {
     }
     if (!identity) throw new Error("LOCAL_IDENTITY_CREATION_FAILED");
     const identityAccountId = String(identity.attributes.identityAccountId);
+    await withTenantDb(
+      { organizationId: auth.organizationId, tenantId: auth.tenantId },
+      async (tx) => {
+        const locked = await tx.localIdentity.findFirst({
+          where: {
+            identityAccountId,
+            status: "LOCKED",
+            identityAccount: { subjectId: auth.subjectId, status: "ACTIVE" },
+          },
+          select: { id: true },
+        });
+        if (!locked) return;
+        await tx.localIdentity.update({
+          where: { id: locked.id },
+          data: { status: "ACTIVE", failedAttempts: 0, lockedUntil: null },
+        });
+        await tx.canonicalAdminAuditEvent.create({ data: {
+          organizationId: auth.organizationId,
+          tenantId: auth.tenantId,
+          actorSubjectId: auth.subjectId,
+          targetSubjectId: auth.subjectId,
+          operation: "LOCAL_IDENTITY.RECOVERY_UNLOCK",
+          changeId: `local-recovery:${randomUUID()}`,
+          result: "SUCCESS",
+          metadata: { providerConnectionId: prepared.connection.id, reason: "PASSKEY_REENROLLMENT_FROM_FEDERATED_SESSION" },
+        } });
+      },
+    );
     const challenge = await adapter.beginEnrollment(context, identityAccountId);
     return NextResponse.json({
       providerConnectionId: prepared.connection.id,
