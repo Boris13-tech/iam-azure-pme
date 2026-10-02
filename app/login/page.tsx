@@ -40,7 +40,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <ShieldCheck className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight">LUXIA Secure Access</h1>
-          <p className="text-slate-400 mt-2 text-center text-sm font-medium">Authentification PME via Microsoft Entra ID.</p>
+          <p className="text-slate-400 mt-2 text-center text-sm font-medium">Accès souverain par fournisseur d’identité vérifié.</p>
         </div>
 
         {errorMsg && (
