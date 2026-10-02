@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { ShieldAlert, Key, Globe, Clock, Smartphone, CheckCircle2 } from "lucide-react";
+import { PasskeyEnrollment } from "./passkey-enrollment";
 
 export default function AccessPoliciesPage() {
   const [policies, setPolicies] = useState({
@@ -57,6 +58,7 @@ export default function AccessPoliciesPage() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
+      <PasskeyEnrollment />
       <div className="flex justify-between items-center pb-4 border-b border-gray-200">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Politiques d'Accès & Sécurité</h2>

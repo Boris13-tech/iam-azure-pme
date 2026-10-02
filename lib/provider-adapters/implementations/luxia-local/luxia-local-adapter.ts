@@ -156,6 +156,7 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
   async enrollPasskey(context: ProviderOperationContext, input: {
     identityAccountId: string; enrollmentTransactionId: string; enrollmentChallenge: string;
     credentialId: string; publicKey: string; relyingPartyId: string; allowedOrigin: string;
+    hardwareBound?: boolean; userVerificationRequired?: boolean;
   }): Promise<string> {
     await this.validate(context, "AUTHENTICATION");
     if (!input.credentialId || !input.publicKey || !input.relyingPartyId || !input.allowedOrigin) invalid("Incomplete passkey enrollment");
@@ -165,7 +166,8 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
       id, identityAccountId: input.identityAccountId, type: "PASSKEY", status: "ACTIVE",
       credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", credentialFormatVersion: 1,
       ...CURRENT_WEBAUTHN_CRYPTO, keyId: id, keyVersion: 1,
-      verifierPolicyVersion: 1, hardwareBound: false, userVerificationRequired: false,
+      verifierPolicyVersion: 1, hardwareBound: input.hardwareBound ?? false,
+      userVerificationRequired: input.userVerificationRequired ?? false,
       credentialId: input.credentialId, publicKey: input.publicKey,
       relyingPartyId: input.relyingPartyId, allowedOrigin: input.allowedOrigin, signCount: 0,
     });
