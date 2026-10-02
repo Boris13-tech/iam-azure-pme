@@ -3,6 +3,7 @@ import { ShieldCheck, Lock, AlertCircle } from 'lucide-react';
 import { rawPrisma } from '@/lib/db/raw-prisma';
 import Link from 'next/link';
 import { safeOperationalRead } from '@/lib/operations/identity-operational-readiness';
+import { LocalPasskeyLogin } from './local-passkey-login';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     }
   }), () => console.error('LOGIN_PROVIDER_DISCOVERY_UNAVAILABLE'));
   const provider = discovery.state === 'AVAILABLE' ? discovery.value : null;
+
+  const localDiscovery = await safeOperationalRead(() => rawPrisma.providerConnection.findFirst({
+    where: { providerType: 'LUXIA_LOCAL' },
+    include: { organization: { include: { tenants: { take: 1 } } } }
+  }), () => console.error('LOCAL_PROVIDER_DISCOVERY_UNAVAILABLE'));
+  const localProvider = localDiscovery.state === 'AVAILABLE' ? localDiscovery.value : null;
 
   const defaultTenantId = provider?.organization?.tenants?.[0]?.id;
 
@@ -68,6 +75,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <div className="p-4 bg-yellow-500/20 border border-yellow-500/50 rounded-xl text-yellow-200 text-sm text-center">
                 Aucune configuration Entra ID trouvée pour cette instance.
               </div>
+            )}
+            {localProvider?.organization?.tenants?.[0]?.id && (
+              <LocalPasskeyLogin providerConnectionId={localProvider.id} tenantId={localProvider.organization.tenants[0].id} />
             )}
           </div>
         </div>
