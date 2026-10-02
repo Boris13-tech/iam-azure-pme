@@ -8,7 +8,7 @@ const encode = (value: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Arra
 
 export function PasskeyEnrollment() {
   const [principalName, setPrincipalName] = useState("");
-  const [status, setStatus] = useState<"idle" | "busy" | "done" | "error" | "unsupported" | "cancelled">("idle");
+  const [status, setStatus] = useState<string>("idle");
   async function enroll() {
     try {
       setStatus("busy");
@@ -16,7 +16,10 @@ export function PasskeyEnrollment() {
         throw new Error("WEBAUTHN_UNAVAILABLE");
       }
       const beginResponse = await fetch("/api/auth/local/enrollment/begin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ principalName }) });
-      if (!beginResponse.ok) throw new Error();
+      if (!beginResponse.ok) {
+        const failure = await beginResponse.json().catch(() => ({ error: "ENROLLMENT_BEGIN_FAILED" }));
+        throw new Error(`SERVER_BEGIN:${failure.error ?? "ENROLLMENT_BEGIN_FAILED"}`);
+      }
       const begin = await beginResponse.json();
       const credential = await navigator.credentials.create({ publicKey: {
         challenge: decode(begin.challenge), rp: begin.rp,
@@ -28,13 +31,16 @@ export function PasskeyEnrollment() {
       if (!credential) throw new Error();
       const attestation = credential.response as AuthenticatorAttestationResponse;
       const publicKey = attestation.getPublicKey?.();
-      if (!publicKey) throw new Error();
+      if (!publicKey) throw new Error("PUBLIC_KEY_UNAVAILABLE");
       const completed = await fetch("/api/auth/local/enrollment/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         providerConnectionId: begin.providerConnectionId, identityAccountId: begin.identityAccountId,
         transactionId: begin.transactionId, challenge: begin.challenge,
         credentialId: encode(credential.rawId), publicKey: encode(publicKey),
       }) });
-      if (!completed.ok) throw new Error();
+      if (!completed.ok) {
+        const failure = await completed.json().catch(() => ({ error: "ENROLLMENT_COMPLETE_FAILED" }));
+        throw new Error(`SERVER_COMPLETE:${failure.error ?? "ENROLLMENT_COMPLETE_FAILED"}`);
+      }
       setStatus("done");
     } catch (error) {
       if (error instanceof Error && error.message === "WEBAUTHN_UNAVAILABLE") {
@@ -42,7 +48,8 @@ export function PasskeyEnrollment() {
       } else if (error instanceof DOMException && error.name === "NotAllowedError") {
         setStatus("cancelled");
       } else {
-        setStatus("error");
+        const code = error instanceof Error ? `${error.name}:${error.message}` : "UNKNOWN";
+        setStatus(`error:${code}`);
       }
     }
   }
@@ -59,7 +66,7 @@ export function PasskeyEnrollment() {
         {status === "done" && <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Passkey activée.</p>}
         {status === "unsupported" && <p className="mt-3 text-sm font-semibold text-amber-800">Ce navigateur ne permet pas Windows Hello/WebAuthn. Ouvrez LUXIA dans Microsoft Edge ou Google Chrome sur cet appareil.</p>}
         {status === "cancelled" && <p className="mt-3 text-sm font-semibold text-amber-800">La confirmation Windows Hello a été annulée ou a expiré. Vous pouvez relancer l’enrôlement.</p>}
-        {status === "error" && <p className="mt-3 text-sm font-semibold text-red-700">L’enrôlement a échoué sans modifier vos accès existants. Reconnectez-vous avec Entra puis réessayez depuis Edge ou Chrome.</p>}
+        {status.startsWith("error:") && <p className="mt-3 text-sm font-semibold text-red-700">L’enrôlement a échoué sans modifier vos accès existants. Code sûr : <span className="font-mono">{status.slice(6)}</span></p>}
       </div>
     </div>
   </section>;

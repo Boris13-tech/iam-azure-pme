@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getLuxiaLocalAdapter, localProviderContext } from "@/lib/auth/providers/luxia-local";
 import { withTenantDb } from "@/lib/db/scoped-client";
+import { ProviderAdapterError } from "@/lib/provider-adapters";
 
 export const runtime = "nodejs";
 
@@ -72,6 +73,10 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "ENROLLMENT_FAILED";
     const status = message === "UNAUTHORIZED" ? 401 : message === "FORBIDDEN" ? 403 : 500;
-    return NextResponse.json({ error: status === 500 ? "ENROLLMENT_FAILED" : message }, { status });
+    const safeCode = error instanceof ProviderAdapterError
+      ? `${error.code}${error.safeDetails.reason ? `_${error.safeDetails.reason}` : ""}`
+      : status === 500 ? "ENROLLMENT_BEGIN_FAILED" : message;
+    console.error("LOCAL_ENROLLMENT_BEGIN_FAILED", safeCode);
+    return NextResponse.json({ error: safeCode }, { status });
   }
 }
