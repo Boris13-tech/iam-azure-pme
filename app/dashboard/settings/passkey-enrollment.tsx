@@ -8,10 +8,13 @@ const encode = (value: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Arra
 
 export function PasskeyEnrollment() {
   const [principalName, setPrincipalName] = useState("");
-  const [status, setStatus] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "busy" | "done" | "error" | "unsupported" | "cancelled">("idle");
   async function enroll() {
     try {
       setStatus("busy");
+      if (!window.isSecureContext || !window.PublicKeyCredential || !navigator.credentials) {
+        throw new Error("WEBAUTHN_UNAVAILABLE");
+      }
       const beginResponse = await fetch("/api/auth/local/enrollment/begin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ principalName }) });
       if (!beginResponse.ok) throw new Error();
       const begin = await beginResponse.json();
@@ -33,8 +36,14 @@ export function PasskeyEnrollment() {
       }) });
       if (!completed.ok) throw new Error();
       setStatus("done");
-    } catch {
-      setStatus("error");
+    } catch (error) {
+      if (error instanceof Error && error.message === "WEBAUTHN_UNAVAILABLE") {
+        setStatus("unsupported");
+      } else if (error instanceof DOMException && error.name === "NotAllowedError") {
+        setStatus("cancelled");
+      } else {
+        setStatus("error");
+      }
     }
   }
   return <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
@@ -48,7 +57,9 @@ export function PasskeyEnrollment() {
           <button onClick={enroll} disabled={!principalName || status === "busy"} className="rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white disabled:opacity-50">{status === "busy" ? "Enrôlement…" : "Ajouter une passkey"}</button>
         </div>
         {status === "done" && <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Passkey activée.</p>}
-        {status === "error" && <p className="mt-3 text-sm font-semibold text-red-700">L’enrôlement a échoué sans modifier vos accès existants.</p>}
+        {status === "unsupported" && <p className="mt-3 text-sm font-semibold text-amber-800">Ce navigateur ne permet pas Windows Hello/WebAuthn. Ouvrez LUXIA dans Microsoft Edge ou Google Chrome sur cet appareil.</p>}
+        {status === "cancelled" && <p className="mt-3 text-sm font-semibold text-amber-800">La confirmation Windows Hello a été annulée ou a expiré. Vous pouvez relancer l’enrôlement.</p>}
+        {status === "error" && <p className="mt-3 text-sm font-semibold text-red-700">L’enrôlement a échoué sans modifier vos accès existants. Reconnectez-vous avec Entra puis réessayez depuis Edge ou Chrome.</p>}
       </div>
     </div>
   </section>;

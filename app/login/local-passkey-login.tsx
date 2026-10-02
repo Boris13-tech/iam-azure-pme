@@ -12,6 +12,10 @@ export function LocalPasskeyLogin({ providerConnectionId, tenantId }: { provider
   async function login() {
     try {
       setStatus("Vérification de la passkey…");
+      if (!window.isSecureContext || !window.PublicKeyCredential || !navigator.credentials) {
+        setStatus("Ce navigateur ne prend pas en charge Windows Hello/WebAuthn. Utilisez Edge ou Chrome.");
+        return;
+      }
       const begin = await fetch("/api/auth/local/begin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ principalName, providerConnectionId, tenantId }) });
       if (!begin.ok) throw new Error();
       const challenge = await begin.json();
@@ -29,8 +33,10 @@ export function LocalPasskeyLogin({ providerConnectionId, tenantId }: { provider
       }) });
       if (!complete.ok) throw new Error();
       window.location.assign("/dashboard");
-    } catch {
-      setStatus("Connexion locale refusée. Vérifiez l’identifiant et la passkey.");
+    } catch (error) {
+      setStatus(error instanceof DOMException && error.name === "NotAllowedError"
+        ? "La vérification biométrique a été annulée ou a expiré."
+        : "Connexion locale refusée. Vérifiez d’abord que la passkey a bien été enrôlée.");
     }
   }
   return <div className="space-y-3 border-t border-slate-700 pt-5">
