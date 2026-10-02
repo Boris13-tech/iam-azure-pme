@@ -116,28 +116,30 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenants                    Tenant[]
-  providerConnections        ProviderConnection[]
-  subjects                   Subject[]
-  resources                  Resource[]
-  localIdentities            LocalIdentity[]
-  localAuthenticators        LocalAuthenticator[]
-  localAuthChallenges        LocalAuthChallenge[]
-  localRecoveryCodes         LocalRecoveryCode[]
-  authenticationEvidence     AuthenticationEvidence[]
-  cryptoKeyVersions          CryptoKeyVersion[]
-  trustAnchorVersions        TrustAnchorVersion[]
-  continuityStates           IdentityContinuityState[]
-  offlineChallenges          OfflineIdentityChallenge[]
-  assuranceSnapshots         IdentityAssuranceSnapshot[]
-  continuityEvents           IdentityContinuityEvent[]
-  continuityConflicts        IdentityContinuityConflict[]
-  portabilityReceipts        IdentityPortabilityReceipt[]
-  recoveryCeremonies         IdentityRecoveryCeremony[]
-  recoveryApprovals          IdentityRecoveryApproval[]
-  portabilityConflicts       IdentityPortabilityConflict[]
-  reenrollmentRequirements   CredentialReenrollmentRequirement[]
-  providerIdentityCollisions ProviderIdentityCollision[]
+  tenants                        Tenant[]
+  providerConnections            ProviderConnection[]
+  subjects                       Subject[]
+  resources                      Resource[]
+  localIdentities                LocalIdentity[]
+  localAuthenticators            LocalAuthenticator[]
+  localAuthChallenges            LocalAuthChallenge[]
+  localRecoveryCodes             LocalRecoveryCode[]
+  authenticationEvidence         AuthenticationEvidence[]
+  cryptoKeyVersions              CryptoKeyVersion[]
+  trustAnchorVersions            TrustAnchorVersion[]
+  continuityStates               IdentityContinuityState[]
+  offlineChallenges              OfflineIdentityChallenge[]
+  assuranceSnapshots             IdentityAssuranceSnapshot[]
+  continuityEvents               IdentityContinuityEvent[]
+  continuityConflicts            IdentityContinuityConflict[]
+  portabilityReceipts            IdentityPortabilityReceipt[]
+  recoveryCeremonies             IdentityRecoveryCeremony[]
+  recoveryApprovals              IdentityRecoveryApproval[]
+  portabilityConflicts           IdentityPortabilityConflict[]
+  reenrollmentRequirements       CredentialReenrollmentRequirement[]
+  providerIdentityCollisions     ProviderIdentityCollision[]
+  canonicalAdminAuditEvents      CanonicalAdminAuditEvent[]
+  providerConnectionTenantScopes ProviderConnectionTenantScope[]
 }
 
 model Tenant {
@@ -170,6 +172,8 @@ model Tenant {
   portabilityConflicts       IdentityPortabilityConflict[]
   reenrollmentRequirements   CredentialReenrollmentRequirement[]
   providerIdentityCollisions ProviderIdentityCollision[]
+  canonicalAdminAuditEvents  CanonicalAdminAuditEvent[]
+  providerConnectionScopes   ProviderConnectionTenantScope[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -184,11 +188,12 @@ model ProviderConnection {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  organization           Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization           Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   identityAccounts       IdentityAccount[]
   resources              Resource[]
   authenticationEvidence AuthenticationEvidence[]
   identityCollisions     ProviderIdentityCollision[]
+  tenantScopes           ProviderConnectionTenantScope[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, providerType, externalScopeId])
@@ -207,19 +212,21 @@ model Subject {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
-  organization             Organization                        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  tenant                   Tenant                              @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
-  identities               IdentityAccount[]
-  legacyBridge             LegacyUserBridge?
-  Session                  Session[]
-  Assignment               Assignment[]
-  authenticationEvidence   AuthenticationEvidence[]
-  boundAuthenticators      LocalAuthenticator[]                @relation("DeviceBoundAuthenticators")
-  offlineChallenges        OfflineIdentityChallenge[]
-  assuranceSnapshots       IdentityAssuranceSnapshot[]
-  continuityEvents         IdentityContinuityEvent[]
-  continuityConflicts      IdentityContinuityConflict[]
-  reenrollmentRequirements CredentialReenrollmentRequirement[]
+  organization                 Organization                        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant                       Tenant                              @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  identities                   IdentityAccount[]
+  legacyBridge                 LegacyUserBridge?
+  Session                      Session[]
+  Assignment                   Assignment[]
+  authenticationEvidence       AuthenticationEvidence[]
+  boundAuthenticators          LocalAuthenticator[]                @relation("DeviceBoundAuthenticators")
+  offlineChallenges            OfflineIdentityChallenge[]
+  assuranceSnapshots           IdentityAssuranceSnapshot[]
+  continuityEvents             IdentityContinuityEvent[]
+  continuityConflicts          IdentityContinuityConflict[]
+  reenrollmentRequirements     CredentialReenrollmentRequirement[]
+  canonicalAdminEventsAsActor  CanonicalAdminAuditEvent[]          @relation("CanonicalAdminActor")
+  canonicalAdminEventsAsTarget CanonicalAdminAuditEvent[]          @relation("CanonicalAdminTarget")
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -227,14 +234,16 @@ model Subject {
 }
 
 model IdentityAccount {
-  id                   String   @id @default(uuid())
+  id                   String                @id @default(uuid())
   organizationId       String
   tenantId             String
   subjectId            String
   providerConnectionId String
   externalObjectId     String // e.g., Entra User OID
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  status               IdentityAccountStatus @default(ACTIVE)
+  disabledAt           DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 
   subject                Subject                  @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
   providerConnection     ProviderConnection       @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
@@ -249,6 +258,11 @@ model IdentityAccount {
   @@index([organizationId])
   @@index([organizationId, tenantId, subjectId])
   @@index([organizationId, providerConnectionId])
+}
+
+enum IdentityAccountStatus {
+  ACTIVE
+  DISABLED
 }
 
 /// Quarantine evidence for ambiguous or duplicate provider projections.
@@ -1080,6 +1094,60 @@ model Assignment {
   @@unique([organizationId, tenantId, id])
   @@index([organizationId, tenantId, subjectId, status])
   @@index([organizationId, tenantId, entitlementId])
+}
+
+enum CanonicalAdminResult {
+  SUCCESS
+  DENIED
+  FAILURE
+}
+
+/// Tenant-scoped, provider-neutral evidence for canonical administration.
+/// It deliberately does not reference the legacy User/AuditLog models.
+model CanonicalAdminAuditEvent {
+  id              String               @id @default(uuid())
+  organizationId  String
+  tenantId        String
+  actorSubjectId  String
+  targetSubjectId String?
+  operation       String
+  roleKey         String?
+  roleVersion     Int?
+  assignmentIds   String[]             @default([])
+  changeId        String
+  result          CanonicalAdminResult
+  metadata        Json?
+  occurredAt      DateTime             @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  actor        Subject      @relation("CanonicalAdminActor", fields: [organizationId, tenantId, actorSubjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  target       Subject?     @relation("CanonicalAdminTarget", fields: [organizationId, tenantId, targetSubjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, changeId])
+  @@index([organizationId, tenantId, occurredAt])
+  @@index([organizationId, tenantId, actorSubjectId, occurredAt])
+  @@index([organizationId, tenantId, targetSubjectId, occurredAt])
+  @@index([organizationId, tenantId, operation, occurredAt])
+  @@index([organizationId, tenantId, roleKey, roleVersion])
+}
+
+/// Makes an organization-owned provider connection explicitly visible to one
+/// tenant without changing provider ownership or the existing login path.
+model ProviderConnectionTenantScope {
+  organizationId       String
+  tenantId             String
+  providerConnectionId String
+  displayName          String?
+  createdAt            DateTime @default(now())
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant             Tenant             @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([organizationId, tenantId, providerConnectionId])
+  @@index([organizationId, providerConnectionId])
 }
 
 enum AuthorizationShadowStatus {

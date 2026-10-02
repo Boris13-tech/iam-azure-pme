@@ -29,6 +29,26 @@ export const ENTITLEMENT_CATALOG_V1 = [
 
   "settings.read",
   "settings.update",
+
+  "subjects.read",
+  "subjects.create",
+  "subjects.update",
+
+  "identity_accounts.read",
+  "identity_accounts.link",
+  "identity_accounts.disable",
+
+  "assignments.read",
+  "assignments.manage",
+
+  "sessions.read",
+  "sessions.revoke",
+
+  "providers.read",
+  "providers.manage",
+
+  "resources.read",
+  "resources.manage",
 ] as const;
 
 export type CatalogEntitlement = typeof ENTITLEMENT_CATALOG_V1[number];

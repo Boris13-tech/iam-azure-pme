@@ -5,7 +5,7 @@ import { ProviderAdapterError } from "../../../lib/provider-adapters";
 import { AuthTransactionStore } from "../../../lib/auth/auth-transaction-store";
 import { rawPrisma } from "../../../lib/db/raw-prisma";
 import { withTenantDb } from "../../../lib/db/scoped-client";
-import { SessionStore } from "../../../lib/auth/session-store";
+import { SessionCreationDeniedError, SessionStore } from "../../../lib/auth/session-store";
 
 export const runtime = "nodejs";
 
@@ -97,12 +97,21 @@ export async function GET(request: Request) {
     const ip = request.headers.get("x-forwarded-for") || "unknown";
     const userAgent = request.headers.get("user-agent") || "unknown";
 
-    const { session, rawToken } = await SessionStore.createSession({
-      organizationId: transaction.expectedOrganizationId,
-      tenantId: transaction.expectedTenantId,
-      subjectId: subject.id,
-      identityAccountId: identityAccount.id
-    }, ip, userAgent);
+    let createdSession;
+    try {
+      createdSession = await SessionStore.createSession({
+        organizationId: transaction.expectedOrganizationId,
+        tenantId: transaction.expectedTenantId,
+        subjectId: subject.id,
+        identityAccountId: identityAccount.id
+      }, ip, userAgent);
+    } catch (error) {
+      if (error instanceof SessionCreationDeniedError) {
+        return NextResponse.json({ error: error.reason }, { status: 403 });
+      }
+      throw error;
+    }
+    const { session, rawToken } = createdSession;
 
     // 7. Set HttpOnly/Secure/SameSite=Lax luxia_session cookie
     const cookieStore = await cookies();

@@ -1,6 +1,6 @@
 import { adminPrisma } from "../helpers/admin-prisma";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { SessionStore } from "../../lib/auth/session-store";
+import { SessionCreationDeniedError, SessionStore } from "../../lib/auth/session-store";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import crypto from "crypto";
 
@@ -100,5 +100,37 @@ describe("SessionStore Security", () => {
     const fakeToken = rawToken + "a";
     const retrieved = await SessionStore.getSession(fakeToken);
     expect(retrieved).toBeNull();
+  });
+
+  it("fails closed when the identity account is disabled", async () => {
+    await adminPrisma.identityAccount.update({
+      where: { id: identityAccountId },
+      data: { status: "DISABLED", disabledAt: new Date() },
+    });
+
+    await expect(SessionStore.createSession({
+      organizationId: orgId, tenantId, subjectId, identityAccountId,
+    })).rejects.toBeInstanceOf(SessionCreationDeniedError);
+
+    await adminPrisma.identityAccount.update({
+      where: { id: identityAccountId },
+      data: { status: "ACTIVE", disabledAt: null },
+    });
+  });
+
+  it("fails closed when the canonical subject is not active", async () => {
+    await adminPrisma.subject.update({
+      where: { id: subjectId },
+      data: { lifecycleState: "SUSPENDED", lifecycleVersion: { increment: 1 }, lifecycleChangedAt: new Date() },
+    });
+
+    await expect(SessionStore.createSession({
+      organizationId: orgId, tenantId, subjectId, identityAccountId,
+    })).rejects.toMatchObject({ reason: "SUBJECT_NOT_ACTIVE" });
+
+    await adminPrisma.subject.update({
+      where: { id: subjectId },
+      data: { lifecycleState: "ACTIVE", lifecycleVersion: { increment: 1 }, lifecycleChangedAt: new Date() },
+    });
   });
 });

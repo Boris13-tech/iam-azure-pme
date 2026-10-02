@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "role": {
+    "key": "LUXIA_ORG_ADMIN",
+    "version": 1,
+    "sourceRef": "native-role:LUXIA_ORG_ADMIN:v1"
+  },
+  "scope": {
+    "organizationId": "4841428a-80b4-4f07-bb3f-c94612dfd4a2",
+    "tenantId": "c68ae9ee-11a8-42f9-bc9c-b19c42ec7914",
+    "subjectId": "30a15eda-24d3-40ef-8705-11c2e6e1b929"
+  },
+  "status": "PLANNED_NOT_APPLIED",
+  "providerConnectionTenantScope": {
+    "organizationId": "4841428a-80b4-4f07-bb3f-c94612dfd4a2",
+    "tenantId": "c68ae9ee-11a8-42f9-bc9c-b19c42ec7914",
+    "providerConnectionId": "fde0704e-0d1c-4c47-b53e-f19a60f1748d",
+    "displayName": "Microsoft Entra"
+  },
+  "grants": [
+    { "key": "subjects.read", "entitlementId": "15dd30d5-403e-453d-a84a-90642825db33", "assignmentId": "c930b1b8-1a7b-4ccd-8b7d-5eafdc4cac65" },
+    { "key": "subjects.create", "entitlementId": "9cba522a-3402-4bdb-b6c6-8bff7bcfc76b", "assignmentId": "409bdea9-1811-4861-a756-926e08a41070" },
+    { "key": "subjects.update", "entitlementId": "a3031d22-80b4-4c6b-a4ab-eaf8683d2273", "assignmentId": "ba6fb47e-7a4f-4e45-8046-423b93afb062" },
+    { "key": "identity_accounts.read", "entitlementId": "1d90c00c-caf4-420e-9a03-43d83cf6e5d4", "assignmentId": "8466da2e-8288-4eaf-89f0-9fb60fdc1432" },
+    { "key": "identity_accounts.link", "entitlementId": "72268f2d-817e-4e89-acb7-a5a11c16637c", "assignmentId": "71ed6d02-23cd-4b63-8312-dad534562384" },
+    { "key": "identity_accounts.disable", "entitlementId": "6766ea58-bae3-4467-8844-90e86063aaa9", "assignmentId": "48825c00-4ee3-4b84-8ace-bdd3eea82eb6" },
+    { "key": "assignments.read", "entitlementId": "b3cbf5e8-8453-4fbb-a692-eb672da2a33f", "assignmentId": "4dec6718-e364-48f1-9645-26e4a3d63ed8" },
+    { "key": "assignments.manage", "entitlementId": "5e6eb1d0-497b-4e7d-9401-9119a7fbd78b", "assignmentId": "9b42d264-1e20-48be-81e1-ccc129a5ad69" },
+    { "key": "sessions.read", "entitlementId": "1f991443-950e-4114-87d9-483c8f82a36f", "assignmentId": "d426f877-c781-4668-88bb-95df05bdc7b4" },
+    { "key": "sessions.revoke", "entitlementId": "75e15de2-662a-4d2b-ac48-7e81cc693dbb", "assignmentId": "db9e77f2-e9c4-49ab-a658-bb336f0464fd" },
+    { "key": "providers.read", "entitlementId": "05193ecc-1a4d-47c5-8d12-0f23a31b8a96", "assignmentId": "096444bd-070c-4a07-8b64-3986b1e8b13c" },
+    { "key": "providers.manage", "entitlementId": "29a8ac6e-5d8a-43ea-a6ab-06f90d6d3710", "assignmentId": "0576f6ad-ca5a-4c3b-adc4-47a0b74c6c58" },
+    { "key": "resources.read", "entitlementId": "50260588-158c-4bc2-9905-3f52b6943062", "assignmentId": "44ae2a6b-7d97-42aa-9ab2-9a5a5b759df1" },
+    { "key": "resources.manage", "entitlementId": "6dd84098-d1d7-4168-a19f-bfe06bd71151", "assignmentId": "84cf3d91-b056-4c10-9064-bd3400884d02" },
+    { "key": "audit.read", "entitlementId": "514fa884-0038-4dfd-9750-b0f011581a70", "assignmentId": "8dd44ab0-ee5b-4a2d-9cec-4e97d1e8fe28" }
+  ]
+}

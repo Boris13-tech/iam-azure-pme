@@ -9,6 +9,13 @@ export type SessionContext = {
   identityAccountId: string;
 };
 
+export class SessionCreationDeniedError extends Error {
+  constructor(public readonly reason: "IDENTITY_ACCOUNT_DISABLED" | "SUBJECT_NOT_ACTIVE") {
+    super(reason);
+    this.name = "SessionCreationDeniedError";
+  }
+}
+
 export class SessionStore {
   /**
    * Creates a new session.
@@ -23,7 +30,18 @@ export class SessionStore {
 
     const session = await withTenantDb(
       { organizationId: ctx.organizationId, tenantId: ctx.tenantId },
-      async (tx) => tx.session.create({
+      async (tx) => {
+        const account = await tx.identityAccount.findFirst({
+          where: { id: ctx.identityAccountId, subjectId: ctx.subjectId },
+          include: { subject: { select: { lifecycleState: true } } },
+        });
+        if (!account || account.status !== "ACTIVE") {
+          throw new SessionCreationDeniedError("IDENTITY_ACCOUNT_DISABLED");
+        }
+        if (account.subject.lifecycleState !== "ACTIVE") {
+          throw new SessionCreationDeniedError("SUBJECT_NOT_ACTIVE");
+        }
+        return tx.session.create({
         data: {
           id: hashedToken,
           organizationId: ctx.organizationId,
@@ -35,7 +53,8 @@ export class SessionStore {
           userAgentHash: userAgent ? crypto.createHash('sha256').update(userAgent).digest('hex') : null,
           lastSeenAt: new Date()
         }
-      })
+        });
+      }
     );
 
     return { session, rawToken };
