@@ -70,7 +70,7 @@ export async function configureProvider(auth: AuthContext, id: string, raw: Prov
   }
   return withTenantDb(auth, async tx => {
     const key = scopeKey(auth, id);
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(key)}, 0))`;
+    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${JSON.stringify(key)}, 0))`;
     const existing = await tx.providerConnectionTenantScope.findUnique({
       where: { organizationId_tenantId_providerConnectionId: key }, include: { providerConnection: true },
     });
@@ -125,7 +125,7 @@ export async function runProviderOperation(auth: AuthContext, id: string, operat
   const key = scopeKey(auth, id);
   const setup = await withTenantDb(auth, async tx => {
     // Serialize operation/configuration changes for this tenant connection.
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(key)}, 0))`;
+    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${JSON.stringify(key)}, 0))`;
     const scope = await tx.providerConnectionTenantScope.findUnique({
       where: { organizationId_tenantId_providerConnectionId: key }, include: { providerConnection: true },
     });
