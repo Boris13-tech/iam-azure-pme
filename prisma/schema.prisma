@@ -107,7 +107,24 @@ enum ProviderType {
   AWS
   GOOGLE_WORKSPACE
   GITHUB
+  OIDC_GENERIC
+  SAML
+  SCIM
   CUSTOM
+}
+
+enum ProviderOperationalStatus {
+  CONNECTED
+  DEGRADED
+  ERROR
+  DISABLED
+}
+
+enum ProviderSyncRunStatus {
+  RUNNING
+  DRY_RUN_COMPLETE
+  FAILED
+  CONFLICTED
 }
 
 model Organization {
@@ -140,6 +157,7 @@ model Organization {
   providerIdentityCollisions     ProviderIdentityCollision[]
   canonicalAdminAuditEvents      CanonicalAdminAuditEvent[]
   providerConnectionTenantScopes ProviderConnectionTenantScope[]
+  providerSyncRuns                ProviderSyncRun[]
 }
 
 model Tenant {
@@ -174,6 +192,7 @@ model Tenant {
   providerIdentityCollisions ProviderIdentityCollision[]
   canonicalAdminAuditEvents  CanonicalAdminAuditEvent[]
   providerConnectionScopes   ProviderConnectionTenantScope[]
+  providerSyncRuns           ProviderSyncRun[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -194,6 +213,7 @@ model ProviderConnection {
   authenticationEvidence AuthenticationEvidence[]
   identityCollisions     ProviderIdentityCollision[]
   tenantScopes           ProviderConnectionTenantScope[]
+  syncRuns               ProviderSyncRun[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, providerType, externalScopeId])
@@ -1140,13 +1160,57 @@ model ProviderConnectionTenantScope {
   tenantId             String
   providerConnectionId String
   displayName          String?
+  enabled              Boolean                   @default(false)
+  operationalStatus    ProviderOperationalStatus @default(DISABLED)
+  configuration        Json                      @default("{}")
+  credentialSecretRef  String?
+  attributeMapping     Json                      @default("{}")
+  mappingVersion       Int                       @default(1)
+  lastHealthCheckAt    DateTime?
+  lastSyncAt           DateTime?
+  lastErrorCode        String?
+  updatedAt            DateTime                  @updatedAt
   createdAt            DateTime @default(now())
 
   organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   tenant             Tenant             @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Cascade)
+  syncRuns          ProviderSyncRun[]
 
   @@id([organizationId, tenantId, providerConnectionId])
+  @@index([organizationId, providerConnectionId])
+}
+
+/// Append-oriented, tenant-scoped operational evidence for provider dry-runs.
+/// It contains counters and safe error codes only, never provider credentials.
+model ProviderSyncRun {
+  id                   String                @id @default(uuid())
+  organizationId       String
+  tenantId             String
+  providerConnectionId String
+  operationId          String
+  operation            String
+  mode                 String
+  status               ProviderSyncRunStatus
+  observed             Int                   @default(0)
+  created              Int                   @default(0)
+  updated              Int                   @default(0)
+  disabled             Int                   @default(0)
+  conflicts            Int                   @default(0)
+  cursor               Json?
+  safeErrorCode        String?
+  startedAt            DateTime              @default(now())
+  completedAt          DateTime?
+
+  organization       Organization                  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant             Tenant                        @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  providerConnection ProviderConnection            @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
+  tenantScope        ProviderConnectionTenantScope @relation(fields: [organizationId, tenantId, providerConnectionId], references: [organizationId, tenantId, providerConnectionId], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, providerConnectionId, operationId])
+  @@index([organizationId, tenantId, providerConnectionId, startedAt])
+  @@index([organizationId, tenantId, status, startedAt])
   @@index([organizationId, providerConnectionId])
 }
 
