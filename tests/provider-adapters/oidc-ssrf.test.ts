@@ -32,7 +32,7 @@ describe("OIDC SSRF protection", () => {
       return req;
     }) as never);
     await expect(oidcMetadataRequest("https://issuer.example.test")).rejects.toThrow("OIDC_HTTP_REJECTED");
-    expect(options).toMatchObject({ servername: "issuer.example.test", rejectUnauthorized: true });
+    expect(options).toMatchObject({ family: 4, servername: "issuer.example.test", rejectUnauthorized: true });
     const lookup = options.lookup as (host: string, opts: unknown, callback: (...args: unknown[]) => void) => void;
     const callback = vi.fn(); lookup("issuer.example.test", {}, callback);
     expect(callback).toHaveBeenCalledWith(null, "8.8.8.8", 4);

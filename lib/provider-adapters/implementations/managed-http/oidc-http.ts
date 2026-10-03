@@ -31,7 +31,7 @@ export async function oidcMetadataRequest(value: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const fail = (code: string) => reject(new ProviderManagementFailure(code));
     const req = request(url, {
-      method: "GET", servername: url.hostname, rejectUnauthorized: true,
+      method: "GET", family: 4, servername: url.hostname, rejectUnauthorized: true,
       lookup: (_hostname, _options, callback) => callback(null, addresses[0], 4),
       headers: { Accept: "application/json" },
     }, response => {
