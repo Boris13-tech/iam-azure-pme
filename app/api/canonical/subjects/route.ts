@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 const createSchema = z.object({
   name: z.string().trim().min(1).max(200),
   type: z.enum(["HUMAN", "WORKLOAD", "SERVICE", "DEVICE", "AI_AGENT"]),
+  lifecycleState: z.enum(["PROVISIONING", "ACTIVE"]).optional(),
 }).strict();
 
 export async function GET() {

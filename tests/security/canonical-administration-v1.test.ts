@@ -72,6 +72,98 @@ describe("Canonical Administration v1", () => {
     }) });
   });
 
+  it("creates a joiner in PROVISIONING without activating it implicitly", async () => {
+    const subjectCreate = vi.fn().mockResolvedValue({
+      id: "subject-joiner", type: "HUMAN", lifecycleState: "PROVISIONING",
+    });
+    vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
+      canonicalAdminAuditEvent: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "event-joiner" }),
+      },
+      subject: { create: subjectCreate },
+    } as never));
+
+    await createSubject(auth, {
+      name: "New Joiner", type: "HUMAN", lifecycleState: "PROVISIONING",
+    }, "change-joiner");
+
+    expect(subjectCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
+      organizationId: "org-a",
+      tenantId: "tenant-a",
+      lifecycleState: "PROVISIONING",
+    }) });
+  });
+
+  it("suspends a subject and revokes active sessions within the same tenant", async () => {
+    const sessionUpdate = vi.fn().mockResolvedValue({ count: 2 });
+    const assignmentUpdate = vi.fn();
+    const auditCreate = vi.fn().mockResolvedValue({ id: "event-suspend" });
+    vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
+      canonicalAdminAuditEvent: {
+        findUnique: vi.fn().mockResolvedValue(null), create: auditCreate,
+      },
+      subject: {
+        findFirst: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "ACTIVE" }),
+        update: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "SUSPENDED" }),
+      },
+      session: { updateMany: sessionUpdate },
+      assignment: { updateMany: assignmentUpdate },
+    } as never));
+
+    await updateSubject(auth, "subject-1", { lifecycleState: "SUSPENDED" }, "change-suspend");
+
+    expect(sessionUpdate).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-a", tenantId: "tenant-a", subjectId: "subject-1", revokedAt: null,
+      },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(assignmentUpdate).not.toHaveBeenCalled();
+    expect(auditCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
+      operation: "SUBJECT.UPDATE",
+      metadata: expect.objectContaining({
+        lifecycleFrom: "ACTIVE", lifecycleTo: "SUSPENDED", revokedSessions: 2,
+      }),
+    }) });
+  });
+
+  it("retires a subject, revokes sessions and assignments, and rejects reactivation", async () => {
+    const sessionUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const assignmentUpdate = vi.fn().mockResolvedValue({ count: 3 });
+    vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
+      canonicalAdminAuditEvent: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "event-retire" }),
+      },
+      subject: {
+        findFirst: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "ACTIVE" }),
+        update: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "RETIRED" }),
+      },
+      session: { updateMany: sessionUpdate },
+      assignment: { updateMany: assignmentUpdate },
+    } as never));
+
+    await updateSubject(auth, "subject-1", { lifecycleState: "RETIRED" }, "change-retire");
+
+    expect(assignmentUpdate).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-a", tenantId: "tenant-a", subjectId: "subject-1", status: "ACTIVE",
+      },
+      data: { status: "REVOKED", validUntil: expect.any(Date) },
+    });
+
+    vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
+      canonicalAdminAuditEvent: { findUnique: vi.fn().mockResolvedValue(null) },
+      subject: {
+        findFirst: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "RETIRED" }),
+        update: vi.fn(),
+      },
+    } as never));
+    await expect(updateSubject(auth, "subject-1", { lifecycleState: "ACTIVE" }, "change-reactivate"))
+      .rejects.toMatchObject({ code: "INVALID_SUBJECT_LIFECYCLE_TRANSITION:RETIRED:ACTIVE", httpStatus: 409 });
+  });
+
   it("fails closed when a target is outside the scoped tenant", async () => {
     const update = vi.fn();
     const auditCreate = vi.fn();
