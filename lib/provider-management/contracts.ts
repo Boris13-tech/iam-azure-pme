@@ -18,8 +18,13 @@ export const attributeMappingSchema = z.object({
 export type AttributeMapping = z.infer<typeof attributeMappingSchema>;
 
 export const configurationSchema = z.object({
-  clientId: z.string().trim().min(1).max(200).optional(),
-  issuer: z.string().url().max(512).optional(),
+  clientId: z.string().uuid().optional(),
+  issuer: z.string().url().max(512).refine(value => {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash;
+    } catch { return false; }
+  }, "Issuer must be a public HTTPS URL without credentials, query or fragment").optional(),
   customerId: z.string().trim().min(1).max(200).optional(),
 }).strict();
 

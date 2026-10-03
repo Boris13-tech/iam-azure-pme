@@ -182,9 +182,10 @@ export async function runProviderOperation(auth: AuthContext, id: string, operat
       data: { status: failure ? "FAILED" : result.collisions.length ? "CONFLICTED" : "DRY_RUN_COMPLETE",
         observed: result.observed, conflicts: result.collisions.length, safeErrorCode: failure ?? null, completedAt: new Date() },
     });
+    const openCollisions = await tx.providerIdentityCollision.count({ where: { ...key, resolvedAt: null } });
     await tx.providerConnectionTenantScope.update({
       where: { organizationId_tenantId_providerConnectionId: key },
-      data: { operationalStatus: failure ? "ERROR" : result.collisions.length ? "DEGRADED" : "CONNECTED",
+      data: { operationalStatus: failure ? "ERROR" : openCollisions ? "DEGRADED" : "CONNECTED",
         lastErrorCode: failure ?? null,
         ...(operation === "CONNECTION_TEST" ? { lastHealthCheckAt: new Date() } : { lastSyncAt: new Date() }) },
     });
