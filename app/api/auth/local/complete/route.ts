@@ -3,6 +3,7 @@ import { rawPrisma } from "@/lib/db/raw-prisma";
 import { withTenantDb } from "@/lib/db/scoped-client";
 import { SessionCreationDeniedError, SessionStore } from "@/lib/auth/session-store";
 import { getLuxiaLocalAdapter, localProviderContext } from "@/lib/auth/providers/luxia-local";
+import { ProviderAdapterError } from "@/lib/provider-adapters";
 
 export const runtime = "nodejs";
 const failure = () => NextResponse.json({ error: "LOCAL_AUTHENTICATION_FAILED" }, { status: 401 });
@@ -51,6 +52,10 @@ export async function POST(request: Request) {
     return response;
   } catch (error) {
     if (error instanceof SessionCreationDeniedError) return failure();
-    return failure();
+    const safeCode = error instanceof ProviderAdapterError
+      ? `${error.code}${error.safeDetails.reason ? `_${error.safeDetails.reason}` : ""}`
+      : "LOCAL_AUTH_COMPLETE_FAILED";
+    console.error("LOCAL_AUTH_COMPLETE_FAILED", safeCode);
+    return NextResponse.json({ error: safeCode }, { status: 401 });
   }
 }
