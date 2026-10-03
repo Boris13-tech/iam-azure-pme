@@ -31,7 +31,8 @@ describe("LUXIA_LOCAL authentication security", () => {
     const challenge = String(start.publicChallenge!.challenge); const clientDataJSON = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge, origin: "https://local.luxia" })).toString("base64url");
     const authData = Buffer.alloc(37); createHash("sha256").update("local.luxia").digest().copy(authData); authData[32] = 1; authData.writeUInt32BE(1, 33);
     const signed = Buffer.concat([authData, createHash("sha256").update(Buffer.from(clientDataJSON, "base64url")).digest()]);
-    const response = { externalObjectId: created.identity!.externalObjectId, challenge, authenticatorId, credentialId: "credential-1", clientDataJSON, authenticatorData: authData.toString("base64url"), signature: sign("sha256", signed, pair.privateKey).toString("base64url"), credentialType: "PASSKEY" };
+    // Browsers return the WebAuthn credential ID, never LUXIA's internal authenticator row ID.
+    const response = { externalObjectId: created.identity!.externalObjectId, challenge, credentialId: "credential-1", clientDataJSON, authenticatorData: authData.toString("base64url"), signature: sign("sha256", signed, pair.privateKey).toString("base64url"), credentialType: "PASSKEY" };
     await expect(adapter.completeAuthentication({ context: context("complete-passkey"), transactionId: start.transactionId, response })).resolves.toMatchObject({ assuranceLevel: "LOCAL_PASSKEY", evidence: { method: "PASSKEY", outcome: "VERIFIED", assurance: { phishingResistant: true }, provenance: { source: "LOCAL_VERIFIER", offline: true, algorithmId: "WEBAUTHN_ES256", algorithmVersion: 1, keyId: authenticatorId, keyVersion: "1" } } });
     await expect(adapter.completeAuthentication({ context: context("replay-passkey"), transactionId: start.transactionId, response })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
   });

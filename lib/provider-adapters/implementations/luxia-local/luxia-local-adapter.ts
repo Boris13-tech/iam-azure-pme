@@ -254,7 +254,12 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
         phishingResistant: false, hardwareBound: false, userVerification: "NOT_VERIFIED",
       });
     }
-    const authenticator = authenticators.find((item) => item.id === response.authenticatorId && item.status === "ACTIVE");
+    const passkeyResponse = response.credentialType === "PASSKEY" || response.credentialType === "SECURITY_KEY";
+    const authenticator = authenticators.find((item) => item.status === "ACTIVE" && (
+      passkeyResponse
+        ? Boolean(response.credentialId) && item.credentialId === response.credentialId
+        : item.id === response.authenticatorId
+    ));
     if (!authenticator) authFailed("AUTHENTICATOR_UNAVAILABLE");
     if (authenticator.type === "TOTP") {
       if (!authenticator.secretRef || !response.totp) authFailed("TOTP_INVALID");
