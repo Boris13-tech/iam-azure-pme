@@ -9,6 +9,7 @@ import {
 import type { AuthContext } from "../auth/authorization-engine";
 import { ENTITLEMENT_CATALOG_V1 } from "../auth/entitlements-catalog";
 import { withTenantDb } from "../db/scoped-client";
+import { assertSubjectLifecycleTransition } from "../identity";
 
 export class CanonicalAdminError extends Error {
   constructor(
@@ -154,7 +155,7 @@ export async function listSubjects(auth: AuthContext, changeId: string) {
 
 export async function createSubject(
   auth: AuthContext,
-  input: { name: string; type: SubjectType },
+  input: { name: string; type: SubjectType; lifecycleState?: SubjectLifecycleState },
   changeId: string,
 ) {
   return withTenantDb(auth, async (tx) => {
@@ -165,6 +166,7 @@ export async function createSubject(
         tenantId: auth.tenantId,
         name: input.name.trim(),
         type: input.type,
+        lifecycleState: input.lifecycleState ?? "ACTIVE",
       },
     });
     await writeAudit(tx, auth, {
@@ -195,6 +197,13 @@ export async function updateSubject(
       throw new CanonicalAdminError("SELF_LIFECYCLE_DOWNGRADE_FORBIDDEN", 409);
     }
     const lifecycleChanged = input.lifecycleState != null && input.lifecycleState !== existing.lifecycleState;
+    if (lifecycleChanged) {
+      try {
+        assertSubjectLifecycleTransition(existing.lifecycleState, input.lifecycleState!);
+      } catch {
+        throw new CanonicalAdminError(`INVALID_SUBJECT_LIFECYCLE_TRANSITION:${existing.lifecycleState}:${input.lifecycleState}`, 409);
+      }
+    }
     const subject = await tx.subject.update({
       where: {
         organizationId_tenantId_id: {
@@ -215,6 +224,30 @@ export async function updateSubject(
           : {}),
       },
     });
+    let revokedSessions = 0;
+    let revokedAssignments = 0;
+    if (lifecycleChanged && subject.lifecycleState !== "ACTIVE") {
+      revokedSessions = (await tx.session.updateMany({
+        where: {
+          organizationId: auth.organizationId,
+          tenantId: auth.tenantId,
+          subjectId: subject.id,
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      })).count;
+    }
+    if (lifecycleChanged && (subject.lifecycleState === "DISABLED" || subject.lifecycleState === "RETIRED")) {
+      revokedAssignments = (await tx.assignment.updateMany({
+        where: {
+          organizationId: auth.organizationId,
+          tenantId: auth.tenantId,
+          subjectId: subject.id,
+          status: "ACTIVE",
+        },
+        data: { status: "REVOKED", validUntil: new Date() },
+      })).count;
+    }
     await writeAudit(tx, auth, {
       operation: "SUBJECT.UPDATE",
       changeId,
@@ -223,6 +256,8 @@ export async function updateSubject(
         nameChanged: input.name != null,
         lifecycleFrom: existing.lifecycleState,
         lifecycleTo: subject.lifecycleState,
+        revokedSessions,
+        revokedAssignments,
       },
     });
     return subject;
