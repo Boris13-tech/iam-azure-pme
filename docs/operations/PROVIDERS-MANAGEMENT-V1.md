@@ -26,7 +26,7 @@ The secret environment reference is derived from SHA-256 of the JSON array `[org
 
 Entra requires a real Directory ID, Graph client ID and secret with least-privilege read permission/admin consent. No reuse of existing OIDC or global Graph credentials is assumed. Google requires an exact customer ID (not `my_customer`) and a separately supplied, scoped access token; automatic refresh/service-account delegation is not part of this slice. Expired credentials produce a safe failure.
 
-OIDC issuers must be exact entries in operator-controlled `LUXIA_OIDC_ALLOWED_ISSUERS`, HTTPS, without userinfo/query/fragment. Operators must approve only public issuers accessible under their egress policy. No redirects are followed. Custom internal issuers need an explicitly reviewed edge/egress deployment; arbitrary admin-provided URLs are rejected.
+OIDC issuers must be exact entries in operator-controlled `LUXIA_OIDC_ALLOWED_ISSUERS`, equal to the connection external scope, HTTPS, without userinfo/query/fragment. IP literals, localhost, `.local` and non-443 ports are rejected independently of the allowlist. DNS answers must all be public IPv4; the selected address is pinned to the HTTPS request while TLS validates the original hostname. Redirects are rejected. IPv6-only and internal issuers currently fail closed and require a separate reviewed policy.
 
 ## Operations and permissions
 

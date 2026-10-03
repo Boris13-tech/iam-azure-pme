@@ -39,6 +39,7 @@ export default function ProviderDetailPage() {
   const supported = ["MICROSOFT_ENTRA", "GOOGLE_WORKSPACE", "OIDC_GENERIC"].includes(p.providerType);
   return <div className="space-y-5">
     <h2 className="text-2xl font-bold">{p.name}</h2><p>{p.providerType} · {p.operationalStatus}</p>
+    <p>Opérations de gestion {p.enabled ? "activées" : "désactivées"}. Ce réglage ne désactive pas l’authentification existante.</p>
     <p>Scope externe : {p.externalScopeId}</p>
     {message && <p role="alert" className="rounded border p-3">{message}</p>}
     {supported && <section className="space-y-3 rounded-xl bg-white p-5">
@@ -56,7 +57,7 @@ export default function ProviderDetailPage() {
         ...(secretReference ? { credentialSecretRef: secretReference } : {}),
         attributeMapping: p.providerType === "OIDC_GENERIC" ? {} : { displayName, principalName },
       })}>Enregistrer la configuration</button>
-      <button disabled={busy} className="ml-3 rounded border p-2" onClick={() => command("", "PATCH", { enabled: !p.enabled, expectedMappingVersion: p.mappingVersion })}>{p.enabled ? "Désactiver les opérations" : "Activer les opérations"}</button>
+      <button disabled={busy} className="ml-3 rounded border p-2" onClick={() => command("", "PATCH", { enabled: !p.enabled, expectedMappingVersion: p.mappingVersion })}>{p.enabled ? "Désactiver les opérations de gestion" : "Activer les opérations de gestion"}</button>
       <button disabled={busy || !p.enabled} className="ml-3 rounded border p-2" onClick={() => command("/operations", "POST", { operation: "CONNECTION_TEST" })}>Tester la connexion</button>
       {p.providerType !== "OIDC_GENERIC" && <button disabled={busy || !p.enabled} className="ml-3 rounded border p-2" onClick={() => command("/operations", "POST", { operation: "SYNC_DRY_RUN" })}>Découverte / sync dry-run</button>}
       <p>Le dry-run examine les comptes externes et les collisions. La création de Subjects, la fusion et le provisioning exigent un rapprochement validé.</p>

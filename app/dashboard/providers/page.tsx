@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-type Provider = { id: string; name: string; providerType: string; operationalStatus: string; lastSyncAt: string | null };
+type Provider = { id: string; name: string; providerType: string; enabled: boolean; operationalStatus: string; lastSyncAt: string | null };
 export default function ProvidersPage() {
   const [rows, setRows] = useState<Provider[]>([]);
   const [message, setMessage] = useState("");
@@ -35,11 +35,12 @@ export default function ProvidersPage() {
       </select></label>
       <label>Nom<input required maxLength={200} className="block w-full rounded border p-2" value={name} onChange={e => setName(e.target.value)} /></label>
       <label>Directory ID, Customer ID ou issuer OIDC<input required maxLength={512} className="block w-full rounded border p-2" value={externalScopeId} onChange={e => setExternalScopeId(e.target.value)} /></label>
-      <button disabled={busy} className="rounded bg-blue-700 p-2 text-white disabled:opacity-50">Créer une connexion désactivée</button>
+      <button disabled={busy} className="rounded bg-blue-700 p-2 text-white disabled:opacity-50">Créer avec les opérations de gestion désactivées</button>
     </form>
     {message && <p role="alert">{message}</p>}
     <div className="space-y-3">{rows.map(row => <Link key={row.id} href={`/dashboard/providers/${row.id}`} className="block rounded-xl border bg-white p-5">
       <strong>{row.name}</strong><p>{row.providerType} · {row.operationalStatus}</p>
+      <p>Opérations de gestion {row.enabled ? "activées" : "désactivées"}</p>
       <small>Dernière opération de découverte : {row.lastSyncAt ? new Date(row.lastSyncAt).toLocaleString("fr-FR") : "Aucune"}</small>
     </Link>)}</div>
     {!rows.length && <p>Aucun fournisseur visible dans ce tenant.</p>}

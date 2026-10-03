@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createManagedHttpDriver } from "../../lib/provider-adapters/implementations/managed-http/driver";
 import { connectionSecretReference } from "../../lib/provider-management/contracts";
+import { oidcMetadataRequest } from "../../lib/provider-adapters/implementations/managed-http/oidc-http";
+vi.mock("../../lib/provider-adapters/implementations/managed-http/oidc-http", () => ({ oidcMetadataRequest: vi.fn() }));
 const context = { organizationId: "org", tenantId: "tenant", providerConnectionId: "connection", operationId: "operation" };
 const key = connectionSecretReference(context);
 const google = () => createManagedHttpDriver({ context, type: "GOOGLE_WORKSPACE", externalScopeId: "C123",
@@ -35,8 +37,8 @@ describe("Managed provider real HTTP boundaries", () => {
   });
   it("tests approved OIDC discovery with exact issuer comparison", async () => {
     vi.stubEnv("LUXIA_OIDC_ALLOWED_ISSUERS", "https://identity.example.test");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ issuer: "https://wrong.example.test",
-      authorization_endpoint: "https://identity.example.test/auth", token_endpoint: "https://identity.example.test/token", jwks_uri: "https://identity.example.test/keys" })));
+    vi.mocked(oidcMetadataRequest).mockResolvedValue({ issuer: "https://wrong.example.test",
+      authorization_endpoint: "https://identity.example.test/auth", token_endpoint: "https://identity.example.test/token", jwks_uri: "https://identity.example.test/keys" });
     const driver = createManagedHttpDriver({ context, type: "OIDC_GENERIC", externalScopeId: "https://identity.example.test",
       configuration: { issuer: "https://identity.example.test" }, attributeMapping: {}, credentialSecretRef: null });
     await expect(driver.testConnection()).rejects.toThrow("OIDC_METADATA_MISMATCH");

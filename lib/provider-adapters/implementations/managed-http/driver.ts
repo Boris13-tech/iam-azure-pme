@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { oidcMetadataRequest } from "./oidc-http";
 import { EnvironmentSecretResolver } from "../../infrastructure/environment-secret-resolver";
 import type { ProviderOperationContext } from "../..";
 import { normalizeCloudIdentity } from "../cloud-providers/normalization";
@@ -95,13 +96,14 @@ export function createManagedHttpDriver(input: {
     async testConnection() {
       if (input.type !== "OIDC_GENERIC") { await page(); return; }
       if (!config.issuer) throw new ProviderManagementFailure("OIDC_ISSUER_REQUIRED");
+      if (config.issuer !== input.externalScopeId) throw new ProviderManagementFailure("OIDC_METADATA_MISMATCH");
       const issuer = new URL(config.issuer);
       const allowlist = (process.env.LUXIA_OIDC_ALLOWED_ISSUERS ?? "").split(",").map(value => value.trim());
       if (issuer.protocol !== "https:" || issuer.username || issuer.password || issuer.search || issuer.hash ||
           !allowlist.includes(config.issuer)) throw new ProviderManagementFailure("OIDC_ISSUER_NOT_APPROVED");
       const metadata = z.object({ issuer: z.string(), authorization_endpoint: z.string().url(),
         token_endpoint: z.string().url(), jwks_uri: z.string().url() }).parse(
-          await request(`${config.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`));
+          await oidcMetadataRequest(`${config.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`));
       if (metadata.issuer !== config.issuer || [metadata.authorization_endpoint, metadata.token_endpoint, metadata.jwks_uri]
         .some(value => new URL(value).protocol !== "https:")) throw new ProviderManagementFailure("OIDC_METADATA_MISMATCH");
     },
