@@ -50,4 +50,28 @@ describe("Managed provider real HTTP boundaries", () => {
       configuration: { issuer: "https://127.0.0.1" }, attributeMapping: {}, credentialSecretRef: null }).testConnection()).rejects.toThrow("OIDC_ISSUER_NOT_APPROVED");
     expect(fetcher).not.toHaveBeenCalled();
   });
+  it("enforces the ten-page/1000-identity ceiling without fetching page eleven", async () => {
+    vi.stubEnv(key, "private"); let pages = 0;
+    const fetcher = vi.fn().mockImplementation(async () => Response.json({
+      users: Array.from({ length: 100 }, (_, index) => ({ id: `${pages}-${index}`, primaryEmail: `person${index}@example.test` })),
+      nextPageToken: `page-${++pages}`,
+    }));
+    vi.stubGlobal("fetch", fetcher); let observed = 0;
+    await expect((async () => { for await (const item of google().discover()) { void item; observed++; } })()).rejects.toThrow("DISCOVERY_LIMIT_EXCEEDED");
+    expect(observed).toBe(1000); expect(fetcher).toHaveBeenCalledTimes(10);
+  });
+  it("maps Entra stable IDs unchanged and rejects an off-origin Graph cursor", async () => {
+    vi.stubEnv(key, "private");
+    const oid = "e0000000-0000-4000-8000-000000000001";
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ access_token: "hidden-access-token" }))
+      .mockResolvedValueOnce(Response.json({ value: [{ id: oid, displayName: "Certification fixture" }], "@odata.nextLink": "https://internal.example.test/v1.0/users" }));
+    vi.stubGlobal("fetch", fetcher);
+    const driver = createManagedHttpDriver({ context, type: "MICROSOFT_ENTRA",
+      externalScopeId: "e0000000-0000-4000-8000-000000000002", configuration: { clientId: "e0000000-0000-4000-8000-000000000003" }, attributeMapping: {}, credentialSecretRef: key });
+    const results = [];
+    await expect((async () => { for await (const item of driver.discover()) results.push(item); })()).rejects.toThrow("UNSAFE_PROVIDER_CURSOR");
+    expect(results).toMatchObject([{ externalObjectId: oid }]);
+    expect(JSON.stringify(results)).not.toContain("hidden-access-token");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });
