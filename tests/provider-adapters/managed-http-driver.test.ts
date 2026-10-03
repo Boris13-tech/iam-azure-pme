@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createManagedHttpDriver } from "../../lib/provider-adapters/implementations/managed-http/driver";
-import { connectionSecretReference } from "../../lib/provider-management/contracts";
+import { connectionSecretReference, type DiscoveryProjection } from "../../lib/provider-management/contracts";
 import { oidcMetadataRequest } from "../../lib/provider-adapters/implementations/managed-http/oidc-http";
 vi.mock("../../lib/provider-adapters/implementations/managed-http/oidc-http", () => ({ oidcMetadataRequest: vi.fn() }));
 const context = { organizationId: "org", tenantId: "tenant", providerConnectionId: "connection", operationId: "operation" };
@@ -68,7 +68,7 @@ describe("Managed provider real HTTP boundaries", () => {
     vi.stubGlobal("fetch", fetcher);
     const driver = createManagedHttpDriver({ context, type: "MICROSOFT_ENTRA",
       externalScopeId: "e0000000-0000-4000-8000-000000000002", configuration: { clientId: "e0000000-0000-4000-8000-000000000003" }, attributeMapping: {}, credentialSecretRef: key });
-    const results = [];
+    const results: DiscoveryProjection[] = [];
     await expect((async () => { for await (const item of driver.discover()) results.push(item); })()).rejects.toThrow("UNSAFE_PROVIDER_CURSOR");
     expect(results).toMatchObject([{ externalObjectId: oid }]);
     expect(JSON.stringify(results)).not.toContain("hidden-access-token");
