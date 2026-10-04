@@ -7,6 +7,14 @@ export function connectionSecretReference(scope: { organizationId: string; tenan
   ])).digest("hex").toUpperCase()}`;
 }
 
+export function versionedConnectionSecretReference(scope: {
+  organizationId: string; tenantId: string; providerConnectionId: string; providerType: string; credentialVersion: string;
+}) {
+  return `LUXIA_PROVIDER_VERSION_${createHash('sha256').update(JSON.stringify([
+    scope.organizationId,scope.tenantId,scope.providerConnectionId,scope.providerType,scope.credentialVersion,
+  ])).digest('hex').toUpperCase()}`;
+}
+
 export const managedProviderTypes = ["MICROSOFT_ENTRA", "GOOGLE_WORKSPACE", "OIDC_GENERIC"] as const;
 export const preparedProviderTypes = ["LDAP", "ACTIVE_DIRECTORY", "SAMBA_AD", "GITHUB", "AWS", "SAML", "SCIM"] as const;
 

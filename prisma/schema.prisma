@@ -1164,6 +1164,9 @@ model ProviderConnectionTenantScope {
   operationalStatus    ProviderOperationalStatus @default(DISABLED)
   configuration        Json                      @default("{}")
   credentialSecretRef  String?
+  activeCredentialVersion String?
+  candidateCredentialVersion String?
+  credentialRevoked Boolean @default(false)
   attributeMapping     Json                      @default("{}")
   mappingVersion       Int                       @default(1)
   lastHealthCheckAt    DateTime?

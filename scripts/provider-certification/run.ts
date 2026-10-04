@@ -6,7 +6,14 @@ import { completeEvidence } from './evidence';
 
 export async function run(profile: Profile) {
   const gate = preflight(profile, process.env);
-  if (!gate.ready) { console.log(JSON.stringify({ profile, status:'BLOCKED', missing:gate.missing })); process.exitCode=2; return; }
+  if (!gate.ready) { console.log(JSON.stringify({ profile, status:'BLOCKED', missing:gate.missing, networkCalls:0 })); process.exitCode=2; return; }
+  // Memory/custody certification alone must not launch a real provider. Live
+  // setup must bind dedicated main/negative credentials and versioned scopes.
+  const liveSetupPending = (candidate: Profile): boolean => candidate === 'ENTRA';
+  if (liveSetupPending(profile)) {
+    console.log(JSON.stringify({ profile, status:'BLOCKED', missing:['ENTRA_VERSIONED_LIVE_SETUP_PENDING'], networkCalls:0 }));
+    process.exitCode=2; return;
+  }
   process.env.DATABASE_URL = process.env.LUXIA_CERT_DATABASE_URL;
   const admin = new PrismaClient({ datasources:{ db:{ url:process.env.LUXIA_CERT_DATABASE_MIGRATION_URL } } });
   const runtime = new PrismaClient();
@@ -31,8 +38,10 @@ export async function run(profile: Profile) {
     const role = await runtime.$queryRaw<Array<{ current_user:string; rolsuper:boolean; rolbypassrls:boolean }>>`SELECT current_user,rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user`;
     if (role[0]?.current_user !== 'app_user' || role[0].rolsuper || role[0].rolbypassrls) throw new Error('POSTURE');
     pass('Runtime posture','NEON');
-    const auth = { organizationId:process.env[`LUXIA_CERT_${profile}_ORGANIZATION_ID`]!, tenantId:process.env[`LUXIA_CERT_${profile}_TENANT_SCOPE_ID`]!, subjectId:process.env[`LUXIA_CERT_${profile}_ACTOR_SUBJECT_ID`]! };
-    const id = process.env[`LUXIA_CERT_${profile}_CONNECTION_ID`]!;
+    const auth = profile === 'ENTRA' ? { organizationId:process.env.LUXIA_CERT_SCOPE_ORGANIZATION_ID!,
+      tenantId:process.env.LUXIA_CERT_SCOPE_TENANT_ID!, subjectId:process.env.LUXIA_CERT_ACTOR_SUBJECT_ID! } :
+      { organizationId:process.env[`LUXIA_CERT_${profile}_ORGANIZATION_ID`]!, tenantId:process.env[`LUXIA_CERT_${profile}_TENANT_SCOPE_ID`]!, subjectId:process.env[`LUXIA_CERT_${profile}_ACTOR_SUBJECT_ID`]! };
+    const id = profile === 'ENTRA' ? process.env.LUXIA_CERT_ENTRA_PROVIDER_CONNECTION_ID! : process.env[`LUXIA_CERT_${profile}_CONNECTION_ID`]!;
     const { withTenantDb } = await import('../../lib/db/scoped-client');
     const scope = await withTenantDb(auth, tx => tx.providerConnectionTenantScope.findUnique({ where:{ organizationId_tenantId_providerConnectionId:{ organizationId:auth.organizationId,tenantId:auth.tenantId,providerConnectionId:id } }, include:{providerConnection:true} }));
     const type = profile === 'ENTRA' ? 'MICROSOFT_ENTRA' : profile === 'GOOGLE' ? 'GOOGLE_WORKSPACE' : 'OIDC_GENERIC';

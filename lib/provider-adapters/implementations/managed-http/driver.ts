@@ -3,6 +3,7 @@ import { oidcMetadataRequest } from "./oidc-http";
 import { EnvironmentSecretResolver } from "../../infrastructure/environment-secret-resolver";
 import type { ProviderOperationContext } from "../..";
 import { normalizeCloudIdentity } from "../cloud-providers/normalization";
+import type {ProviderTokenManager,TokenContext} from '../../../provider-management/token-manager';
 import { connectionSecretReference, applyAttributeMapping, attributeMappingSchema, configurationSchema, ProviderManagementFailure,
   type ProviderManagementDriver } from "../../../provider-management/contracts";
 
@@ -33,9 +34,29 @@ async function request(url: string, options: RequestInit = {}): Promise<unknown>
   }
 }
 
+async function tokenManagedRequest(url:string,manager:ProviderTokenManager,context:TokenContext,transport:typeof fetch):Promise<unknown> {
+  try {
+  const response=await manager.executeWithToken(context,token=>transport(url,{
+    headers:{Authorization:`Bearer ${token}`},redirect:'error',cache:'no-store',signal:AbortSignal.timeout(8000),
+  }));
+  if(!response.ok||!response.body)throw new ProviderManagementFailure('PROVIDER_HTTP_FAILURE');
+  const reader=response.body.getReader();const chunks:Uint8Array[]=[];let length=0;
+  try {while(true){const next=await reader.read();if(next.done)break;length+=next.value.length;
+    if(length>MAX_RESPONSE_BYTES)throw new ProviderManagementFailure('PROVIDER_RESPONSE_TOO_LARGE');chunks.push(next.value);}}
+  finally{await reader.cancel();}
+  const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
+  try{return JSON.parse(new TextDecoder().decode(bytes));}catch{throw new ProviderManagementFailure('INVALID_PROVIDER_RESPONSE');}
+  } catch(error) {
+    if(error instanceof ProviderManagementFailure)throw error;
+    throw new ProviderManagementFailure('PROVIDER_UNAVAILABLE');
+  }
+}
+
 export function createManagedHttpDriver(input: {
   context: ProviderOperationContext; type: string; externalScopeId: string;
   configuration: unknown; attributeMapping: unknown; credentialSecretRef: string | null;
+  tokenManager?: ProviderTokenManager; tokenContext?: TokenContext;
+  tokenTransport?: typeof fetch;
 }): ProviderManagementDriver {
   const config = configurationSchema.parse(input.configuration);
   const mapping = attributeMappingSchema.parse(input.attributeMapping);
@@ -83,7 +104,13 @@ export function createManagedHttpDriver(input: {
       url.searchParams.set("projection", "basic");
       if (cursor) url.searchParams.set("pageToken", cursor);
     } else throw new ProviderManagementFailure("DIRECTORY_DISCOVERY_UNSUPPORTED");
-    const data = await request(url.toString(), { headers: { Authorization: `Bearer ${await token()}` } });
+    if(Boolean(input.tokenManager)!==Boolean(input.tokenContext))throw new ProviderManagementFailure('PROVIDER_TOKEN_CONTEXT_INVALID');
+    if(input.tokenContext && (input.tokenContext.organizationId!==input.context.organizationId||
+      input.tokenContext.tenantId!==input.context.tenantId||input.tokenContext.providerConnectionId!==input.context.providerConnectionId||
+      input.tokenContext.providerType!==input.type))throw new ProviderManagementFailure('PROVIDER_TOKEN_CONTEXT_INVALID');
+    const data = input.tokenManager && input.tokenContext
+      ? await tokenManagedRequest(url.toString(),input.tokenManager,input.tokenContext,input.tokenTransport ?? fetch)
+      : await request(url.toString(), { headers: { Authorization: `Bearer ${await token()}` } });
     const validated = input.type === "MICROSOFT_ENTRA"
       ? z.object({ value: z.array(z.record(z.string(), z.unknown())).max(100), "@odata.nextLink": z.string().max(8192).optional() }).parse(data)
       : z.object({ users: z.array(z.record(z.string(), z.unknown())).max(100).optional(), nextPageToken: z.string().max(8192).optional() }).parse(data);

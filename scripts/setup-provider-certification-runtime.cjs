@@ -8,6 +8,12 @@ async function main() {
   const admin = new PrismaClient({ datasources: { db: { url: url.toString() } } });
   const password = randomBytes(32).toString('hex');
   try {
+    if (process.env.LUXIA_CERT_TOKEN_SUITE === 'true') {
+      const migration = spawnSync(process.execPath,['node_modules/prisma/build/index.js','migrate','deploy'],{
+        env:{...process.env,DATABASE_URL:url.toString()},encoding:'utf8',timeout:120000});
+      console.log(`Certification migrations: ${migration.status===0?'PASS':'FAIL'} (raw output withheld)`);
+      if(migration.status!==0)throw new Error('MIGRATION');
+    }
     const existing = await admin.$queryRawUnsafe("SELECT rolname FROM pg_roles WHERE rolname='app_user'");
     if (!existing.length) throw new Error('POSTURE');
     const role = await admin.$queryRawUnsafe("SELECT rolsuper,rolbypassrls,rolcreatedb,rolcreaterole,rolreplication FROM pg_roles WHERE rolname='app_user'");
@@ -38,8 +44,10 @@ async function main() {
     } finally { await runtime.$disconnect(); }
     const secret = spawnSync('gh', ['secret','set','LUXIA_CERT_DATABASE_URL','--env','provider-certification','--repo','Boris13-tech/iam-azure-pme'], { input: url.toString(), encoding:'utf8' });
     if (secret.status !== 0) throw new Error('STORE');
-    const tests = spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs','run','tests/security/provider-management-rls.test.ts','tests/certification/provider-denial-audit-rls.test.ts','--testTimeout=30000','--hookTimeout=30000'], {
-      env: { ...process.env, DATABASE_URL:url.toString() }, encoding:'utf8', timeout:180000,
+    const tests = spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs','run',
+      ...(process.env.LUXIA_CERT_TOKEN_FINAL_CHECK==='true'?['tests/certification/provider-token-store-rls.test.ts','--testTimeout=120000','--hookTimeout=60000']:
+      ['tests/security/provider-management-rls.test.ts','tests/certification/provider-denial-audit-rls.test.ts','--testTimeout=30000','--hookTimeout=30000'])], {
+      env: { ...process.env, DATABASE_URL:url.toString() }, encoding:'utf8', timeout:300000,
     });
     console.log(`Certification provider RLS tests: ${tests.status === 0 ? 'PASS' : 'FAIL'} (raw output withheld)`);
     if (tests.status !== 0) {
@@ -49,6 +57,37 @@ async function main() {
       }
     }
     if (tests.status !== 0) throw new Error('TESTS');
+    if(process.env.LUXIA_CERT_TOKEN_SUITE==='true') {
+      const testEnv={...process.env,DATABASE_URL:url.toString()};
+      const allTasks=[
+        ['Versioned custody PostgreSQL/RLS',['node_modules/vitest/vitest.mjs','run','tests/certification/provider-token-store-rls.test.ts','--testTimeout=120000','--hookTimeout=60000']],
+        ['Security suite',['node_modules/vitest/vitest.mjs','run','tests/security','--testTimeout=30000','--hookTimeout=30000']],
+        ['Adapter suite',['node_modules/vitest/vitest.mjs','run','tests/provider-adapters']],
+        ['Identity suite',['node_modules/vitest/vitest.mjs','run','tests/identity']],
+        ['Operations suite',['node_modules/vitest/vitest.mjs','run','tests/operations']],
+        ['Operational certification',['node_modules/tsx/dist/cli.mjs','scripts/certify-identity-v1.ts']],
+        ['Entra parity',['node_modules/vitest/vitest.mjs','run','tests/provider-adapters/microsoft-entra-adapter.contract.test.ts','tests/provider-adapters/microsoft-entra-architecture.test.ts']],
+        ['TypeScript',['node_modules/typescript/bin/tsc','--noEmit','--incremental','false']],
+        ['Lint',['node_modules/next/dist/bin/next','lint']],
+        ['Cutover readiness',['node_modules/tsx/dist/cli.mjs','scripts/generate-cutover-report.ts']],
+      ];
+      const tasks=process.env.LUXIA_CERT_TOKEN_FINAL_CHECK==='true'?
+        [['Final TypeScript',['node_modules/typescript/bin/tsc','--noEmit','--incremental','false']]]:allTasks;
+      for(const [label,args] of tasks){
+        const result=spawnSync(process.execPath,args,{env:testEnv,encoding:'utf8',timeout:300000});
+        console.log(`${label}: ${result.status===0?'PASS':'FAIL'} (raw output withheld)`);
+        if(result.status!==0){
+          const output=(result.stdout+result.stderr).replace(/\u001b\[[0-9;]*m/g,'');
+          for(const line of output.split(/\r?\n/)) {
+            // Test names/locations and whitelisted failure classes only, no raw provider/DB errors.
+            if(/^\s*(FAIL|❯)\s+(tests\/|tests\\)/.test(line) && ![url.toString(),password,process.env.DATABASE_MIGRATION_URL].some(v=>v&&line.includes(v)))console.log(line);
+          }
+          for(const marker of ['Test timed out','Hook timed out','PROVIDER_CREDENTIAL_INVALID','PROVIDER_TOKEN_SCOPE_DENIED','PROVIDER_CREDENTIAL_ROTATION_FAILED','PROVIDER_TOKEN_AUDIT_UNAVAILABLE','AssertionError','P2028'])
+            if(output.includes(marker))console.log(`Safe failure class: ${marker}`);
+          throw new Error('TESTS');
+        }
+      }
+    }
     if (process.env.LUXIA_CERT_BUILD === 'true') {
       const buildEnv = { ...process.env, DATABASE_URL:url.toString() };
       delete buildEnv.DATABASE_MIGRATION_URL;
@@ -59,7 +98,7 @@ async function main() {
   } finally { await admin.$disconnect(); }
 }
 main().catch(error => {
-  const safe = ['SCOPE','MEMBERSHIPS','OWNERSHIP','RLS','POSTURE','STORE','TESTS','BUILD'];
+  const safe = ['SCOPE','MEMBERSHIPS','OWNERSHIP','RLS','POSTURE','STORE','TESTS','BUILD','MIGRATION'];
   console.error(`CERTIFICATION_SETUP_FAILED: ${safe.includes(error.message) ? error.message : /^P\d{4}$/.test(error.code || '') ? error.code : 'INTERNAL'}; SQLSTATE=${/^[0-9A-Z]{5}$/.test(error.meta?.code || '') ? error.meta.code : 'WITHHELD'} — sensitive diagnostics withheld`);
   process.exitCode=1;
 });
