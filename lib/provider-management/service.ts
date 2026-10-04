@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
 import type { AuthContext } from "../auth/authorization-engine";
 import { withTenantDb } from "../db/scoped-client";
 import { CanonicalAdminError } from "../admin/canonical-administration";
@@ -130,29 +131,55 @@ export async function runProviderOperation(auth: AuthContext, id: string, operat
       where: { organizationId_tenantId_providerConnectionId: key }, include: { providerConnection: true },
     });
     if (!scope) throw new CanonicalAdminError("PROVIDER_NOT_IN_TENANT_SCOPE", 404);
+    // A sentinel commits denial evidence before the error is raised outside.
+    const deny = async (reasonCode: string, httpStatus: number) => {
+      const operationName = `PROVIDER.${operation}.DENIED`;
+      const requestedKey = { organizationId: auth.organizationId, tenantId: auth.tenantId, changeId };
+      const metadata = { providerConnectionId: id, reasonCode, requestedOperation: operation };
+      const matches = (event: { result: string; operation: string; actorSubjectId: string; metadata: Prisma.JsonValue | null }) => {
+        const stored = event.metadata as Record<string, unknown> | null;
+        return event.result === "DENIED" && event.operation === operationName && event.actorSubjectId === auth.subjectId &&
+          stored?.providerConnectionId === id && stored?.reasonCode === reasonCode && stored?.requestedOperation === operation &&
+          Object.keys(stored).length === 3;
+      };
+      const occupied = await tx.canonicalAdminAuditEvent.findUnique({ where: { organizationId_tenantId_changeId: requestedKey } });
+      // Historical START events and unrelated reuse retain their original keys.
+      const auditChangeId = occupied && !matches(occupied)
+        ? `denied:${createHash("sha256").update(JSON.stringify([id, auth.subjectId, operation, reasonCode, changeId])).digest("hex")}` : changeId;
+      await tx.canonicalAdminAuditEvent.createMany({ data: [{
+        organizationId: auth.organizationId, tenantId: auth.tenantId, actorSubjectId: auth.subjectId,
+        operation: operationName, changeId: auditChangeId, result: "DENIED", metadata,
+      }], skipDuplicates: true });
+      const persisted = await tx.canonicalAdminAuditEvent.findUnique({ where: {
+        organizationId_tenantId_changeId: { ...requestedKey, changeId: auditChangeId },
+      } });
+      if (!persisted || !matches(persisted)) throw new CanonicalAdminError("PROVIDER_DENIAL_AUDIT_UNAVAILABLE", 503);
+      return { denial: { reasonCode, httpStatus } } as const;
+    };
     const prior = await tx.providerSyncRun.findUnique({
       where: { organizationId_tenantId_providerConnectionId_operationId: { ...key, operationId: changeId } },
     });
     if (prior) {
-      if (prior.operation !== operation) throw new CanonicalAdminError("PROVIDER_OPERATION_ID_CONFLICT", 409);
+      if (prior.operation !== operation) return deny("PROVIDER_OPERATION_ID_CONFLICT", 409);
       return { replay: prior };
     }
-    if (!scope.enabled) throw new CanonicalAdminError("PROVIDER_DISABLED", 409);
+    if (!scope.enabled) return deny("PROVIDER_DISABLED", 409);
     if (!(managedProviderTypes as readonly string[]).includes(scope.providerConnection.providerType)) {
-      throw new CanonicalAdminError("PROVIDER_OPERATION_UNSUPPORTED", 422);
+      return deny("PROVIDER_OPERATION_UNSUPPORTED", 422);
     }
     if (operation === "SYNC_DRY_RUN" && scope.providerConnection.providerType === "OIDC_GENERIC") {
-      throw new CanonicalAdminError("DIRECTORY_DISCOVERY_UNSUPPORTED", 422);
+      return deny("DIRECTORY_DISCOVERY_UNSUPPORTED", 422);
     }
     if (await tx.providerSyncRun.findFirst({ where: { ...key, status: "RUNNING" } })) {
-      throw new CanonicalAdminError("PROVIDER_OPERATION_IN_PROGRESS", 409);
+      return deny("PROVIDER_OPERATION_IN_PROGRESS", 409);
     }
     const run = await tx.providerSyncRun.create({ data: {
       ...key, operationId: changeId, operation, mode: "DRY_RUN", status: "RUNNING",
     } });
-    await audit(tx, auth, id, `PROVIDER.${operation}.START`, changeId);
+    await audit(tx, auth, id, `PROVIDER.${operation}.START`, `start:${run.id}`);
     return { scope, run };
   });
+  if ("denial" in setup) throw new CanonicalAdminError(setup.denial.reasonCode, setup.denial.httpStatus);
   if ("replay" in setup) return setup.replay;
   const projections: DiscoveryProjection[] = [];
   let failure: string | undefined;
