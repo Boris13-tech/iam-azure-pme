@@ -47,7 +47,7 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
     if (!process.env.DATABASE_MIGRATION_URL || !process.env.DATABASE_URL) throw new Error("ISOLATED_DB_REQUIRED");
     const endpoint = new URL(process.env.DATABASE_URL);
     if (!(["localhost", "127.0.0.1"].includes(endpoint.hostname) ||
-      (endpoint.hostname === "ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech" && endpoint.pathname === "/luxia_resources_cert"))) throw new Error("ISOLATED_DB_REQUIRED");
+      (endpoint.hostname === "ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_resources_cert", "/luxia_sod_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
     legacyBefore = await legacyDigest();
     await owned(auth, async tx => {
@@ -68,7 +68,7 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
         await tx.assignment.create({ data: { organizationId: org, tenantId: tenant, subjectId: actor, entitlementId: id, source: "DIRECT" } });
       }
       memberAssignment = (await tx.assignment.create({ data: { organizationId: org, tenantId: tenant, subjectId: beneficiary, entitlementId: directEntitlement, source: "DIRECT" } })).id;
-      for (const permission of ["resources.read", "resources.manage", "assignments.read", "assignments.manage", "audit.read"]) {
+      for (const permission of ["resources.read", "resources.manage", "assignments.read", "assignments.manage", "audit.read", "sod.read", "sod.manage"]) {
         const entitlement = await tx.entitlement.create({ data: { organizationId: org, tenantId: tenant, key: permission, action: permission.split(".")[1], resource: permission.split(".")[0] } });
         await tx.assignment.create({ data: { organizationId: org, tenantId: tenant, subjectId: actor, entitlementId: entitlement.id, source: "DIRECT" } });
       }
@@ -243,6 +243,25 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
       expect(granted.status).toBe(201);
       expect((await api(`assignments/${granted.body.id}/revoke`, "POST")).status).toBe(200);
       expect((await api("audit")).status).toBe(200);
+      const sodApi = async (path: string, method = "GET", body?: unknown) => {
+        const response = await fetch(`http://127.0.0.1:3193/api/canonical/sod/${path}`, { method,
+          headers: { "content-type": "application/json", "x-luxia-change-id": change(), cookie: `luxia_session=${rawToken}` },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        return { status: response.status, body: await response.json() };
+      };
+      const policy = await sodApi("policies", "POST", { key: randomUUID(), scopeId: scoped.body.id });
+      expect(policy.status).toBe(200); expect(policy.body.status).toBe("DISABLED");
+      expect((await sodApi(`policies/${policy.body.id}`)).status).toBe(200);
+      const secondEntitlement = await api("entitlements", "POST", { scopeId: scoped.body.id, action: "approve", label: "HTTP approve" });
+      const rule = await sodApi(`policies/${policy.body.id}/rules`, "POST", { entitlementAId: entitlement.body.id, entitlementBId: secondEntitlement.body.id });
+      expect(rule.status).toBe(200);
+      expect((await sodApi(`policies/${policy.body.id}`, "PATCH", { status: "ACTIVE" })).status).toBe(200);
+      expect((await sodApi("evaluate", "POST", { subjectId: beneficiary, entitlementId: entitlement.body.id, scope: scoped.body.id })).body.decision).toBe("ALLOW");
+      expect((await sodApi("conflicts")).status).toBe(200);
+      expect((await sodApi(`rules/${rule.body.id}`, "DELETE")).body.enabled).toBe(false);
+      expect((await sodApi(`policies/${randomUUID()}`)).status).toBe(404);
+      expect((await sodApi("policies", "POST", { key: "foreign", scopeId: foreignScope })).status).toBe(404);
+      expect((await sodApi("policies", "POST", { key: "override", scopeId: scoped.body.id, tenantId: otherTenant })).status).toBe(400);
       expect((await api("resources", "GET", undefined, "invalid-session")).status).toBe(401);
       await SessionStore.revokeByToken(rawToken);
       expect((await api("resources")).status).toBe(401);
@@ -251,6 +270,6 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
       else server.kill();
       await new Promise<void>(done => { if (server.exitCode !== null) done(); else { server.once("exit", () => done()); setTimeout(done, 5000); } });
     }
-  }, 120_000);
+  }, 240_000);
   it("legacy rows and bridges unchanged", async () => { expect(await legacyDigest()).toEqual(legacyBefore); });
 });

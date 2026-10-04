@@ -3,6 +3,7 @@ import type { AuthContext } from "../auth/authorization-engine";
 import { CanonicalAdminError } from "../admin/canonical-administration";
 import { withTenantDb } from "../db/scoped-client";
 import { evaluateResourceAccess } from "./authorization";
+import { enforceSoD, SoDDeniedError } from "./sod";
 
 const context = (auth: AuthContext) => ({ organizationId: auth.organizationId, tenantId: auth.tenantId });
 const notFound = () => { throw new CanonicalAdminError("NOT_FOUND", 404); };
@@ -22,7 +23,7 @@ async function requireNative(tx: Prisma.TransactionClient, auth: AuthContext, ke
 
 type Outcome<T> = { value: T } | { error: CanonicalAdminError };
 /** A controlled DENY commits its canonical evidence before throwing outside. */
-async function operation<T>(auth: AuthContext, changeId: string, name: string, permission: string | null,
+export async function operation<T>(auth: AuthContext, changeId: string, name: string, permission: string | null,
   work: (tx: Prisma.TransactionClient) => Promise<{ value: T; metadata?: Prisma.InputJsonObject; assignmentIds?: string[]; targetSubjectId?: string; auditResult?: "SUCCESS" | "DENIED" }>): Promise<T> {
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(changeId)) throw new CanonicalAdminError("INVALID_CHANGE_ID", 400);
   const outcome = await withTenantDb<Outcome<T>>(auth, async tx => {
@@ -40,7 +41,8 @@ async function operation<T>(auth: AuthContext, changeId: string, name: string, p
     } catch (error) {
       if (!(error instanceof CanonicalAdminError)) throw error; // DB error rolls everything back.
       await tx.canonicalAdminAuditEvent.create({ data: { ...context(auth), actorSubjectId: auth.subjectId,
-        operation: `${name}.DENIED`, changeId, result: "DENIED", metadata: { reasonCode: error.code } } });
+        operation: error instanceof SoDDeniedError ? "ASSIGNMENT.DENIED.SOD" : `${name}.DENIED`, changeId, result: "DENIED",
+        metadata: error instanceof SoDDeniedError ? error.metadata : { reasonCode: error.code } } });
       return { error };
     }
     await tx.canonicalAdminAuditEvent.create({ data: { ...context(auth), actorSubjectId: auth.subjectId,
@@ -132,6 +134,8 @@ export function grantAssignment(auth: AuthContext, input: { subjectId: string; e
       AND: [{ OR: [{ validUntil: null }, { validUntil: { gte: input.validUntil } }] }],
     } });
     if (!authority) throw new CanonicalAdminError("GRANT_AUTHORITY_REQUIRED", 403);
+    await enforceSoD(tx, { ...context(auth), subjectId: subject.id, entitlementId: entitlement.id,
+      scope: entitlement.resourceScopeId!, assignmentOperation: "CREATE", validFrom: now, validUntil: input.validUntil });
     const value = await tx.assignment.create({ data: { ...context(auth), subjectId: subject.id,
       entitlementId: entitlement.id, source: "DIRECT", validFrom: now, validUntil: input.validUntil } });
     return { value, assignmentIds: [value.id], targetSubjectId: subject.id, metadata: { entitlementId: entitlement.id, scopeId: entitlement.resourceScopeId! } };
@@ -144,6 +148,28 @@ export function revokeAssignment(auth: AuthContext, id: string, changeId: string
     if (row.subjectId === auth.subjectId) throw new CanonicalAdminError("SELF_REVOKE_FORBIDDEN", 403);
     const value = await tx.assignment.update({ where: { organizationId_tenantId_id: { ...context(auth), id } }, data: { status: "REVOKED" } });
     return { value, assignmentIds: [id], targetSubjectId: row.subjectId, metadata: { entitlementId: row.entitlementId } };
+  });
+}
+export function updateAssignment(auth: AuthContext, id: string, input: { entitlementId?: string; validUntil?: Date; status?: "ACTIVE" | "REVOKED" }, changeId: string) {
+  return operation(auth, changeId, "RESOURCE.ASSIGNMENT.UPDATE", "assignments.manage", async tx => {
+    const row = await tx.assignment.findFirst({ where: { ...context(auth), id, source: "DIRECT", entitlement: { resourceScopeId: { not: null } } } });
+    if (!row) return notFound();
+    if (row.subjectId === auth.subjectId) throw new CanonicalAdminError("SELF_MODIFY_FORBIDDEN", 403);
+    const status = input.status ?? row.status;
+    const entitlementId = input.entitlementId ?? row.entitlementId;
+    const validUntil = input.validUntil ?? row.validUntil;
+    if (status === "ACTIVE") {
+      if (!validUntil || validUntil <= new Date()) throw new CanonicalAdminError("INVALID_EXPIRY", 400);
+      const entitlement = await tx.entitlement.findFirst({ where: { ...context(auth), id: entitlementId, active: true, resourceScopeId: { not: null } }, include: { resourceScope: true } });
+      if (!entitlement?.resourceScope?.active || !await tx.subject.findFirst({ where: { ...context(auth), id: row.subjectId, lifecycleState: "ACTIVE" } })) return notFound();
+      const now = new Date();
+      if (!await tx.assignment.findFirst({ where: { ...context(auth), subjectId: auth.subjectId, entitlementId, status: "ACTIVE", source: { not: "LEGACY_ROLE" },
+        OR: [{ validFrom: null }, { validFrom: { lte: now } }], AND: [{ OR: [{ validUntil: null }, { validUntil: { gte: validUntil } }] }] } })) throw new CanonicalAdminError("GRANT_AUTHORITY_REQUIRED", 403);
+      await enforceSoD(tx, { ...context(auth), subjectId: row.subjectId, entitlementId, scope: entitlement.resourceScopeId!,
+        assignmentOperation: row.status === "ACTIVE" ? "MODIFY" : "REACTIVATE", excludeAssignmentId: id, validFrom: now, validUntil });
+    }
+    const value = await tx.assignment.update({ where: { organizationId_tenantId_id: { ...context(auth), id } }, data: { entitlementId, validUntil, status } });
+    return { value, assignmentIds: [id], targetSubjectId: row.subjectId, metadata: { entitlementId, status } };
   });
 }
 export function listAssignments(auth: AuthContext, changeId: string, after?: string) {

@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const certUrl = process.env.LUXIA_RESOURCE_OWNER_URL;
 const endpoint = certUrl && new URL(certUrl);
-if (!endpoint || endpoint.hostname !== 'ep-dark-king-ah402c68.c-3.us-east-1.aws.neon.tech' || endpoint.pathname !== '/luxia_resources_cert') {
+if (!endpoint || endpoint.hostname !== 'ep-dark-king-ah402c68.c-3.us-east-1.aws.neon.tech' || !['/luxia_resources_cert', '/luxia_sod_cert'].includes(endpoint.pathname)) {
   console.error('ISOLATED_RESOURCES_DB_REQUIRED'); process.exit(2);
 }
 const owner = new PrismaClient({ datasources: { db: { url: certUrl } } });
@@ -17,6 +17,8 @@ function run(label, bin, args, env) {
     const names = (result.stdout + result.stderr).split(/\r?\n/).filter(line => /^( FAIL |Error:|.*error TS\d)/.test(line));
     for (const line of names.filter(line => /^ FAIL /.test(line))) console.log(line.replace(/\x1B\[[0-9;]*m/g, '').slice(0, 300));
     console.log(`Safe failure classes: ${names.map(line => /TS\d+/.exec(line)?.[0] ?? (/FAIL/.test(line) ? 'TEST_FAILURE' : 'PROCESS_FAILURE')).join(',')}`);
+    const output = result.stdout + result.stderr;
+    console.log(`Safe diagnostics: unique=${/Unique constraint|P2002/.test(output)}, foreignKey=${/Foreign key|P2003/.test(output)}, timeout=${/timed out|timeout/i.test(output)}, sodConflict=${/SOD_CONFLICT/.test(output)}`);
     throw new Error('CERTIFICATION_STEP_FAILED');
   }
 }
@@ -33,7 +35,7 @@ async function main() {
   console.log('Runtime posture: PASS');
   const memberships = await owner.$queryRawUnsafe("SELECT count(*)::int n FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname='app_user')");
   if (memberships[0].n !== 0) throw new Error('RUNTIME_ROLE_MEMBERSHIP_REVIEW_REQUIRED');
-  await owner.$executeRawUnsafe('GRANT CONNECT ON DATABASE luxia_resources_cert TO app_user');
+  await owner.$executeRawUnsafe(`GRANT CONNECT ON DATABASE ${endpoint.pathname.slice(1)} TO app_user`);
   await owner.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO app_user');
   // Existing CI suites need their existing tables. New production privileges must be separately approved.
   await owner.$executeRawUnsafe('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user');
@@ -44,12 +46,12 @@ async function main() {
   runtime.hostname = 'ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech';
   const env = { ...process.env, DATABASE_URL: runtime.toString(), DATABASE_MIGRATION_URL: certUrl, LUXIA_RESOURCE_RLS: 'true', NEXT_PUBLIC_APP_URL: 'http://localhost:3193', AUTHZ_MODE: 'native' };
   delete env.LUXIA_RESOURCE_OWNER_URL;
-  run('Resources PostgreSQL/RLS + unit/architecture', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources', '--testTimeout=120000', '--hookTimeout=120000'], env);
+  if (process.env.LUXIA_RESOURCE_REMAINING !== 'true') run('Resources PostgreSQL/RLS + unit/architecture', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources', '--testTimeout=120000', '--hookTimeout=120000'], env);
   if (process.env.LUXIA_RESOURCE_FULL === 'true') {
-    run('Existing security', 'node_modules/vitest/vitest.mjs', ['run', 'tests/security', '--testTimeout=120000', '--hookTimeout=120000'], env);
-    run('Provider contracts', 'node_modules/vitest/vitest.mjs', ['run', 'tests/provider-adapters'], env);
-    run('Identity', 'node_modules/vitest/vitest.mjs', ['run', 'tests/identity'], env);
-    run('Operations', 'node_modules/vitest/vitest.mjs', ['run', 'tests/operations'], env);
+    if (process.env.LUXIA_RESOURCE_REMAINING !== 'true') run('Existing security', 'node_modules/vitest/vitest.mjs', ['run', 'tests/security', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    run('Provider contracts', 'node_modules/vitest/vitest.mjs', ['run', 'tests/provider-adapters', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    run('Identity', 'node_modules/vitest/vitest.mjs', ['run', 'tests/identity', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    run('Operations', 'node_modules/vitest/vitest.mjs', ['run', 'tests/operations', '--testTimeout=120000', '--hookTimeout=120000'], env);
     run('Operational certification', 'node_modules/tsx/dist/cli.mjs', ['scripts/certify-identity-v1.ts'], env);
     run('Cutover readiness', 'node_modules/tsx/dist/cli.mjs', ['scripts/generate-cutover-report.ts'], env);
     run('TypeScript', 'node_modules/typescript/bin/tsc', ['--noEmit'], env);

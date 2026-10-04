@@ -11,6 +11,7 @@ const navigation = [
   { href: "/dashboard/settings", label: "Authentification", icon: ShieldCheck, entitlement: "providers.read" },
   { href: "/dashboard/roles", label: "Accès", icon: KeyRound, entitlement: "assignments.read" },
   { href: "/dashboard/resources", label: "Resources", icon: Boxes, entitlement: "resources.read" },
+  { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: Boxes, entitlement: "sod.read" },
   { href: "/dashboard/audit", label: "Sécurité", icon: Fingerprint, entitlement: "audit.read" },
 ];
 

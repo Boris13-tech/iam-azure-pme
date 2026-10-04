@@ -42,6 +42,8 @@ async function handle(request: Request, route: RouteContext) {
       else if (surface === "assignments") value = await service.grantAssignment(auth, await jsonBody(request, assignmentInput), changeId);
       else if (surface === "authorize") value = await service.checkAccess(auth, await jsonBody(request, authorizationInput), changeId);
       else throw new CanonicalAdminError("NOT_FOUND", 404);
+    } else if (request.method === "PATCH" && surface === "assignments" && path.length === 2) {
+      value = await service.updateAssignment(auth, id, await jsonBody(request, z.object({ entitlementId: uuid.optional(), validUntil: z.coerce.date().optional(), status: z.enum(["ACTIVE", "REVOKED"]).optional() }).strict().refine(input => Object.keys(input).length > 0)), changeId);
     } else if (request.method === "PATCH" && surface === "resources" && path.length === 2) {
       value = await service.updateResource(auth, id, await jsonBody(request, z.object({ name: label.optional(), active: z.boolean().optional() }).strict().refine(input => Object.keys(input).length > 0)), changeId);
     } else if (request.method === "POST" && command === "revoke" && path.length === 3) {

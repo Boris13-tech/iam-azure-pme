@@ -994,6 +994,7 @@ model ResourceScope {
   resource Resource? @relation(fields: [organizationId, tenantId, resourceId], references: [organizationId, tenantId, id], onDelete: Restrict)
   members ResourceScopeMember[]
   entitlements Entitlement[]
+  sodPolicies SoDPolicy[]
   @@unique([organizationId, tenantId, id])
   @@unique([organizationId, tenantId, key])
 }
@@ -1114,6 +1115,8 @@ model Entitlement {
   updatedAt      DateTime     @updatedAt
   tenant         Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   assignments    Assignment[]
+  sodRulesA SoDRule[] @relation("SoDEntitlementA")
+  sodRulesB SoDRule[] @relation("SoDEntitlementB")
 
   @@unique([organizationId, tenantId, id])
   @@unique([organizationId, tenantId, key])
@@ -1149,6 +1152,55 @@ enum CanonicalAdminResult {
 
 /// Tenant-scoped, provider-neutral evidence for canonical administration.
 /// It deliberately does not reference the legacy User/AuditLog models.
+enum SoDPolicyStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum SoDConflictType {
+  MUTUALLY_EXCLUSIVE
+}
+
+enum SoDEnforcement {
+  DENY
+}
+
+model SoDPolicy {
+  id String @id @default(uuid())
+  organizationId String
+  tenantId String
+  key String
+  scopeId String
+  status SoDPolicyStatus @default(DISABLED)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  scope ResourceScope @relation(fields: [organizationId, tenantId, scopeId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  rules SoDRule[]
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, key])
+  @@index([organizationId, tenantId, status, scopeId], map: "SoDPolicy_scope_idx")
+}
+
+model SoDRule {
+  id String @id @default(uuid())
+  organizationId String
+  tenantId String
+  policyId String
+  entitlementAId String
+  entitlementBId String
+  conflictType SoDConflictType @default(MUTUALLY_EXCLUSIVE)
+  enforcement SoDEnforcement @default(DENY)
+  enabled Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  policy SoDPolicy @relation(fields: [organizationId, tenantId, policyId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  entitlementA Entitlement @relation("SoDEntitlementA", fields: [organizationId, tenantId, entitlementAId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  entitlementB Entitlement @relation("SoDEntitlementB", fields: [organizationId, tenantId, entitlementBId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, policyId, entitlementAId, entitlementBId])
+  @@index([organizationId, tenantId, entitlementAId, entitlementBId], map: "SoDRule_entitlements_idx")
+}
+
 model CanonicalAdminAuditEvent {
   id              String               @id @default(uuid())
   organizationId  String
