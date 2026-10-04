@@ -384,7 +384,7 @@ export async function grantAssignment(
     ]);
     if (!subject) throw new CanonicalAdminError("SUBJECT_NOT_FOUND", 404);
     if (!entitlement) throw new CanonicalAdminError("ENTITLEMENT_NOT_FOUND", 404);
-    if (!(ENTITLEMENT_CATALOG_V1 as readonly string[]).includes(entitlement.key)) {
+    if (entitlement.resourceScopeId || !(ENTITLEMENT_CATALOG_V1 as readonly string[]).includes(entitlement.key)) {
       throw new CanonicalAdminError("UNKNOWN_ENTITLEMENT", 400);
     }
     if (input.validFrom && input.validUntil && input.validUntil <= input.validFrom) {

@@ -94,6 +94,8 @@ export async function authorize(
             status: "ACTIVE",
             entitlement: {
               key: entitlementKey,
+              active: true,
+              resourceScopeId: null,
             },
             OR: [
               { validFrom: null },

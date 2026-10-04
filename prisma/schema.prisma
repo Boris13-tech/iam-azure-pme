@@ -931,6 +931,10 @@ model LocalRecoveryCode {
 enum ResourceType {
   APPLICATION
   API
+  SERVICE
+  DEVICE
+  WORKLOAD
+  AI_AGENT
   DATASET
   DATABASE
   REPOSITORY
@@ -950,6 +954,7 @@ model Resource {
 
   name String
   type ResourceType
+  active Boolean @default(true)
 
   externalId  String?
   description String?
@@ -961,10 +966,47 @@ model Resource {
   organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   tenant             Tenant              @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
   providerConnection ProviderConnection? @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
+  scopes ResourceScope[]
+  scopeMemberships ResourceScopeMember[]
 
   @@unique([organizationId, id])
+  @@unique([organizationId, tenantId, id])
   @@index([organizationId, tenantId])
   @@index([organizationId, providerConnectionId])
+}
+
+enum ResourceScopeKind {
+  RESOURCE
+  RESOURCE_GROUP
+  TENANT
+}
+
+model ResourceScope {
+  id String @id @default(uuid())
+  organizationId String
+  tenantId String
+  key String
+  kind ResourceScopeKind
+  resourceId String?
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  resource Resource? @relation(fields: [organizationId, tenantId, resourceId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  members ResourceScopeMember[]
+  entitlements Entitlement[]
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, key])
+}
+
+model ResourceScopeMember {
+  organizationId String
+  tenantId String
+  scopeId String
+  resourceId String
+  scope ResourceScope @relation(fields: [organizationId, tenantId, scopeId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  resource Resource @relation(fields: [organizationId, tenantId, resourceId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  @@id([organizationId, tenantId, scopeId, resourceId])
+  @@index([organizationId, tenantId, resourceId])
 }
 
 // ----------------------------------------------------------------------
@@ -1065,6 +1107,9 @@ model Entitlement {
   action         String
   resource       String
   description    String?
+  active         Boolean @default(true)
+  resourceScopeId String?
+  resourceScope ResourceScope? @relation(fields: [organizationId, tenantId, resourceScopeId], references: [organizationId, tenantId, id], onDelete: Restrict)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   tenant         Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)

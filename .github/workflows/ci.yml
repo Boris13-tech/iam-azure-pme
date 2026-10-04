@@ -101,6 +101,11 @@ jobs:
     - name: Run Security Tests
       run: npm run test:security
 
+    - name: Resources Governance and real PostgreSQL RLS
+      run: npm run test:resources
+      env:
+        LUXIA_RESOURCE_RLS: 'true'
+
     - name: Run Provider Adapter Contract Tests
       run: npm run test:provider-adapters
 
