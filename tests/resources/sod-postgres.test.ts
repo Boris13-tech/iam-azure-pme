@@ -20,7 +20,7 @@ let first: string;
 describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("SoD app_user PostgreSQL/RLS", () => {
   beforeAll(async () => {
     const url = new URL(process.env.DATABASE_URL!);
-    if (!(["localhost", "127.0.0.1"].includes(url.hostname) || (url.hostname === "ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_resources_cert", "/luxia_sod_cert"].includes(url.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
+    if (!(["localhost", "127.0.0.1"].includes(url.hostname) || (url.hostname === "ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(url.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL! } } });
     await owner.$transaction(async tx => {
       await tx.$queryRaw`SELECT set_config('app.organization_id', ${auth.organizationId}, true)`;

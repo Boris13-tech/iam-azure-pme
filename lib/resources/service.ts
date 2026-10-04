@@ -8,7 +8,7 @@ import { enforceSoD, SoDDeniedError } from "./sod";
 const context = (auth: AuthContext) => ({ organizationId: auth.organizationId, tenantId: auth.tenantId });
 const notFound = () => { throw new CanonicalAdminError("NOT_FOUND", 404); };
 
-async function requireNative(tx: Prisma.TransactionClient, auth: AuthContext, key: string) {
+export async function requireNative(tx: Prisma.TransactionClient, auth: AuthContext, key: string) {
   const subject = await tx.subject.findFirst({ where: { ...context(auth), id: auth.subjectId, lifecycleState: "ACTIVE" } });
   if (!subject) throw new CanonicalAdminError("FORBIDDEN", 403);
   const now = new Date();

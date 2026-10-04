@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const certUrl = process.env.LUXIA_RESOURCE_OWNER_URL;
 const endpoint = certUrl && new URL(certUrl);
-if (!endpoint || endpoint.hostname !== 'ep-dark-king-ah402c68.c-3.us-east-1.aws.neon.tech' || !['/luxia_resources_cert', '/luxia_sod_cert'].includes(endpoint.pathname)) {
+if (!endpoint || endpoint.hostname !== 'ep-dark-king-ah402c68.c-3.us-east-1.aws.neon.tech' || !['/luxia_resources_cert', '/luxia_sod_cert', '/luxia_reviews_cert'].includes(endpoint.pathname)) {
   console.error('ISOLATED_RESOURCES_DB_REQUIRED'); process.exit(2);
 }
 const owner = new PrismaClient({ datasources: { db: { url: certUrl } } });
@@ -18,6 +18,12 @@ function run(label, bin, args, env) {
     for (const line of names.filter(line => /^ FAIL /.test(line))) console.log(line.replace(/\x1B\[[0-9;]*m/g, '').slice(0, 300));
     console.log(`Safe failure classes: ${names.map(line => /TS\d+/.exec(line)?.[0] ?? (/FAIL/.test(line) ? 'TEST_FAILURE' : 'PROCESS_FAILURE')).join(',')}`);
     const output = result.stdout + result.stderr;
+    const clean = output.replace(/\x1B\[[0-9;]*m/g, '');
+    for (const location of clean.matchAll(/tests\/resources\/[A-Za-z0-9_.-]+\.test\.ts:\d+:\d+/g)) console.log(`Safe assertion location: ${location[0]}`);
+    const numericAssertion = clean.match(/AssertionError: expected \d+ to be \d+/)?.[0];
+    if (numericAssertion) console.log(numericAssertion);
+    const lengthAssertion = clean.match(/to have a length of (\d+) but got (\d+)/);
+    if (lengthAssertion) console.log(`Safe length assertion: expected=${lengthAssertion[1]}, actual=${lengthAssertion[2]}`);
     console.log(`Safe diagnostics: unique=${/Unique constraint|P2002/.test(output)}, foreignKey=${/Foreign key|P2003/.test(output)}, timeout=${/timed out|timeout/i.test(output)}, sodConflict=${/SOD_CONFLICT/.test(output)}`);
     throw new Error('CERTIFICATION_STEP_FAILED');
   }
@@ -46,7 +52,10 @@ async function main() {
   runtime.hostname = 'ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech';
   const env = { ...process.env, DATABASE_URL: runtime.toString(), DATABASE_MIGRATION_URL: certUrl, LUXIA_RESOURCE_RLS: 'true', NEXT_PUBLIC_APP_URL: 'http://localhost:3193', AUTHZ_MODE: 'native' };
   delete env.LUXIA_RESOURCE_OWNER_URL;
-  if (process.env.LUXIA_RESOURCE_REMAINING !== 'true') run('Resources PostgreSQL/RLS + unit/architecture', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources', '--testTimeout=120000', '--hookTimeout=120000'], env);
+  if (process.env.LUXIA_RESOURCE_REMAINING !== 'true') {
+    if (process.env.LUXIA_RESOURCE_HTTP_ONLY === 'true') run('Persisted-session Resources/SoD/Reviews HTTP only', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources/postgres-rls.test.ts', '--testNamePattern=real HTTP APIs', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    else run('Resources PostgreSQL/RLS + unit/architecture', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources', '--testTimeout=120000', '--hookTimeout=120000'], env);
+  }
   if (process.env.LUXIA_RESOURCE_FULL === 'true') {
     if (process.env.LUXIA_RESOURCE_REMAINING !== 'true') run('Existing security', 'node_modules/vitest/vitest.mjs', ['run', 'tests/security', '--testTimeout=120000', '--hookTimeout=120000'], env);
     run('Provider contracts', 'node_modules/vitest/vitest.mjs', ['run', 'tests/provider-adapters', '--testTimeout=120000', '--hookTimeout=120000'], env);

@@ -227,6 +227,9 @@ model Subject {
   reenrollmentRequirements     CredentialReenrollmentRequirement[]
   canonicalAdminEventsAsActor  CanonicalAdminAuditEvent[]          @relation("CanonicalAdminActor")
   canonicalAdminEventsAsTarget CanonicalAdminAuditEvent[]          @relation("CanonicalAdminTarget")
+  reviewCampaignsAsReviewer AccessReviewCampaign[] @relation("ReviewCampaignReviewer")
+  reviewCampaignsAsCreator AccessReviewCampaign[] @relation("ReviewCampaignCreator")
+  reviewItemsAsSubject AccessReviewItem[] @relation("ReviewItemSubject")
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -968,6 +971,8 @@ model Resource {
   providerConnection ProviderConnection? @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict)
   scopes ResourceScope[]
   scopeMemberships ResourceScopeMember[]
+  reviewCampaigns AccessReviewCampaign[]
+  reviewItems AccessReviewItem[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -995,6 +1000,8 @@ model ResourceScope {
   members ResourceScopeMember[]
   entitlements Entitlement[]
   sodPolicies SoDPolicy[]
+  reviewCampaigns AccessReviewCampaign[]
+  reviewItems AccessReviewItem[]
   @@unique([organizationId, tenantId, id])
   @@unique([organizationId, tenantId, key])
 }
@@ -1117,6 +1124,7 @@ model Entitlement {
   assignments    Assignment[]
   sodRulesA SoDRule[] @relation("SoDEntitlementA")
   sodRulesB SoDRule[] @relation("SoDEntitlementB")
+  reviewItems AccessReviewItem[]
 
   @@unique([organizationId, tenantId, id])
   @@unique([organizationId, tenantId, key])
@@ -1138,6 +1146,7 @@ model Assignment {
   updatedAt      DateTime         @updatedAt
   subject        Subject          @relation(fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
   entitlement    Entitlement      @relation(fields: [organizationId, tenantId, entitlementId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  reviewItems AccessReviewItem[]
 
   @@unique([organizationId, tenantId, id])
   @@index([organizationId, tenantId, subjectId, status])
@@ -1252,6 +1261,78 @@ enum AuthorizationShadowStatus {
   DIVERGENCE
   NATIVE_ERROR
   LEGACY_ERROR
+}
+
+enum AccessReviewCampaignStatus {
+  OPEN
+  COMPLETED
+}
+enum AccessReviewDecision {
+  PENDING
+  KEEP
+  REVOKE
+}
+enum AccessReviewState {
+  PENDING
+  REQUIRES_REMEDIATION
+  DECIDED
+}
+
+/// Immutable snapshots; SQL adds forced RLS and immutable-decision guards.
+model AccessReviewCampaign {
+  id String @id @default(uuid())
+  organizationId String
+  tenantId String
+  name String
+  scopeId String
+  scopeType ResourceScopeKind
+  resourceId String?
+  reviewerSubjectId String
+  reviewerStrategy String @default("EXPLICIT_SINGLE")
+  createdBySubjectId String
+  startsAt DateTime
+  dueAt DateTime
+  status AccessReviewCampaignStatus @default(OPEN)
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  scope ResourceScope @relation(fields: [organizationId, tenantId, scopeId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  resource Resource? @relation(fields: [organizationId, tenantId, resourceId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  reviewer Subject @relation("ReviewCampaignReviewer", fields: [organizationId, tenantId, reviewerSubjectId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator Subject @relation("ReviewCampaignCreator", fields: [organizationId, tenantId, createdBySubjectId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  items AccessReviewItem[]
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, id, reviewerSubjectId])
+  @@index([organizationId, tenantId, status, dueAt])
+}
+model AccessReviewItem {
+  id String @id @default(uuid())
+  organizationId String
+  tenantId String
+  campaignId String
+  subjectId String
+  assignmentId String
+  entitlementId String
+  resourceId String?
+  scopeId String
+  resourceIds String[]
+  assignmentVersion DateTime
+  entitlementVersion DateTime
+  reviewerSubjectId String
+  decision AccessReviewDecision @default(PENDING)
+  reviewState AccessReviewState @default(PENDING)
+  observedAssignmentState String @default("ACTIVE")
+  decidedAt DateTime?
+  justification String?
+  createdAt DateTime @default(now())
+  campaign AccessReviewCampaign @relation(fields: [organizationId, tenantId, campaignId, reviewerSubjectId], references: [organizationId, tenantId, id, reviewerSubjectId], onDelete: Restrict, onUpdate: NoAction)
+  subject Subject @relation("ReviewItemSubject", fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  assignment Assignment @relation(fields: [organizationId, tenantId, assignmentId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  entitlement Entitlement @relation(fields: [organizationId, tenantId, entitlementId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  scope ResourceScope @relation(fields: [organizationId, tenantId, scopeId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  resource Resource? @relation(fields: [organizationId, tenantId, resourceId], references: [organizationId, tenantId, id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, tenantId, campaignId, assignmentId])
+  @@index([organizationId, tenantId, reviewerSubjectId, decision, id], map: "AccessReviewItem_organizationId_tenantId_reviewerSubjectId_dec_")
 }
 
 model AuthorizationShadowObservation {

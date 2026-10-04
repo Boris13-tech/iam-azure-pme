@@ -47,7 +47,7 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
     if (!process.env.DATABASE_MIGRATION_URL || !process.env.DATABASE_URL) throw new Error("ISOLATED_DB_REQUIRED");
     const endpoint = new URL(process.env.DATABASE_URL);
     if (!(["localhost", "127.0.0.1"].includes(endpoint.hostname) ||
-      (endpoint.hostname === "ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_resources_cert", "/luxia_sod_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
+      (endpoint.hostname === "ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
     legacyBefore = await legacyDigest();
     await owned(auth, async tx => {
@@ -262,6 +262,46 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
       expect((await sodApi(`policies/${randomUUID()}`)).status).toBe(404);
       expect((await sodApi("policies", "POST", { key: "foreign", scopeId: foreignScope })).status).toBe(404);
       expect((await sodApi("policies", "POST", { key: "override", scopeId: scoped.body.id, tenantId: otherTenant })).status).toBe(400);
+      const reviewAccount = await owned(auth, async tx => {
+        for (const permission of ["access_reviews.read", "access_reviews.create", "access_reviews.decide", "access_reviews.manage"]) {
+          const entitlement = await tx.entitlement.create({ data: { organizationId: org, tenantId: tenant, key: permission, action: permission.split(".")[1], resource: "access_reviews" } });
+          for (const subjectId of [actor, beneficiary]) await tx.assignment.create({ data: { organizationId: org, tenantId: tenant, subjectId, entitlementId: entitlement.id, source: "DIRECT" } });
+        }
+        const account = await tx.identityAccount.findUniqueOrThrow({ where: { id: accountId } });
+        return tx.identityAccount.create({ data: { organizationId: org, tenantId: tenant, subjectId: beneficiary, providerConnectionId: account.providerConnectionId, externalObjectId: randomUUID() } });
+      });
+      const reviewerSession = await SessionStore.createSession({ ...memberAuth, identityAccountId: reviewAccount.id });
+      const reviewsApi = async (path: string, method = "GET", body?: unknown, token = rawToken) => {
+        const response = await fetch(`http://127.0.0.1:3193/api/canonical/access-reviews${path}`, { method,
+          headers: { "content-type": "application/json", "x-luxia-change-id": change(), cookie: `luxia_session=${token}` },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        return { status: response.status, body: await response.json() };
+      };
+      expect((await reviewsApi("/configuration")).status).toBe(200);
+      expect((await reviewsApi("", "POST", { name: "Tenant override", scopeId: scoped.body.id, reviewerSubjectId: beneficiary, startsAt: new Date().toISOString(), dueAt: new Date(Date.now() + 3600000).toISOString(), tenantId: otherTenant })).status).toBe(400);
+      expect((await reviewsApi("", "POST", { name: "Foreign scope", scopeId: foreignScope, reviewerSubjectId: beneficiary, startsAt: new Date().toISOString(), dueAt: new Date(Date.now() + 3600000).toISOString() })).status).toBe(404);
+      const campaign = await reviewsApi("", "POST", { name: "Real HTTP review", scopeId: scoped.body.id, reviewerSubjectId: beneficiary, startsAt: new Date(Date.now() - 1000).toISOString(), dueAt: new Date(Date.now() + 3600000).toISOString() });
+      expect(campaign.status).toBe(200);
+      expect((await reviewsApi("")).status).toBe(200);
+      expect((await reviewsApi(`/${campaign.body.id}`)).status).toBe(200);
+      const reviewItems = await reviewsApi(`/${campaign.body.id}/items`);
+      expect(reviewItems.status).toBe(200); expect(reviewItems.body).toHaveLength(2);
+      // The actor also has a real TENANT-wide grant: intersection must include it,
+      // not silently truncate the snapshot to only the direct RESOURCE grant.
+      expect(new Set(reviewItems.body.map((row: { entitlementId: string }) => row.entitlementId))).toEqual(new Set([entitlement.body.id, tenantEntitlement]));
+      const directItem = reviewItems.body.find((row: { entitlementId: string }) => row.entitlementId === entitlement.body.id);
+      const tenantItem = reviewItems.body.find((row: { entitlementId: string }) => row.entitlementId === tenantEntitlement);
+      expect((await reviewsApi(`/${campaign.body.id}/items/${tenantItem.id}/decision`, "POST", { decision: "KEEP", justification: "Confirm existing tenant-wide grant" }, reviewerSession.rawToken)).status).toBe(200);
+      const itemId = directItem.id, decisionPath = `/${campaign.body.id}/items/${itemId}/decision`;
+      expect((await reviewsApi(decisionPath, "POST", { decision: "KEEP", justification: "Not assigned reviewer" })).status).toBe(403);
+      expect((await reviewsApi(decisionPath, "POST", { decision: "REVOKE", justification: "Approved removal", entitlementId: randomUUID() }, reviewerSession.rawToken)).status).toBe(400);
+      expect((await reviewsApi(decisionPath, "POST", { decision: "REVOKE", justification: "Approved removal" }, reviewerSession.rawToken)).status).toBe(200);
+      expect((await reviewsApi(decisionPath, "POST", { decision: "REVOKE", justification: "Approved removal" }, reviewerSession.rawToken)).status).toBe(200);
+      expect((await reviewsApi(`/${campaign.body.id}/complete`, "POST", {})).body.status).toBe("COMPLETED");
+      expect((await reviewsApi(`/${campaign.body.id}/audit`)).body.some((row: { operation: string }) => row.operation === "ACCESS_REVIEW.ITEM.REVOKE")).toBe(true);
+      expect((await reviewsApi(`/${randomUUID()}`)).status).toBe(404);
+      await SessionStore.revokeByToken(reviewerSession.rawToken);
+      expect((await reviewsApi(decisionPath, "POST", { decision: "KEEP", justification: "Revoked session" }, reviewerSession.rawToken)).status).toBe(401);
       expect((await api("resources", "GET", undefined, "invalid-session")).status).toBe(401);
       await SessionStore.revokeByToken(rawToken);
       expect((await api("resources")).status).toBe(401);
@@ -270,6 +310,6 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
       else server.kill();
       await new Promise<void>(done => { if (server.exitCode !== null) done(); else { server.once("exit", () => done()); setTimeout(done, 5000); } });
     }
-  }, 240_000);
+  }, 480_000);
   it("legacy rows and bridges unchanged", async () => { expect(await legacyDigest()).toEqual(legacyBefore); });
 });
