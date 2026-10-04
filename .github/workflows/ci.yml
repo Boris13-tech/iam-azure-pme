@@ -104,6 +104,12 @@ jobs:
     - name: Run Provider Adapter Contract Tests
       run: npm run test:provider-adapters
 
+    - name: Certify provider denial audit commit and RLS
+      run: npx vitest run tests/certification/provider-denial-audit-rls.test.ts
+
+    - name: Certify versioned provider custody and canonical token audit RLS
+      run: npx vitest run tests/certification/provider-token-store-rls.test.ts
+
     - name: Run Phase 6D Identity Semantics Tests
       run: npm run test:identity
 

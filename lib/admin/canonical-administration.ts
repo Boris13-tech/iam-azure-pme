@@ -476,7 +476,8 @@ export async function listProviderConnections(auth: AuthContext, changeId: strin
   return withTenantDb(auth, async (tx) => {
     await writeAudit(tx, auth, { operation: "PROVIDER.READ", changeId });
     return tx.providerConnectionTenantScope.findMany({
-      include: { providerConnection: true },
+      select: { organizationId: true, tenantId: true, providerConnectionId: true,
+        displayName: true, createdAt: true, providerConnection: true },
       orderBy: { createdAt: "desc" },
     });
   });

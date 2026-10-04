@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Bell, Bot, Building2, CircleHelp, Fingerprint, Gauge, KeyRound, Search, ShieldCheck, Users } from "lucide-react";
+import { Bell, Bot, Building2, CircleHelp, Fingerprint, Gauge, KeyRound, Network, Search, ShieldCheck, Users } from "lucide-react";
 import { getAuthContext } from "@/lib/auth/auth-context";
 import { loadPlatformContext } from "@/lib/platform/context";
 
@@ -9,6 +9,7 @@ const navigation = [
   { href: "/dashboard", label: "Vue d’ensemble", icon: Gauge, entitlement: null },
   { href: "/dashboard/users", label: "Identités", icon: Users, entitlement: "subjects.read" },
   { href: "/dashboard/settings", label: "Authentification", icon: ShieldCheck, entitlement: "providers.read" },
+  { href: "/dashboard/providers", label: "Providers", icon: Network, entitlement: "providers.read" },
   { href: "/dashboard/roles", label: "Accès", icon: KeyRound, entitlement: "assignments.read" },
   { href: "/dashboard/audit", label: "Sécurité", icon: Fingerprint, entitlement: "audit.read" },
 ];
