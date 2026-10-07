@@ -8,6 +8,7 @@ import * as service from "../../lib/resources/service";
 import { withTenantDb } from "../../lib/db/scoped-client";
 import { SessionStore } from "../../lib/auth/session-store";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+import { applyGovernanceAdminBundle, rollbackGovernanceAdminBundle, GOVERNANCE_ADMIN_V2 } from "../../lib/resources/admin-bundle";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const org = randomUUID(), tenant = randomUUID(), otherTenant = randomUUID(), foreignOrg = randomUUID(), foreignTenant = randomUUID();
@@ -47,7 +48,7 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
     if (!process.env.DATABASE_MIGRATION_URL || !process.env.DATABASE_URL) throw new Error("ISOLATED_DB_REQUIRED");
     const endpoint = new URL(process.env.DATABASE_URL);
     if (!(["localhost", "127.0.0.1"].includes(endpoint.hostname) ||
-      (["ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech", "ep-holy-forest-ah3ser8s-pooler.c-3.us-east-1.aws.neon.tech"].includes(endpoint.hostname) && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
+      (["ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech", "ep-holy-forest-ah3ser8s-pooler.c-3.us-east-1.aws.neon.tech", "ep-ancient-base-ahfygu4z-pooler.c-3.us-east-1.aws.neon.tech", "ep-delicate-boat-ahnvfj7w-pooler.c-3.us-east-1.aws.neon.tech"].includes(endpoint.hostname) && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
     legacyBefore = await legacyDigest();
     await owned(auth, async tx => {
@@ -87,6 +88,23 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
   }, 120_000);
   afterAll(async () => { if (owner) await owner.$disconnect(); await rawPrisma.$disconnect(); });
   const request = () => ({ ...memberAuth, resourceId, entitlementKey: key, action: "read" });
+  it("explicit governance bundle is scoped, atomic, audited and idempotent", async () => {
+    const changeId = change();
+    const result = await applyGovernanceAdminBundle(auth, beneficiary, changeId);
+    expect(result.assignmentIds).toHaveLength(6);
+    expect(await applyGovernanceAdminBundle(auth, beneficiary, changeId)).toEqual({ ...result, replay: true });
+    const evidence = await withTenantDb(auth, tx => tx.canonicalAdminAuditEvent.findFirst({ where: { changeId } }));
+    expect(evidence).toMatchObject({ operation: "ROLE.GOVERNANCE.GRANT", result: "SUCCESS", roleVersion: 2, targetSubjectId: beneficiary });
+    expect((evidence?.metadata as { entitlementKeys: string[] }).entitlementKeys).toEqual([...GOVERNANCE_ADMIN_V2]);
+    await expect(applyGovernanceAdminBundle(auth, retired, change())).rejects.toMatchObject({ code: "INVALID_TARGET_SUBJECT" });
+    await expect(applyGovernanceAdminBundle({ ...auth, tenantId: otherTenant }, beneficiary, change())).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const rollbackId = change();
+    const rollback = await rollbackGovernanceAdminBundle(auth, beneficiary, rollbackId);
+    expect(rollback.replay).toBe(false);
+    expect([...rollback.assignmentIds].sort()).toEqual([...result.assignmentIds].sort());
+    expect(await rollbackGovernanceAdminBundle(auth, beneficiary, rollbackId)).toMatchObject({ replay: true });
+    await expect(applyGovernanceAdminBundle(auth, beneficiary, changeId)).rejects.toMatchObject({ code: "BUNDLE_NO_LONGER_ACTIVE" });
+  });
   it("runtime is app_user NOSUPERUSER NOBYPASSRLS with no ownership", async () => {
     const rows = await withTenantDb(auth, tx => tx.$queryRaw<Array<{ current_user: string; rolsuper: boolean; rolbypassrls: boolean; owns: boolean }>>`
       SELECT current_user, rolsuper, rolbypassrls, EXISTS(SELECT 1 FROM pg_class WHERE relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user) AND relnamespace='public'::regnamespace) AS owns
@@ -264,7 +282,7 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
       expect((await sodApi("policies", "POST", { key: "override", scopeId: scoped.body.id, tenantId: otherTenant })).status).toBe(400);
       const reviewAccount = await owned(auth, async tx => {
         for (const permission of ["access_reviews.read", "access_reviews.create", "access_reviews.decide", "access_reviews.manage"]) {
-          const entitlement = await tx.entitlement.create({ data: { organizationId: org, tenantId: tenant, key: permission, action: permission.split(".")[1], resource: "access_reviews" } });
+          const entitlement = await tx.entitlement.upsert({ where: { organizationId_tenantId_key: { organizationId: org, tenantId: tenant, key: permission } }, create: { organizationId: org, tenantId: tenant, key: permission, action: permission.split(".")[1], resource: "access_reviews" }, update: {} });
           for (const subjectId of [actor, beneficiary]) await tx.assignment.create({ data: { organizationId: org, tenantId: tenant, subjectId, entitlementId: entitlement.id, source: "DIRECT" } });
         }
         const account = await tx.identityAccount.findUniqueOrThrow({ where: { id: accountId } });

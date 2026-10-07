@@ -48,6 +48,7 @@ USING ("organizationId"=current_setting('app.organization_id',true) AND "tenantI
 WITH CHECK ("organizationId"=current_setting('app.organization_id',true) AND "tenantId"=current_setting('app.tenant_id',true));
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='app_user') THEN
+    REVOKE ALL ON "ResourceScope", "ResourceScopeMember" FROM app_user;
     GRANT SELECT, INSERT ON "ResourceScope", "ResourceScopeMember" TO app_user;
   END IF;
 END $$;

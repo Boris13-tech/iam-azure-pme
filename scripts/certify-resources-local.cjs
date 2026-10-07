@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const certUrl = process.env.LUXIA_RESOURCE_OWNER_URL;
 const endpoint = certUrl && new URL(certUrl);
-if (!endpoint || !['ep-dark-king-ah402c68.c-3.us-east-1.aws.neon.tech', 'ep-holy-forest-ah3ser8s.c-3.us-east-1.aws.neon.tech'].includes(endpoint.hostname) || !['/luxia_resources_cert', '/luxia_sod_cert', '/luxia_reviews_cert'].includes(endpoint.pathname)) {
+if (!endpoint || !['ep-dark-king-ah402c68.c-3.us-east-1.aws.neon.tech', 'ep-holy-forest-ah3ser8s.c-3.us-east-1.aws.neon.tech', 'ep-ancient-base-ahfygu4z.c-3.us-east-1.aws.neon.tech', 'ep-delicate-boat-ahnvfj7w.c-3.us-east-1.aws.neon.tech'].includes(endpoint.hostname) || !['/luxia_resources_cert', '/luxia_sod_cert', '/luxia_reviews_cert'].includes(endpoint.pathname)) {
   console.error('ISOLATED_RESOURCES_DB_REQUIRED'); process.exit(2);
 }
 const owner = new PrismaClient({ datasources: { db: { url: certUrl } } });
@@ -55,7 +55,8 @@ async function main() {
   const env = { ...process.env, DATABASE_URL: runtime.toString(), DATABASE_MIGRATION_URL: certUrl, LUXIA_RESOURCE_RLS: 'true', NEXT_PUBLIC_APP_URL: 'http://localhost:3193', AUTHZ_MODE: 'native' };
   delete env.LUXIA_RESOURCE_OWNER_URL;
   if (process.env.LUXIA_RESOURCE_REMAINING !== 'true') {
-    if (process.env.LUXIA_RESOURCE_PRIVILEGES_ONLY === 'true') run('SQL privilege PostgreSQL probes', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources/function-privileges.test.ts', 'tests/resources/sod-postgres.test.ts', '--no-file-parallelism', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    if (process.env.LUXIA_RESOURCE_GOVERNANCE_ONLY === 'true') run('Governance bundle PostgreSQL probes', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources/postgres-rls.test.ts', '--testNamePattern=explicit governance bundle', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    else if (process.env.LUXIA_RESOURCE_PRIVILEGES_ONLY === 'true') run('SQL privilege PostgreSQL probes', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources/function-privileges.test.ts', 'tests/resources/sod-postgres.test.ts', '--no-file-parallelism', '--testTimeout=120000', '--hookTimeout=120000'], env);
     else if (process.env.LUXIA_RESOURCE_HTTP_ONLY === 'true') run('Persisted-session Resources/SoD/Reviews HTTP only', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources/postgres-rls.test.ts', '--testNamePattern=real HTTP APIs', '--testTimeout=120000', '--hookTimeout=120000'], env);
     else run('Resources PostgreSQL/RLS + unit/architecture', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources', '--no-file-parallelism', '--testTimeout=120000', '--hookTimeout=120000'], env);
   }
@@ -72,6 +73,18 @@ async function main() {
     run('Production build (local only)', 'node_modules/next/dist/bin/next', ['build'], buildEnv);
   }
   console.log('Production modified: NO');
+  if (process.env.LUXIA_GOVERNANCE_BUNDLE_CLONE === 'true') {
+    if (endpoint.hostname !== 'ep-delicate-boat-ahnvfj7w.c-3.us-east-1.aws.neon.tech') throw new Error('GOVERNANCE_CLONE_SCOPE_DENY');
+    const copiedRuntime = new URL(runtime.toString()); copiedRuntime.pathname = '/neondb';
+    const copiedEnv = { ...env, DATABASE_URL: copiedRuntime.toString(), GOVERNANCE_ADMIN_CONFIRMATION: 'APPLY_GOVERNANCE_ADMIN_V2' };
+    delete copiedEnv.DATABASE_MIGRATION_URL;
+    run('Real Subject governance plan on clone', 'node_modules/tsx/dist/cli.mjs', ['scripts/governance-admin-v2.ts', 'plan'], copiedEnv);
+    run('Real Subject explicit grant on clone', 'node_modules/tsx/dist/cli.mjs', ['scripts/governance-admin-v2.ts', 'apply'], copiedEnv);
+    run('Real Subject grant replay on clone', 'node_modules/tsx/dist/cli.mjs', ['scripts/governance-admin-v2.ts', 'apply'], copiedEnv);
+    copiedEnv.GOVERNANCE_ADMIN_CONFIRMATION = 'ROLLBACK_GOVERNANCE_ADMIN_V2';
+    run('Real Subject governance rollback on clone', 'node_modules/tsx/dist/cli.mjs', ['scripts/governance-admin-v2.ts', 'rollback'], copiedEnv);
+    run('Real Subject rollback replay on clone', 'node_modules/tsx/dist/cli.mjs', ['scripts/governance-admin-v2.ts', 'rollback'], copiedEnv);
+  }
 }
 main().catch(error => { console.error('ISOLATED_CERTIFICATION_FAILED — no raw errors emitted');
   const safe = /^[A-Z_]{3,80}$/.test(error.message) ? error.message : error.code ?? 'UNKNOWN';

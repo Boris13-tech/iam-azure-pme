@@ -36,6 +36,7 @@ CREATE POLICY sod_rule_scope ON "SoDRule"
  USING ("organizationId"=current_setting('app.organization_id',true) AND "tenantId"=current_setting('app.tenant_id',true))
  WITH CHECK ("organizationId"=current_setting('app.organization_id',true) AND "tenantId"=current_setting('app.tenant_id',true));
 DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='app_user') THEN
+ REVOKE ALL ON "SoDPolicy","SoDRule" FROM app_user;
  GRANT SELECT,INSERT,UPDATE ON "SoDPolicy","SoDRule" TO app_user;
 END IF; END $$;
 
