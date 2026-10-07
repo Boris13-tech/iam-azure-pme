@@ -55,6 +55,7 @@ BEGIN
  END IF;
  RETURN NEW;
 END $$;
+REVOKE ALL ON FUNCTION luxia_review_immutable_guard() FROM PUBLIC;
 CREATE TRIGGER review_campaign_immutable BEFORE UPDATE OR DELETE ON "AccessReviewCampaign" FOR EACH ROW EXECUTE FUNCTION luxia_review_immutable_guard();
 CREATE TRIGGER review_item_immutable BEFORE UPDATE OR DELETE ON "AccessReviewItem" FOR EACH ROW EXECUTE FUNCTION luxia_review_immutable_guard();
 DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='app_user') THEN GRANT SELECT,INSERT,UPDATE ON "AccessReviewCampaign","AccessReviewItem" TO app_user; END IF; END $$;

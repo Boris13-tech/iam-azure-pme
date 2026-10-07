@@ -20,7 +20,7 @@ let first: string;
 describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("SoD app_user PostgreSQL/RLS", () => {
   beforeAll(async () => {
     const url = new URL(process.env.DATABASE_URL!);
-    if (!(["localhost", "127.0.0.1"].includes(url.hostname) || (url.hostname === "ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(url.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
+    if (!(["localhost", "127.0.0.1"].includes(url.hostname) || (["ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech", "ep-holy-forest-ah3ser8s-pooler.c-3.us-east-1.aws.neon.tech"].includes(url.hostname) && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(url.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL! } } });
     await owner.$transaction(async tx => {
       await tx.$queryRaw`SELECT set_config('app.organization_id', ${auth.organizationId}, true)`;
@@ -132,7 +132,23 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("SoD app_user PostgreS
   it("direct SQL activation cannot bypass SoD", async () => {
     const person = await withTenantDb(auth, tx => tx.subject.create({ data: { ...context, name: "SQL fixture", type: "HUMAN" } }));
     await grantAssignment(auth, { subjectId: person.id, entitlementId: a, validUntil: expiry() }, change());
-    await expect(withTenantDb(auth, tx => tx.assignment.create({ data: { ...context, subjectId: person.id, entitlementId: b, source: "DIRECT", validUntil: expiry() } }))).rejects.toBeDefined();
+    await expect(withTenantDb(auth, tx => tx.$executeRaw`INSERT INTO "Assignment" (id,"organizationId","tenantId","subjectId","entitlementId",source,status,"updatedAt") VALUES (${randomUUID()},${context.organizationId},${context.tenantId},${person.id},${b},'DIRECT','ACTIVE',CURRENT_TIMESTAMP)`)).rejects.toMatchObject({ meta: { code: "23514", message: expect.stringContaining("SOD_CONFLICT") } });
     expect(await withTenantDb(auth, tx => tx.assignment.count({ where: { ...context, subjectId: person.id, entitlementId: b } }))).toBe(0);
+  });
+  it("nested invoker helper EXECUTE is required, but trigger entry-point EXECUTE is not", async () => {
+    const person = await withTenantDb(auth, tx => tx.subject.create({ data: { ...context, name: "Privilege fixture", type: "HUMAN" } }));
+    await grantAssignment(auth, { subjectId: person.id, entitlementId: a, validUntil: expiry() }, change());
+    // Certification files run sequentially. Use the actual runtime connection,
+    // not SET ROLE (not available to the Neon migration role). Always restore
+    // this isolated database's helper ACL before allowing another test to run.
+    await owner.$executeRawUnsafe('REVOKE EXECUTE ON FUNCTION public.luxia_sod_scope_contains(TEXT,TEXT,TEXT,TEXT) FROM app_user');
+    try {
+      await expect(withTenantDb(auth, tx => tx.$executeRaw`INSERT INTO "Assignment" (id,"organizationId","tenantId","subjectId","entitlementId",source,status,"updatedAt") VALUES (${randomUUID()},${context.organizationId},${context.tenantId},${person.id},${b},'DIRECT','ACTIVE',CURRENT_TIMESTAMP)`)).rejects.toMatchObject({ meta: { code: "42501", message: expect.stringContaining("luxia_sod_scope_contains") } });
+    } finally {
+      await owner.$executeRawUnsafe('GRANT EXECUTE ON FUNCTION public.luxia_sod_scope_contains(TEXT,TEXT,TEXT,TEXT) TO app_user');
+    }
+    expect(await withTenantDb(auth, tx => tx.assignment.count({ where: { ...context, subjectId: person.id, entitlementId: b } }))).toBe(0);
+    const privileges = await withTenantDb(auth, tx => tx.$queryRaw<Array<{ helper: boolean; guard: boolean }>>`SELECT has_function_privilege(current_user,'public.luxia_sod_scope_contains(text,text,text,text)','EXECUTE') helper,has_function_privilege(current_user,'public.luxia_sod_assignment_guard()','EXECUTE') guard`);
+    expect(privileges).toEqual([{ helper: true, guard: false }]);
   });
 });

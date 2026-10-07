@@ -47,7 +47,7 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
     if (!process.env.DATABASE_MIGRATION_URL || !process.env.DATABASE_URL) throw new Error("ISOLATED_DB_REQUIRED");
     const endpoint = new URL(process.env.DATABASE_URL);
     if (!(["localhost", "127.0.0.1"].includes(endpoint.hostname) ||
-      (endpoint.hostname === "ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
+      (["ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech", "ep-holy-forest-ah3ser8s-pooler.c-3.us-east-1.aws.neon.tech"].includes(endpoint.hostname) && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
     legacyBefore = await legacyDigest();
     await owned(auth, async tx => {

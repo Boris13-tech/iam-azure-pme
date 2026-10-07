@@ -46,6 +46,12 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public,pg_t
  AND (s.kind='TENANT' OR (s.kind='RESOURCE' AND s."resourceId"=resource) OR
  (s.kind='RESOURCE_GROUP' AND EXISTS(SELECT 1 FROM "ResourceScopeMember" m WHERE m."organizationId"=org AND m."tenantId"=tenant AND m."scopeId"=s.id AND m."resourceId"=resource))))
 $$;
+REVOKE ALL ON FUNCTION luxia_sod_scope_contains(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+-- Nested SECURITY INVOKER calls require this helper privilege; trigger entry
+-- points themselves require no runtime EXECUTE grant.
+DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='app_user') THEN
+ GRANT EXECUTE ON FUNCTION luxia_sod_scope_contains(TEXT, TEXT, TEXT, TEXT) TO app_user;
+END IF; END $$;
 CREATE FUNCTION luxia_sod_assignment_guard() RETURNS TRIGGER LANGUAGE plpgsql SECURITY INVOKER SET search_path=public,pg_temp AS $$
 BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended('resource-governance:'||NEW."organizationId"||':'||NEW."tenantId",0));
@@ -67,4 +73,5 @@ BEGIN
  ) THEN RAISE EXCEPTION 'SOD_CONFLICT' USING ERRCODE='23514'; END IF;
  RETURN NEW;
 END $$;
+REVOKE ALL ON FUNCTION luxia_sod_assignment_guard() FROM PUBLIC;
 CREATE TRIGGER assignment_static_sod BEFORE INSERT OR UPDATE ON "Assignment" FOR EACH ROW EXECUTE FUNCTION luxia_sod_assignment_guard();

@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const certUrl = process.env.LUXIA_RESOURCE_OWNER_URL;
 const endpoint = certUrl && new URL(certUrl);
-if (!endpoint || endpoint.hostname !== 'ep-dark-king-ah402c68.c-3.us-east-1.aws.neon.tech' || !['/luxia_resources_cert', '/luxia_sod_cert', '/luxia_reviews_cert'].includes(endpoint.pathname)) {
+if (!endpoint || !['ep-dark-king-ah402c68.c-3.us-east-1.aws.neon.tech', 'ep-holy-forest-ah3ser8s.c-3.us-east-1.aws.neon.tech'].includes(endpoint.hostname) || !['/luxia_resources_cert', '/luxia_sod_cert', '/luxia_reviews_cert'].includes(endpoint.pathname)) {
   console.error('ISOLATED_RESOURCES_DB_REQUIRED'); process.exit(2);
 }
 const owner = new PrismaClient({ datasources: { db: { url: certUrl } } });
@@ -47,14 +47,17 @@ async function main() {
   await owner.$executeRawUnsafe('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user');
   await owner.$executeRawUnsafe('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user');
   await owner.$executeRawUnsafe('GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user');
+  // Only the nested invoker helper needs runtime EXECUTE, not trigger entry points.
+  await owner.$executeRawUnsafe('GRANT EXECUTE ON FUNCTION public.luxia_sod_scope_contains(TEXT,TEXT,TEXT,TEXT) TO app_user');
   const runtime = new URL(certUrl);
   runtime.username = 'app_user'; runtime.password = password;
-  runtime.hostname = 'ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech';
+  runtime.hostname = endpoint.hostname.replace('.c-3.', '-pooler.c-3.');
   const env = { ...process.env, DATABASE_URL: runtime.toString(), DATABASE_MIGRATION_URL: certUrl, LUXIA_RESOURCE_RLS: 'true', NEXT_PUBLIC_APP_URL: 'http://localhost:3193', AUTHZ_MODE: 'native' };
   delete env.LUXIA_RESOURCE_OWNER_URL;
   if (process.env.LUXIA_RESOURCE_REMAINING !== 'true') {
-    if (process.env.LUXIA_RESOURCE_HTTP_ONLY === 'true') run('Persisted-session Resources/SoD/Reviews HTTP only', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources/postgres-rls.test.ts', '--testNamePattern=real HTTP APIs', '--testTimeout=120000', '--hookTimeout=120000'], env);
-    else run('Resources PostgreSQL/RLS + unit/architecture', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    if (process.env.LUXIA_RESOURCE_PRIVILEGES_ONLY === 'true') run('SQL privilege PostgreSQL probes', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources/function-privileges.test.ts', 'tests/resources/sod-postgres.test.ts', '--no-file-parallelism', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    else if (process.env.LUXIA_RESOURCE_HTTP_ONLY === 'true') run('Persisted-session Resources/SoD/Reviews HTTP only', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources/postgres-rls.test.ts', '--testNamePattern=real HTTP APIs', '--testTimeout=120000', '--hookTimeout=120000'], env);
+    else run('Resources PostgreSQL/RLS + unit/architecture', 'node_modules/vitest/vitest.mjs', ['run', 'tests/resources', '--no-file-parallelism', '--testTimeout=120000', '--hookTimeout=120000'], env);
   }
   if (process.env.LUXIA_RESOURCE_FULL === 'true') {
     if (process.env.LUXIA_RESOURCE_REMAINING !== 'true') run('Existing security', 'node_modules/vitest/vitest.mjs', ['run', 'tests/security', '--testTimeout=120000', '--hookTimeout=120000'], env);
