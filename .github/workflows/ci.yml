@@ -89,6 +89,8 @@ jobs:
         $do$;
 
         GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
+        -- app_user is created after migrations in this ephemeral CI database.
+        GRANT EXECUTE ON FUNCTION public.luxia_sod_scope_contains(TEXT,TEXT,TEXT,TEXT) TO app_user;
         GRANT CONNECT ON DATABASE luxia_db TO app_user;
         GRANT USAGE ON SCHEMA public TO app_user;
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
@@ -100,6 +102,11 @@ jobs:
 
     - name: Run Security Tests
       run: npm run test:security
+
+    - name: Resources Governance and real PostgreSQL RLS
+      run: npm run test:resources
+      env:
+        LUXIA_RESOURCE_RLS: 'true'
 
     - name: Run Provider Adapter Contract Tests
       run: npm run test:provider-adapters

@@ -49,6 +49,12 @@ export const ENTITLEMENT_CATALOG_V1 = [
 
   "resources.read",
   "resources.manage",
+  "sod.read",
+  "sod.manage",
+  "access_reviews.read",
+  "access_reviews.create",
+  "access_reviews.decide",
+  "access_reviews.manage",
 ] as const;
 
 export type CatalogEntitlement = typeof ENTITLEMENT_CATALOG_V1[number];

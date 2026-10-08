@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Bell, Bot, Building2, CircleHelp, Fingerprint, Gauge, KeyRound, Search, ShieldCheck, Users } from "lucide-react";
+import { Bot, Building2, Fingerprint, Gauge, KeyRound, ShieldCheck, Users, Boxes } from "lucide-react";
 import { getAuthContext } from "@/lib/auth/auth-context";
 import { loadPlatformContext } from "@/lib/platform/context";
 
@@ -10,6 +10,9 @@ const navigation = [
   { href: "/dashboard/users", label: "Identités", icon: Users, entitlement: "subjects.read" },
   { href: "/dashboard/settings", label: "Authentification", icon: ShieldCheck, entitlement: "providers.read" },
   { href: "/dashboard/roles", label: "Accès", icon: KeyRound, entitlement: "assignments.read" },
+  { href: "/dashboard/resources", label: "Resources", icon: Boxes, entitlement: "resources.read" },
+  { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: Boxes, entitlement: "sod.read" },
+  { href: "/dashboard/governance/access-reviews", label: "Revues d’accès", icon: ShieldCheck, entitlement: "access_reviews.read" },
   { href: "/dashboard/audit", label: "Sécurité", icon: Fingerprint, entitlement: "audit.read" },
 ];
 
@@ -41,13 +44,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <section className="luxia-workspace">
         <header className="luxia-topbar">
           <div className="luxia-contexts">
-            <button aria-label="Organisation active"><Building2 size={16} /><span>Entreprise</span><b>{platform.organization.name}</b></button>
-            <button aria-label="Tenant actif"><span className="luxia-live-dot" /><span>Tenant</span><b>{platform.tenant.name}</b></button>
+            <button disabled aria-label="Organisation active — contexte en lecture seule"><Building2 size={16} /><span>Entreprise</span><b>{platform.organization.name}</b></button>
+            <button disabled aria-label="Tenant actif — contexte en lecture seule"><span className="luxia-live-dot" /><span>Tenant</span><b>{platform.tenant.name}</b></button>
           </div>
           <div className="luxia-top-actions">
-            <label className="luxia-search"><Search size={17} /><input aria-label="Recherche" placeholder="Rechercher (utilisateurs, applications, ressources...)" /><kbd>⌘ K</kbd></label>
-            <button className="luxia-icon-button" aria-label="Notifications"><Bell size={19} /><span>3</span></button>
-            <button className="luxia-icon-button" aria-label="Aide"><CircleHelp size={19} /></button>
             <b className="luxia-language">FR</b>
             <div className="luxia-profile"><span>{platform.subject.name.split(" ").map(part => part[0]).join("").slice(0,2).toUpperCase()}</span><div><b>{platform.subject.name}</b><small>{platform.identity.providerType.replaceAll("_", " ")}</small></div></div>
           </div>
