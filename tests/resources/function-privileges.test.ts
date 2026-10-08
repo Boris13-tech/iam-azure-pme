@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 
-const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "luxia_review_immutable_guard"];
+const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "luxia_review_immutable_guard", "luxia_resource_onboarding_evidence_guard"];
 describe("LUXIA SQL function privilege architecture", () => {
   it("every function introduced by these migrations explicitly revokes PUBLIC", () => {
-    const files = ["20261004120000_resource_governance_foundation", "20261004160000_static_sod_v1", "20261004180000_access_reviews_v1"];
+    const files = ["20261004120000_resource_governance_foundation", "20261004160000_static_sod_v1", "20261004180000_access_reviews_v1", "20261008040000_resource_onboarding_evidence"];
     const names: string[] = [];
     for (const file of files) {
       const sql = readFileSync(`prisma/migrations/${file}/migration.sql`, "utf8");
