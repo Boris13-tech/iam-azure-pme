@@ -68,7 +68,11 @@ describe.runIf(process.env.LUXIA_APPROVED_BOOTSTRAP_RLS === "true")("operator-ap
       }
       expect(ready).toBe(true);
       expect((await fetch(route, { headers })).status).toBe(403);
-      const outcomes = await Promise.all([bootstrap(), bootstrap()]);
+      // Await BOTH commits/failures before cleanup; fail-fast Promise.all could
+      // otherwise race a still-running transaction against the rollback check.
+      const settled = await Promise.allSettled([bootstrap(), bootstrap()]);
+      expect(settled.every(result => result.status === "fulfilled")).toBe(true);
+      const outcomes = settled.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
       expect(outcomes.map(result => result.outcome).sort()).toEqual(["ALREADY_APPLIED", "CREATED"]);
       const allowed = await fetch(route, { headers }); expect(allowed.status).toBe(200);
       const allowBody = await allowed.json();
