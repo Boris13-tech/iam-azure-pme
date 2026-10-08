@@ -54,6 +54,7 @@ export default function ResourceCatalog() {
   }
   return <section className="space-y-6 p-6">
     <h1 className="text-2xl font-bold">Resources</h1>
+    {canManage && <a href="/dashboard/resources/onboarding" className="inline-block rounded border px-3 py-2">Préparer le premier accès LUXIA</a>}
     <p>Catalogue du tenant actif. Une ressource enregistrée n’est pas automatiquement protégée : son service doit appeler le moteur d’autorisation côté serveur.</p>
     <nav aria-label="Types de ressources" className="flex flex-wrap gap-3">{categories.map(([value, label]) => <button key={value} type="button" aria-pressed={category === value} onClick={() => setCategory(value)} className="rounded border px-3 py-2">{label}</button>)}</nav>
     {error && <p role="alert" className="text-red-700">{error}</p>}
