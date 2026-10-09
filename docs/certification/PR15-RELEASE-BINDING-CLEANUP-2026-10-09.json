@@ -1,0 +1,12 @@
+{
+  "environment": "CERTIFICATION_ONLY",
+  "branch": "br-crimson-credit-ahqddpia",
+  "utc": "2026-10-09T06:31:24.360Z",
+  "activity": [{"datname":"luxia_resources_diag_ci03","usename":"app_user","state":"idle","n":2,"open_transactions":0,"blocked":0}],
+  "advisoryLocks": [],
+  "deadlocks": {"luxia_resources_diag_ci03":0,"neondb":0},
+  "app_user": {"rolsuper":false,"rolbypassrls":false,"ownershipCount":0},
+  "idlePooledBackends": "EXPECTED_SERVER_POOL_REUSE",
+  "result": "PASS",
+  "scope": "The two databases on the new clone, after all owned test processes exited. Not a seven-database assertion."
+}

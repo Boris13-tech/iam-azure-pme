@@ -1,0 +1,33 @@
+{
+  "branch": "br-small-mountain-ahs8b0nr",
+  "environment": "CERTIFICATION_ONLY",
+  "applicationBaseline": "5704558f5c343ae653c8984917b90a760caeabf1",
+  "negative": {
+    "result": "PASS",
+    "tests": 4,
+    "skipped": 1,
+    "durationSeconds": 38.45
+  },
+  "positive": {
+    "result": "PASS",
+    "tests": 4,
+    "skipped": 1,
+    "durationSeconds": 77.85
+  },
+  "gates": {
+    "initialHttp": "DENY",
+    "exactGrant": "ONE_DIRECT_RESOURCE_BOUNDED",
+    "afterGrant": "ALLOW",
+    "exactReplay": "IDEMPOTENT",
+    "modifiedReplay": "DENY",
+    "revoke": "PASS",
+    "afterRevoke": "DENY",
+    "revokedReplayRecreates": "NO",
+    "crossTenant": "DENY",
+    "immutableEvidence": "PASS",
+    "subjectIdentityProviderLegacyPreservation": "PASS"
+  },
+  "productionExecution": "NONE",
+  "productionManifest": "NONE",
+  "productionRegistrations": "EMPTY"
+}

@@ -29,7 +29,7 @@ const decide = (campaignId: string, itemId: string, decision: "KEEP" | "REVOKE",
 describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Access Reviews real app_user PostgreSQL/RLS", () => {
   beforeAll(async () => {
     const url = new URL(process.env.DATABASE_URL!);
-    if (!(["localhost", "127.0.0.1"].includes(url.hostname) || (["ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech", "ep-holy-forest-ah3ser8s-pooler.c-3.us-east-1.aws.neon.tech", "ep-ancient-base-ahfygu4z-pooler.c-3.us-east-1.aws.neon.tech", "ep-delicate-boat-ahnvfj7w-pooler.c-3.us-east-1.aws.neon.tech"].includes(url.hostname) && url.pathname === "/luxia_reviews_cert"))) throw new Error("ISOLATED_DB_REQUIRED");
+    if (!(["localhost", "127.0.0.1"].includes(url.hostname) || (url.hostname === "ep-still-morning-ah7s0usw-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_reviews_cert","/luxia_resources_diag_awake01","/luxia_resources_diag_concurrency02","/luxia_resources_diag_global01","/luxia_resources_diag_ci02","/luxia_resources_diag_ci03"].includes(url.pathname)) || (["ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech", "ep-holy-forest-ah3ser8s-pooler.c-3.us-east-1.aws.neon.tech", "ep-ancient-base-ahfygu4z-pooler.c-3.us-east-1.aws.neon.tech", "ep-delicate-boat-ahnvfj7w-pooler.c-3.us-east-1.aws.neon.tech"].includes(url.hostname) && url.pathname === "/luxia_reviews_cert"))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL! } } });
     legacyBefore = await legacyDigest();
     await owner.$transaction(async tx => {

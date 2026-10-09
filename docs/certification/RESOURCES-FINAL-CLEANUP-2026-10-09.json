@@ -1,0 +1,67 @@
+{
+  "environment": "CERTIFICATION_ONLY",
+  "branch": "br-small-mountain-ahs8b0nr",
+  "utc": "2026-10-09T05:54:16.363Z",
+  "activity": [
+    {
+      "datname": "luxia_resources_diag_ci03",
+      "usename": "app_user",
+      "state": "idle",
+      "n": 2,
+      "open_transactions": 0,
+      "blocked": 0
+    }
+  ],
+  "locks": [],
+  "counters": [
+    {
+      "datname": "luxia_resources_diag_awake01",
+      "deadlocks": "0",
+      "numbackends": 0
+    },
+    {
+      "datname": "luxia_resources_diag_ci02",
+      "deadlocks": "0",
+      "numbackends": 0
+    },
+    {
+      "datname": "luxia_resources_diag_ci03",
+      "deadlocks": "0",
+      "numbackends": 2
+    },
+    {
+      "datname": "luxia_resources_diag_concurrency02",
+      "deadlocks": "0",
+      "numbackends": 0
+    },
+    {
+      "datname": "luxia_resources_diag_global01",
+      "deadlocks": "0",
+      "numbackends": 0
+    },
+    {
+      "datname": "luxia_reviews_cert",
+      "deadlocks": "0",
+      "numbackends": 0
+    },
+    {
+      "datname": "neondb",
+      "deadlocks": "0",
+      "numbackends": 1
+    }
+  ],
+  "role": [
+    {
+      "rolname": "app_user",
+      "rolsuper": false,
+      "rolbypassrls": false
+    }
+  ],
+  "ownership": [
+    {
+      "n": 0
+    }
+  ],
+  "result": "PASS",
+  "idlePooledBackends": "EXPECTED_SERVER_POOL_REUSE"
+}

@@ -1,0 +1,45 @@
+{
+  "result": "PASS",
+  "files": 69,
+  "skippedFiles": 1,
+  "tests": 361,
+  "skipped": 11,
+  "durationSeconds": 842.05,
+  "capturedSamples": 56,
+  "samplesWithBlockers": 0,
+  "samplesWithPendingSteps": 11,
+  "captureCompleteness": "PARTIAL: one early output chunk was truncated; no exhaustive sampling claim",
+  "environment": "CERTIFICATION_ONLY",
+  "branch": "br-crimson-credit-ahqddpia",
+  "database": "luxia_resources_diag_ci03",
+  "seed": "release-binding-final-ci",
+  "workers": 1,
+  "testBudgetMs": 120000,
+  "selector": [
+    "tests/security",
+    "tests/resources",
+    "tests/provider-adapters",
+    "tests/identity",
+    "tests/operations"
+  ],
+  "runnerNegative": {
+    "passed": 5,
+    "skipped": 1,
+    "durationSeconds": 38.42
+  },
+  "runnerPositive": {
+    "passed": 5,
+    "skipped": 1,
+    "durationSeconds": 65.52,
+    "grant": "REVOKED",
+    "preservation": "ASSERTED_UNCHANGED"
+  },
+  "finalUnit": {
+    "passed": 8,
+    "skipped": 2,
+    "durationSeconds": 3.16
+  },
+  "productionGrant": "NONE",
+  "productionManifest": "NONE",
+  "providerLiveCalls": 0
+}

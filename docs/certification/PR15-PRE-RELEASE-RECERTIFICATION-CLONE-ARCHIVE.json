@@ -1,0 +1,157 @@
+{
+  "evidence": {
+    "branch": "br-small-mountain-ahs8b0nr",
+    "project": "hidden-leaf-91460552",
+    "environment": "CERTIFICATION_ONLY",
+    "exportedAt": "2026-10-09T06:11:41.379Z",
+    "posture": [
+      {
+        "current_user": "app_user",
+        "current_database": "neondb",
+        "rolsuper": false,
+        "rolbypassrls": false
+      }
+    ],
+    "audits": [
+      {
+        "id": "ec845222-68b6-49f4-9457-39e1fb8b5521",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED",
+        "result": "DENIED",
+        "occurredAt": "2026-10-09T05:06:13.239Z",
+        "manifestBinding": "a51718bb6a68bb3b1bdd48dfa4263a70deac445e868b3cf423780b525047f5b4",
+        "reasonCode": "SUBJECT_NOT_ACTIVE"
+      },
+      {
+        "id": "f7d2a931-d6bf-4962-9eb3-0126777cf371",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED",
+        "result": "DENIED",
+        "occurredAt": "2026-10-09T05:06:17.469Z",
+        "manifestBinding": "a51718bb6a68bb3b1bdd48dfa4263a70deac445e868b3cf423780b525047f5b4",
+        "reasonCode": "RESOURCE_BINDING_DENIED"
+      },
+      {
+        "id": "1b979082-0016-4c65-8b11-ac2a18a741b0",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED",
+        "result": "DENIED",
+        "occurredAt": "2026-10-09T05:06:23.465Z",
+        "manifestBinding": "a51718bb6a68bb3b1bdd48dfa4263a70deac445e868b3cf423780b525047f5b4",
+        "reasonCode": "SOD_CONFLICT"
+      },
+      {
+        "id": "e89d1586-9616-4e34-a040-56166ce99a5f",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED",
+        "result": "DENIED",
+        "occurredAt": "2026-10-09T05:08:50.336Z",
+        "manifestBinding": "56fb70ae9e5bbc97457d0f3d414c51777982183ecfbff90e14a99b848d501676",
+        "reasonCode": "MANIFEST_OR_APPROVAL_DENIED"
+      },
+      {
+        "id": "f85919e2-f2f2-4d88-862a-b6a35ec18523",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED",
+        "result": "DENIED",
+        "occurredAt": "2026-10-09T05:08:51.644Z",
+        "manifestBinding": "56fb70ae9e5bbc97457d0f3d414c51777982183ecfbff90e14a99b848d501676",
+        "reasonCode": "MANIFEST_OR_APPROVAL_DENIED"
+      },
+      {
+        "id": "f2862237-3330-481b-a837-0f62c67e9995",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP",
+        "result": "SUCCESS",
+        "occurredAt": "2026-10-09T05:08:53.343Z",
+        "manifestBinding": "56fb70ae9e5bbc97457d0f3d414c51777982183ecfbff90e14a99b848d501676",
+        "reasonCode": null
+      },
+      {
+        "id": "03e77a12-a122-475b-b59e-2167e0054f1a",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.REVOKE",
+        "result": "SUCCESS",
+        "occurredAt": "2026-10-09T05:09:11.420Z",
+        "manifestBinding": "56fb70ae9e5bbc97457d0f3d414c51777982183ecfbff90e14a99b848d501676",
+        "reasonCode": null
+      },
+      {
+        "id": "5e9a9628-f218-469e-9e8b-706f98fcae23",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED",
+        "result": "DENIED",
+        "occurredAt": "2026-10-09T05:09:16.013Z",
+        "manifestBinding": "56fb70ae9e5bbc97457d0f3d414c51777982183ecfbff90e14a99b848d501676",
+        "reasonCode": "BOOTSTRAP_ALREADY_REVOKED_OR_CONFLICTING"
+      }
+    ],
+    "preserved": {
+      "Subject": [
+        {
+          "n": 1,
+          "digest": "457b5d60f12a6dfcefe1712016502d82"
+        }
+      ],
+      "IdentityAccount": [
+        {
+          "n": 2,
+          "digest": "0714d38589d2ee4dc18a4da0bf7c98a0"
+        }
+      ],
+      "ProviderConnection": [
+        {
+          "n": 2,
+          "digest": "5f02e7ab268625a8886d5c098f4f7998"
+        }
+      ],
+      "Assignment": [
+        {
+          "n": 22,
+          "digest": "264d6e8b36b00f69b4af55839f7ee6e5"
+        }
+      ],
+      "Resource": [
+        {
+          "n": 1,
+          "digest": "6b36638b391a4bcb131522fe9c04cc5f"
+        }
+      ],
+      "ResourceScope": [
+        {
+          "n": 1,
+          "digest": "d97dbb74b2967d1a40bb2d0b2978869a"
+        }
+      ],
+      "Entitlement": [
+        {
+          "n": 22,
+          "digest": "ba34b454b1fbe0bbc37518a324d6d95c"
+        }
+      ],
+      "User": [
+        {
+          "n": 2,
+          "digest": "d671e97936d6fa9c83440583538fd783"
+        }
+      ],
+      "Role": [
+        {
+          "n": 3,
+          "digest": "ed87c63fa080c1bab69589d9f6db98ea"
+        }
+      ],
+      "Permission": [
+        {
+          "n": 0,
+          "digest": "d41d8cd98f00b204e9800998ecf8427e"
+        }
+      ],
+      "UserRole": [
+        {
+          "n": 2,
+          "digest": "e1de0551e3aa1ae80ac26b50097c794c"
+        }
+      ],
+      "LegacyUserBridge": [
+        {
+          "n": 0,
+          "digest": "d41d8cd98f00b204e9800998ecf8427e"
+        }
+      ]
+    }
+  },
+  "sha256": "09a962a7d0fc12ba62ea65c1fa300cf0fba27f9ac6a9a6eb130ae604d4e96412"
+}

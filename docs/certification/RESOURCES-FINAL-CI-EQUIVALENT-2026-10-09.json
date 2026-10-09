@@ -1,0 +1,354 @@
+{
+  "environment": "CERTIFICATION_ONLY",
+  "branch": "br-small-mountain-ahs8b0nr",
+  "database": "luxia_resources_diag_ci03",
+  "applicationBaseline": "5704558f5c343ae653c8984917b90a760caeabf1",
+  "selector": [
+    "tests/security",
+    "tests/resources",
+    "tests/provider-adapters",
+    "tests/identity",
+    "tests/operations"
+  ],
+  "workerCount": 1,
+  "fixtureSeed": "final-ci-fresh-03",
+  "emptyFixturePreflight": "PASS",
+  "migrations": 19,
+  "result": "PASS",
+  "filesPassed": 69,
+  "filesSkipped": 1,
+  "testsPassed": 360,
+  "testsSkipped": 11,
+  "durationSeconds": 931.06,
+  "conditionalCeremonies": "Not activated in global suite; dedicated positive/negative runner proofs recorded separately",
+  "capture": {
+    "completeSamples": 155,
+    "incompleteSamples": 0,
+    "blockedSamples": 0,
+    "ungrantedAdvisoryLockSamples": 0,
+    "deadlockSamples": 0
+  },
+  "steps": [
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "database-readiness",
+      "phase": "START",
+      "utc": "2026-10-09T05:43:47.502Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.1167
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "database-readiness",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:43:48.749Z",
+      "wallElapsedMs": 1247,
+      "monotonicElapsedMs": 1247.2255
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-resource",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:04.823Z",
+      "wallElapsedMs": 1,
+      "monotonicElapsedMs": 0.7347
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-resource",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:07.494Z",
+      "wallElapsedMs": 2672,
+      "monotonicElapsedMs": 2671.8043
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "read-create-audit",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:07.495Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0447
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "read-create-audit",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:08.183Z",
+      "wallElapsedMs": 688,
+      "monotonicElapsedMs": 688.8618
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-create-audit",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:08.187Z",
+      "wallElapsedMs": 3,
+      "monotonicElapsedMs": 3.223
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-create-audit",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:08.196Z",
+      "wallElapsedMs": 12,
+      "monotonicElapsedMs": 11.5906
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "duplicate-request-deny",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:08.196Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0136
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "duplicate-request-deny",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:09.151Z",
+      "wallElapsedMs": 955,
+      "monotonicElapsedMs": 955.5977
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-scope",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:09.152Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0337
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-scope",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:10.938Z",
+      "wallElapsedMs": 1786,
+      "monotonicElapsedMs": 1786.1227
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-entitlement",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:10.939Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.016
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-entitlement",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:13.352Z",
+      "wallElapsedMs": 2413,
+      "monotonicElapsedMs": 2413.6506
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "fixture-owner-assignment",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:13.354Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0537
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "fixture-owner-assignment",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:14.167Z",
+      "wallElapsedMs": 813,
+      "monotonicElapsedMs": 813.0464
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "grant-assignment",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:14.167Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.012
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "grant-assignment",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:18.315Z",
+      "wallElapsedMs": 4148,
+      "monotonicElapsedMs": 4148.174
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-allow",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:18.316Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0378
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-allow",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:20.178Z",
+      "wallElapsedMs": 1862,
+      "monotonicElapsedMs": 1861.9782
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "revoke-assignment",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:20.178Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0091
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "revoke-assignment",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:22.191Z",
+      "wallElapsedMs": 2013,
+      "monotonicElapsedMs": 2012.8424
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-deny-after-revoke",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:22.191Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0085
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-deny-after-revoke",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:23.147Z",
+      "wallElapsedMs": 956,
+      "monotonicElapsedMs": 956.0541
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "disable-resource",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:23.148Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0065
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "disable-resource",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:25.059Z",
+      "wallElapsedMs": 1911,
+      "monotonicElapsedMs": 1910.8813
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "revoke-entitlement",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:25.059Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0075
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "revoke-entitlement",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:28.648Z",
+      "wallElapsedMs": 3589,
+      "monotonicElapsedMs": 3589.3579
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "read-grant-audit",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:28.649Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0085
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "read-grant-audit",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:29.325Z",
+      "wallElapsedMs": 676,
+      "monotonicElapsedMs": 676.484
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-grant-audit",
+      "phase": "START",
+      "utc": "2026-10-09T05:45:29.326Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0101
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-grant-audit",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:45:29.326Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.5457
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "disconnect-runtime-and-fixtures",
+      "phase": "START",
+      "utc": "2026-10-09T05:49:03.905Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0779
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "disconnect-runtime-and-fixtures",
+      "phase": "DONE",
+      "utc": "2026-10-09T05:49:03.939Z",
+      "wallElapsedMs": 34,
+      "monotonicElapsedMs": 34.3127
+    }
+  ],
+  "cleanup": [
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "CLEANUP",
+      "utc": "2026-10-09T05:49:04.766Z",
+      "activity": [
+        {
+          "pid": 9950,
+          "usename": "app_user",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T05:49:02.915Z",
+          "state_change": "2026-10-09T05:49:02.915Z",
+          "blockers": [],
+          "query_fingerprint": "09da805002b1520bd798f9484c23f76c",
+          "query_kind": "SELECT"
+        },
+        {
+          "pid": 10193,
+          "usename": "app_user",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T05:43:25.919Z",
+          "state_change": "2026-10-09T05:43:25.920Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "754",
+          "xact_rollback": "16"
+        }
+      ],
+      "pendingSteps": []
+    }
+  ],
+  "productionMutations": "NONE",
+  "providerCalls": "NONE",
+  "localNodeVersion": "24.13.0",
+  "githubNodeVersion": "20"
+}
