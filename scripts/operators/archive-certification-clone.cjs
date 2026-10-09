@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const url = new URL(process.env.DATABASE_URL);
 const profiles = {'ep-lingering-bird-ah4pwsn2-pooler.c-3.us-east-1.aws.neon.tech':'br-bitter-bread-ahptkj1r',
-  'ep-empty-hill-ahbgk7xs-pooler.c-3.us-east-1.aws.neon.tech':'br-ancient-unit-ahy064za'};
+  'ep-empty-hill-ahbgk7xs-pooler.c-3.us-east-1.aws.neon.tech':'br-ancient-unit-ahy064za',
+  'ep-solitary-wildflower-ahcqqg5r-pooler.c-3.us-east-1.aws.neon.tech':'br-small-mountain-ahs8b0nr'};
 assert.ok(profiles[url.hostname], 'CERTIFICATION_CLONE_ONLY');
 assert.equal(url.pathname, '/neondb');
 assert.equal(decodeURIComponent(url.username), 'app_user');

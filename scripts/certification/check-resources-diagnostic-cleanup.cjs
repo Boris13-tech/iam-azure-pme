@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 let url;
 try {
 url=new URL(process.env.DATABASE_MIGRATION_URL);
-assert.equal(url.hostname,'ep-solitary-wildflower-ahcqqg5r.c-3.us-east-1.aws.neon.tech');
+assert.equal(url.hostname,'ep-still-morning-ah7s0usw.c-3.us-east-1.aws.neon.tech');
 assert.equal(url.pathname,'/neondb');assert.equal(url.username,'neondb_owner');
 } catch { console.error('DIAGNOSTIC_ENDPOINT_DENIED');process.exit(1); }
 url.searchParams.set('connection_limit','1');
@@ -27,6 +27,6 @@ db.$transaction(async tx=>{
   assert.ok(activity.every(r=>r.state==='idle'&&r.open_transactions===0&&r.blocked===0&&r.usename==='app_user'),'POST_TEST_CONNECTION_OR_TRANSACTION_LEFT_OPEN');
   assert.equal(locks.length,0,'POST_TEST_ADVISORY_LOCK_LEFT_OPEN');
   assert.ok(counters.every(r=>BigInt(r.deadlocks)===0n),'DATABASE_DEADLOCK_OBSERVED');
-  return {environment:'CERTIFICATION_ONLY',branch:'br-small-mountain-ahs8b0nr',utc:new Date().toISOString(),activity,locks,counters,role,ownership,result:'PASS',idlePooledBackends:'EXPECTED_SERVER_POOL_REUSE'};
+  return {environment:'CERTIFICATION_ONLY',branch:'br-crimson-credit-ahqddpia',utc:new Date().toISOString(),activity,locks,counters,role,ownership,result:'PASS',idlePooledBackends:'EXPECTED_SERVER_POOL_REUSE'};
 },{timeout:30000}).then(proof=>console.log(JSON.stringify(proof,(_k,v)=>typeof v==='bigint'?v.toString():v)))
   .catch(()=>{console.error('DIAGNOSTIC_CLEANUP_PROOF_FAILED');process.exitCode=1;}).finally(()=>db.$disconnect());

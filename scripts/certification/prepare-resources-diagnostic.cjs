@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 let u;
 try {
 u = new URL(process.env.DATABASE_MIGRATION_URL);
-assert.equal(u.hostname,'ep-solitary-wildflower-ahcqqg5r.c-3.us-east-1.aws.neon.tech');
+assert.equal(u.hostname,'ep-still-morning-ah7s0usw.c-3.us-east-1.aws.neon.tech');
 assert.equal(u.username,'neondb_owner');
 assert.ok(['/luxia_resources_diag_awake01','/luxia_resources_diag_concurrency02','/luxia_resources_diag_global01','/luxia_resources_diag_ci02','/luxia_resources_diag_ci03'].includes(u.pathname));
 } catch { console.error('DIAGNOSTIC_ENDPOINT_DENIED');process.exit(1); }

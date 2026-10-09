@@ -26,11 +26,11 @@ foreach ($name in @('DATABASE_URL','DATABASE_MIGRATION_URL','LUXIA_RESOURCE_RLS'
   $saved[$name]=[Environment]::GetEnvironmentVariable($name,'Process')
 }
 try {
-  $runtime=(@(npx --offline neon connection-string br-small-mountain-ahs8b0nr --project-id hidden-leaf-91460552 --database-name $Database --role-name app_user --pooled)[-1]).Trim()
-  $owner=(@(npx --offline neon connection-string br-small-mountain-ahs8b0nr --project-id hidden-leaf-91460552 --database-name $Database --role-name neondb_owner)[-1]).Trim()
+  $runtime=(@(npx --offline neon connection-string br-crimson-credit-ahqddpia --project-id hidden-leaf-91460552 --database-name $Database --role-name app_user --pooled)[-1]).Trim()
+  $owner=(@(npx --offline neon connection-string br-crimson-credit-ahqddpia --project-id hidden-leaf-91460552 --database-name $Database --role-name neondb_owner)[-1]).Trim()
   try { $runtimeUri=[uri]$runtime; $ownerUri=[uri]$owner } catch { throw 'CERTIFICATION_ENDPOINT_INVALID' }
-  if ($runtimeUri.Host -ne 'ep-solitary-wildflower-ahcqqg5r-pooler.c-3.us-east-1.aws.neon.tech' -or
-      $ownerUri.Host -ne 'ep-solitary-wildflower-ahcqqg5r.c-3.us-east-1.aws.neon.tech' -or
+  if ($runtimeUri.Host -ne 'ep-still-morning-ah7s0usw-pooler.c-3.us-east-1.aws.neon.tech' -or
+      $ownerUri.Host -ne 'ep-still-morning-ah7s0usw.c-3.us-east-1.aws.neon.tech' -or
       $runtimeUri.AbsolutePath -ne "/$Database" -or $ownerUri.AbsolutePath -ne "/$Database") { throw 'CERTIFICATION_ENDPOINT_DENIED' }
   $env:DATABASE_URL=$runtime; $env:DATABASE_MIGRATION_URL=$owner
   $env:LUXIA_RESOURCE_RLS='true'; $env:LUXIA_RESOURCE_DIAGNOSTICS='true'; $env:LUXIA_RESOURCE_DIAGNOSTIC_SEED=$Seed

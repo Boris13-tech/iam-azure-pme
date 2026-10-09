@@ -2,21 +2,20 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { FIXED, PROFILES, validate, ceremony, hash, type Approval, type Execution } from "./resource-owner-bootstrap";
+import { FIXED, PROFILES, VERCEL_PROJECT_ID, registeredRelease, validate, ceremony, hash, type Approval, type Execution } from "./resource-owner-bootstrap";
 import { PRODUCTION_REGISTRATIONS } from "./production-bootstrap-registry";
 import { withTenantDb } from "../../lib/db/scoped-client";
 
-function controlPlaneDeployment() {
+function controlPlaneDeployment(expected: { deployedSha: string; deploymentId: string }) {
   const cli = resolve(process.env.APPDATA ?? "", "npm/node_modules/vercel/dist/vc.js");
   const read = (path: string) => JSON.parse(execFileSync(process.execPath,[cli,'api',path,'--scope','legrandborisohandjaedimo-4025s-projects','--raw'],
     {encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','pipe']}));
-  const project = read('/v9/projects/prj_dZ6YOYRdONsicgWdlmofh7NwtoSP');
+  const project = read(`/v9/projects/${VERCEL_PROJECT_ID}`);
   const id = project.targets?.production?.id;
   if (typeof id !== 'string' || !/^dpl_[A-Za-z0-9]+$/.test(id)) throw new Error('DEPLOYMENT_UNVERIFIED');
   const deployment = read(`/v13/deployments/${id}`);
-  if (deployment.projectId !== 'prj_dZ6YOYRdONsicgWdlmofh7NwtoSP' || deployment.target !== 'production' ||
-    deployment.readyState !== 'READY' || deployment.meta?.githubCommitSha !== FIXED.productionDeploymentSha) throw new Error('DEPLOYMENT_UNVERIFIED');
-  return FIXED.productionDeploymentSha;
+  if (id !== expected.deploymentId || deployment.projectId !== VERCEL_PROJECT_ID || deployment.target !== 'production' ||
+    deployment.readyState !== 'READY' || deployment.meta?.githubCommitSha !== expected.deployedSha) throw new Error('DEPLOYMENT_UNVERIFIED');
 }
 async function main() {
   // Separate Production command. Certification is performed through the same engine
@@ -25,15 +24,16 @@ async function main() {
   if (!manifestPath || !approvalPath) throw new Error('DETACHED_ARTIFACTS_REQUIRED');
   const bytes = readFileSync(manifestPath,'utf8'), approval = JSON.parse(readFileSync(approvalPath,'utf8')) as Approval;
   const url = process.env.DATABASE_URL ?? '';
+  const release = registeredRelease(bytes, PRODUCTION_REGISTRATIONS);
   const execution: Execution = { mode:'PRODUCTION',url,origin:PROFILES.PRODUCTION.origin,
-    verifiedProject:FIXED.projectId,verifiedBranch:PROFILES.PRODUCTION.branch,deployedSha:FIXED.productionDeploymentSha,
+    verifiedProject:FIXED.projectId,verifiedBranch:PROFILES.PRODUCTION.branch,deployedSha:release.deployedSha,deploymentId:release.deploymentId,
     registrations:PRODUCTION_REGISTRATIONS };
   // Unknown/abandoned artifacts are rejected BEFORE any control-plane/provider/DB call.
   const manifest=validate(bytes,approval,execution);
   const sessionDisposition=readFileSync(resolve('docs/certification/PR14-SESSION-DELTA-ATTRIBUTION-2026-10-08.md'),'utf8');
   if(hash(sessionDisposition)!=='801333ca13e4f6bd935449540314193be38c4715479d640771925f7baf2a7490')
     throw new Error('SESSION_DELTA_DISPOSITION_UNVERIFIED');
-  controlPlaneDeployment();
+  controlPlaneDeployment(release);
   const neonArgs = ['--offline','neon','branches','get',PROFILES.PRODUCTION.branch,'--project-id',FIXED.projectId,'--output','json'];
   const neonRaw = process.platform === 'win32'
     ? execFileSync('cmd.exe',['/d','/s','/c',`npx ${neonArgs.join(' ')}`],{encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','pipe']})

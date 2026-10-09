@@ -6,7 +6,6 @@ import { internalBinding } from "../../lib/resources/onboarding";
 import { evaluateSoD } from "../../lib/resources/sod";
 
 export const FIXED = Object.freeze({ projectId: "hidden-leaf-91460552", database: "neondb",
-  productionDeploymentSha: "5704558f5c343ae653c8984917b90a760caeabf1",
   organizationId: "4841428a-80b4-4f07-bb3f-c94612dfd4a2", tenantId: "c68ae9ee-11a8-42f9-bc9c-b19c42ec7914",
   actorSubjectId: "30a15eda-24d3-40ef-8705-11c2e6e1b929", targetSubjectId: "30a15eda-24d3-40ef-8705-11c2e6e1b929",
   resourceId: "ed8c9111-a930-4724-a76d-bd541538a621", scopeId: "3952f920-c064-46a2-9d22-d31d338c8a54",
@@ -14,21 +13,33 @@ export const FIXED = Object.freeze({ projectId: "hidden-leaf-91460552", database
   entitlementKey: "resource-scope:3952f920-c064-46a2-9d22-d31d338c8a54:resource.read" });
 export const PROFILES = Object.freeze({
   PRODUCTION: { branch: "br-billowing-frog-ahtirmax", host: "ep-restless-thunder-ah18c37v-pooler.c-3.us-east-1.aws.neon.tech", origin: "https://iam-azure-pme.vercel.app" },
-  CERTIFICATION_ONLY: { branch: "br-small-mountain-ahs8b0nr", host: "ep-solitary-wildflower-ahcqqg5r-pooler.c-3.us-east-1.aws.neon.tech", origin: "http://localhost:3196" },
+  CERTIFICATION_ONLY: { branch: "br-crimson-credit-ahqddpia", host: "ep-still-morning-ah7s0usw-pooler.c-3.us-east-1.aws.neon.tech", origin: "http://localhost:3196" },
 });
 export const ABANDONED = "95e9b80de3e28890faf01eb41fb70002d6ef1efb6986815da8b8868799376232";
 export const hash = (bytes: string) => createHash("sha256").update(bytes, "utf8").digest("hex");
+export const VERCEL_PROJECT_ID = "prj_dZ6YOYRdONsicgWdlmofh7NwtoSP";
+// This is a separately registered operator artifact, NOT a runtime/environment override.
+const releaseSchema = z.object({ releaseVersion: z.literal(1), environment: z.enum(["PRODUCTION", "CERTIFICATION_ONLY"]),
+  projectId: z.literal(FIXED.projectId), branch: z.string(), database: z.literal(FIXED.database),
+  vercelProjectId: z.literal(VERCEL_PROJECT_ID), deployedSha: z.string().regex(/^[a-f0-9]{40}$/),
+  deploymentId: z.string(), manifestBinding: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const manifestSchema = z.object({ manifestVersion: z.literal(1), environment: z.enum(["PRODUCTION", "CERTIFICATION_ONLY"]),
-  ...Object.fromEntries(Object.keys(FIXED).map(key => [key, z.string()])), branch: z.string(), scopeType: z.literal("RESOURCE"),
+  ...Object.fromEntries(Object.keys(FIXED).map(key => [key, z.string()])), productionDeploymentSha: z.string().regex(/^[a-f0-9]{40}$/),
+  branch: z.string(), scopeType: z.literal("RESOURCE"),
   purpose: z.literal("INITIAL_BOUNDED_RESOURCE_OWNER"), source: z.literal("DIRECT"), assignmentId: z.uuid(), operationId: z.uuid(),
   validFrom: z.iso.datetime(), validUntil: z.iso.datetime(), approvedAt: z.literal("PENDING_EXPLICIT_HUMAN_APPROVAL"),
   approvedBy: z.literal("PENDING_EXPLICIT_HUMAN_APPROVAL"), approvalReference: z.literal("PENDING_EXPLICIT_HUMAN_APPROVAL"),
   requiredResourceBinding: z.literal("EXACT_ACTIVE_RESOURCE_SCOPE_ENTITLEMENT") }).strict();
-export type Approval = Readonly<{ manifestBinding: string; approvedAt: string; approvedBy: string; approvalReference: string }>;
+export type Approval = Readonly<{ manifestBinding: string; releaseBinding: string; approvedAt: string; approvedBy: string; approvalReference: string }>;
 // Registry comes from the operator entrypoint, never from a browser/body/admin permission.
-export type Registration = Readonly<{ bytes: string; approval: Approval }>;
+export type Registration = Readonly<{ bytes: string; releaseBytes: string; approval: Approval }>;
 export type Execution = Readonly<{ mode: keyof typeof PROFILES; url: string; origin: string; deployedSha: string;
-  verifiedProject: string; verifiedBranch: string; registrations: readonly Registration[] }>;
+  deploymentId: string; verifiedProject: string; verifiedBranch: string; registrations: readonly Registration[] }>;
+export function registeredRelease(bytes: string, registrations: readonly Registration[]) {
+  const registered = registrations.find(r => r.bytes === bytes);
+  if (!registered) throw new Error("OPERATOR_RELEASE_UNREGISTERED");
+  return releaseSchema.parse(JSON.parse(registered.releaseBytes));
+}
 const abandonedIds = new Set(["d19ec5fa-dc0a-4edc-b186-0735d1533c64", "6bb7d556-4920-428b-9ec6-e219c6ff69e0"]);
 export function validate(bytes: string, approval: Approval | undefined, execution: Execution, now = Date.now(), cleanup = false) {
   const p = PROFILES[execution.mode];
@@ -36,8 +47,8 @@ export function validate(bytes: string, approval: Approval | undefined, executio
   const u = new URL(execution.url);
   if (u.protocol !== "postgresql:" || u.hostname !== p.host || u.username !== "app_user" || u.pathname !== "/neondb" ||
     u.searchParams.get("sslmode") !== "require" || execution.origin !== p.origin || execution.verifiedProject !== FIXED.projectId ||
-    execution.verifiedBranch !== p.branch || execution.deployedSha !== FIXED.productionDeploymentSha) throw new Error("EXECUTION_BINDING_DENIED");
-  const m = manifestSchema.parse(JSON.parse(bytes)) as unknown as typeof FIXED & { environment: keyof typeof PROFILES; branch: string;
+    execution.verifiedBranch !== p.branch) throw new Error("EXECUTION_BINDING_DENIED");
+  const m = manifestSchema.parse(JSON.parse(bytes)) as unknown as typeof FIXED & { productionDeploymentSha: string; environment: keyof typeof PROFILES; branch: string;
     assignmentId: string; operationId: string; validFrom: string; validUntil: string };
   for (const key of Object.keys(FIXED) as (keyof typeof FIXED)[]) if (m[key] !== FIXED[key]) throw new Error("MANIFEST_BINDING_DENIED");
   if (m.environment !== execution.mode || m.branch !== p.branch || hash(bytes) === ABANDONED ||
@@ -46,6 +57,13 @@ export function validate(bytes: string, approval: Approval | undefined, executio
   if (!registered || !approval || hash(bytes) !== approval.manifestBinding || JSON.stringify(registered.approval) !== JSON.stringify(approval) ||
     !approval.approvedBy.trim() || !approval.approvalReference.trim() || !Number.isFinite(Date.parse(approval.approvedAt)) ||
     Date.parse(approval.approvedAt) > now) throw new Error("OPERATOR_APPROVAL_DENIED");
+  const release = registeredRelease(bytes, execution.registrations);
+  if (hash(registered.releaseBytes) !== approval.releaseBinding || release.manifestBinding !== hash(bytes) ||
+    release.environment !== execution.mode || release.branch !== p.branch ||
+    release.deployedSha !== m.productionDeploymentSha || release.deployedSha !== execution.deployedSha ||
+    release.deploymentId !== execution.deploymentId || (execution.mode === "PRODUCTION"
+      ? !/^dpl_[A-Za-z0-9]+$/.test(release.deploymentId) : release.deploymentId !== "certification-local"))
+    throw new Error("OPERATOR_RELEASE_BINDING_DENIED");
   const from = Date.parse(m.validFrom), until = Date.parse(m.validUntil);
   if (until <= from || until - from > 3_600_000 || now < from || (!cleanup && now >= until)) throw new Error("MANIFEST_WINDOW_DENIED");
   return m;
@@ -100,7 +118,9 @@ export async function ceremony(bytes: string, approval: Approval | undefined, ex
     if (prior && (prior.operation !== "RESOURCE.ONBOARDING.BOOTSTRAP" || prior.result !== "SUCCESS" ||
       prior.actorSubjectId !== FIXED.actorSubjectId || prior.targetSubjectId !== FIXED.targetSubjectId ||
       prior.assignmentIds.length !== 1 || prior.assignmentIds[0] !== m.assignmentId ||
-      (prior.metadata as { manifestBinding?: string })?.manifestBinding !== hash(bytes))) return deny("BOOTSTRAP_RECEIPT_CONFLICT");
+      (prior.metadata as { manifestBinding?: string })?.manifestBinding !== hash(bytes) ||
+      (prior.metadata as { releaseBinding?: string })?.releaseBinding !== approval!.releaseBinding ||
+      (prior.metadata as { deploymentSha?: string })?.deploymentSha !== m.productionDeploymentSha)) return deny("BOOTSTRAP_RECEIPT_CONFLICT");
     if (revoke) {
       if (!prior || !matches) return deny("BOOTSTRAP_RECEIPT_MISSING");
       if (row.status === "REVOKED") return { outcome: "REVOKED", replay: true };
@@ -126,7 +146,8 @@ export async function ceremony(bytes: string, approval: Approval | undefined, ex
     await tx.canonicalAdminAuditEvent.create({ data: { ...context, actorSubjectId: FIXED.actorSubjectId, targetSubjectId: FIXED.targetSubjectId,
       changeId, operation: "RESOURCE.ONBOARDING.BOOTSTRAP", result: "SUCCESS", assignmentIds: [m.assignmentId], metadata: {
         manifestBinding: hash(bytes), operationId: m.operationId, entitlementId: FIXED.entitlementId, resourceId: FIXED.resourceId,
-        scopeId: FIXED.scopeId, action: FIXED.action, validFrom: m.validFrom, validUntil: m.validUntil, approval: { ...approval! } } } });
+        scopeId: FIXED.scopeId, action: FIXED.action, validFrom: m.validFrom, validUntil: m.validUntil,
+        deploymentSha: m.productionDeploymentSha, releaseBinding: approval!.releaseBinding, approval: { ...approval! } } } });
     return { outcome: "CREATED" };
   });
 }

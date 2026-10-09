@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
-import { FIXED, PROFILES, ABANDONED, hash, validate, ceremony, type Execution } from "../../scripts/operators/resource-owner-bootstrap";
+import { FIXED, PROFILES, VERCEL_PROJECT_ID, ABANDONED, hash, validate, ceremony, type Execution } from "../../scripts/operators/resource-owner-bootstrap";
 import { withTenantDb } from "../../lib/db/scoped-client";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { SessionStore } from "../../lib/auth/session-store";
@@ -11,19 +11,45 @@ import { authorize } from "../../lib/resources/authorization";
 import { PrismaClient, type Prisma } from "@prisma/client";
 
 const now = Date.now();
+const deploymentSha = "5704558f5c343ae653c8984917b90a760caeabf1";
 const m = { manifestVersion: 1, environment: "CERTIFICATION_ONLY", ...FIXED, branch: PROFILES.CERTIFICATION_ONLY.branch,
+  productionDeploymentSha: deploymentSha,
   scopeType: "RESOURCE", purpose: "INITIAL_BOUNDED_RESOURCE_OWNER", source: "DIRECT", assignmentId: randomUUID(), operationId: randomUUID(),
   validFrom: new Date(now - 1000).toISOString(), validUntil: new Date(now + 3_500_000).toISOString(),
   approvedAt: "PENDING_EXPLICIT_HUMAN_APPROVAL", approvedBy: "PENDING_EXPLICIT_HUMAN_APPROVAL", approvalReference: "PENDING_EXPLICIT_HUMAN_APPROVAL",
   requiredResourceBinding: "EXACT_ACTIVE_RESOURCE_SCOPE_ENTITLEMENT" };
-const bytes = JSON.stringify(m), approval = { manifestBinding: hash(bytes), approvedAt: new Date(now - 500).toISOString(),
+const bytes = JSON.stringify(m);
+const release = { releaseVersion: 1, environment: "CERTIFICATION_ONLY", projectId: FIXED.projectId,
+  branch: PROFILES.CERTIFICATION_ONLY.branch, database: FIXED.database, vercelProjectId: VERCEL_PROJECT_ID,
+  deployedSha: deploymentSha, deploymentId: "certification-local", manifestBinding: hash(bytes) };
+const releaseBytes = JSON.stringify(release), approval = { manifestBinding: hash(bytes), releaseBinding: hash(releaseBytes), approvedAt: new Date(now - 500).toISOString(),
   approvedBy: "operator-authorized-certification-only", approvalReference: "2026-10-08 dedicated runner certification instruction" };
 const ex: Execution = { mode: "CERTIFICATION_ONLY", url: (process.env.LUXIA_PRODUCTION_RUNNER_CERTIFICATION === 'true' || process.env.LUXIA_PRODUCTION_RUNNER_NEGATIVES === 'true') ? process.env.DATABASE_URL! : `postgresql://app_user@${PROFILES.CERTIFICATION_ONLY.host}/neondb?sslmode=require`,
-  origin: PROFILES.CERTIFICATION_ONLY.origin, deployedSha: FIXED.productionDeploymentSha,
-  verifiedProject: FIXED.projectId, verifiedBranch: PROFILES.CERTIFICATION_ONLY.branch, registrations: [{ bytes, approval }] };
+  origin: PROFILES.CERTIFICATION_ONLY.origin, deployedSha: deploymentSha, deploymentId: release.deploymentId,
+  verifiedProject: FIXED.projectId, verifiedBranch: PROFILES.CERTIFICATION_ONLY.branch, registrations: [{ bytes, releaseBytes, approval }] };
 const auth = { organizationId: FIXED.organizationId, tenantId: FIXED.tenantId, subjectId: FIXED.actorSubjectId };
 
 describe("independent operator runner hard guards", () => {
+  it("pins a separately registered release to exact manifest, approval, deployment ID and SHA", () => {
+    for (const field of Object.keys(release)) {
+      const modifiedRelease = JSON.stringify({ ...release, [field]: 'modified' });
+      expect(() => validate(bytes, approval, { ...ex, registrations: [{ bytes, releaseBytes: modifiedRelease, approval }] })).toThrow();
+    }
+    expect(() => validate(bytes, { ...approval, releaseBinding: 'wrong' }, ex)).toThrow();
+    expect(() => validate(bytes, approval, { ...ex, deploymentId: 'another-deployment' })).toThrow();
+    expect(() => validate(bytes, approval, { ...ex, registrations: [{ bytes, releaseBytes: releaseBytes+' ', approval }] })).toThrow();
+    // New releases require NEW exact manifest bytes AND fresh detached approval, never an env override.
+    const sha = '1234567890123456789012345678901234567890';
+    const newBytes = JSON.stringify({ ...m, productionDeploymentSha: sha });
+    const newReleaseBytes = JSON.stringify({ ...release, deployedSha: sha, manifestBinding: hash(newBytes) });
+    const newApproval = { ...approval, manifestBinding: hash(newBytes), releaseBinding: hash(newReleaseBytes) };
+    const next = { ...ex, deployedSha: sha, registrations: [{ bytes: newBytes, releaseBytes: newReleaseBytes, approval: newApproval }] };
+    expect(validate(newBytes, newApproval, next).productionDeploymentSha).toBe(sha);
+    expect(() => validate(newBytes, approval, next)).toThrow();
+    expect(() => validate(newBytes, newApproval, { ...next, deployedSha: deploymentSha })).toThrow();
+    expect(readFileSync('scripts/operators/run-production-resource-bootstrap.ts','utf8')).toContain('id !== expected.deploymentId');
+    expect(readFileSync('scripts/operators/production-bootstrap-registry.ts','utf8')).toContain('Object.freeze([])');
+  });
   it("accepts only exact registered bytes and detached approval", () => {
     expect(validate(bytes, approval, ex).assignmentId).toBe(m.assignmentId);
     for (const field of Object.keys(m)) expect(() => validate(JSON.stringify({ ...m, [field]: "modified" }), approval, ex)).toThrow();
@@ -49,6 +75,10 @@ describe("independent operator runner hard guards", () => {
     expect(hash(readFileSync('docs/certification/PR14-SESSION-DELTA-ATTRIBUTION-2026-10-08.md','utf8')))
       .toBe('801333ca13e4f6bd935449540314193be38c4715479d640771925f7baf2a7490');
     expect(readFileSync('.gitattributes','utf8')).toContain('docs/certification/PR14-SESSION-DELTA-ATTRIBUTION-2026-10-08.md -text');
+    const preflight=readFileSync('scripts/operators/production-resource-preflight.ts','utf8');
+    expect(preflight).toContain('SET TRANSACTION READ ONLY');
+    expect(preflight).not.toMatch(/\.(create|createMany|update|updateMany|delete|deleteMany|upsert)\(/);
+    expect(preflight.indexOf('SET TRANSACTION READ ONLY')).toBeLessThan(preflight.indexOf("set_config('app.organization_id'"));
   });
 });
 
@@ -82,7 +112,11 @@ describe.runIf(process.env.LUXIA_PRODUCTION_RUNNER_CERTIFICATION === 'true')('de
       expect(results.flatMap(x=>x.status==='fulfilled'?[x.value.outcome]:[]).sort()).toEqual(['ALREADY_APPLIED','CREATED']);
       const allowed=await fetch(route,{headers});expect(allowed.status).toBe(200);
       const receipt=await withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.findFirstOrThrow({where:{changeId:`bootstrap:${m.operationId}`}}));
-      expect(receipt.assignmentIds).toEqual([m.assignmentId]);expect(receipt.metadata).toMatchObject({manifestBinding:hash(bytes),approval});
+      expect(receipt.assignmentIds).toEqual([m.assignmentId]);expect(receipt.metadata).toMatchObject({manifestBinding:hash(bytes),releaseBinding:hash(releaseBytes),deploymentSha,approval});
+      const alteredReleaseBytes=releaseBytes+'\n';
+      const alteredApproval={...approval,releaseBinding:hash(alteredReleaseBytes)};
+      expect(await ceremony(bytes,alteredApproval,{...ex,registrations:[{bytes,releaseBytes:alteredReleaseBytes,approval:alteredApproval}]}))
+        .toMatchObject({outcome:'DENIED',reasonCode:'BOOTSTRAP_RECEIPT_CONFLICT'});
       const row=await withTenantDb(auth,tx=>tx.assignment.findFirstOrThrow({where:{id:m.assignmentId},include:{entitlement:{include:{resourceScope:true}}}}));
       expect(row.source).toBe('DIRECT');expect(row.entitlement.resourceScope?.kind).toBe('RESOURCE');expect(row.entitlement.resourceScope?.resourceId).toBe(FIXED.resourceId);
       expect(row.validUntil!.getTime()-row.validFrom!.getTime()).toBeLessThanOrEqual(3_600_000);
@@ -113,7 +147,7 @@ describe.runIf(process.env.LUXIA_PRODUCTION_RUNNER_NEGATIVES === 'true')('clone-
     const resource=await withTenantDb(auth,tx=>tx.resource.findFirstOrThrow({where:{id:FIXED.resourceId}}));
     const otherId=randomUUID(),otherAssignment=randomUUID(),policyId=randomUUID(),ruleId=randomUUID();
     const ownerUrl=new URL(process.env.LUXIA_RUNNER_FIXTURE_OWNER_URL!);
-    if(ownerUrl.hostname!=='ep-solitary-wildflower-ahcqqg5r.c-3.us-east-1.aws.neon.tech'||ownerUrl.pathname!=='/neondb')throw new Error('FIXTURE_CLONE_ONLY');
+    if(ownerUrl.hostname!=='ep-still-morning-ah7s0usw.c-3.us-east-1.aws.neon.tech'||ownerUrl.pathname!=='/neondb')throw new Error('FIXTURE_CLONE_ONLY');
     const owner=new PrismaClient({datasources:{db:{url:ownerUrl.toString()}}});
     const fixture=<T>(work:(tx:Prisma.TransactionClient)=>Promise<T>)=>owner.$transaction(async tx=>{
       await tx.$queryRaw`SELECT set_config('app.organization_id',${context.organizationId},true)`;
