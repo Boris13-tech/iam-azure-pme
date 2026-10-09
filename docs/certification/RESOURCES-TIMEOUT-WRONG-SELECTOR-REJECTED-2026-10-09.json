@@ -1,0 +1,15 @@
+{
+  "environment": "CERTIFICATION_ONLY",
+  "branch": "br-small-mountain-ahs8b0nr",
+  "database": "luxia_resources_diag_ci02",
+  "result": "REJECTED_NOT_PASS",
+  "cause": "Generic Vitest selector imported historical executable scripts outside the GitHub CI test selection",
+  "scripts": ["tests/cross-tenant-isolation.test.ts", "tests/migration-bridge.test.ts"],
+  "observed": ["Starting Cross-Tenant DB Test...", "Starting Migration Bridge Test..."],
+  "disposition": "Verified owned process stopped; database not reused",
+  "correction": "Select exactly tests/security, tests/resources, tests/provider-adapters, tests/identity and tests/operations; fresh ci03 database and empty-fixture preflight",
+  "legacyScriptsModified": false,
+  "businessRulesModified": false,
+  "productionMutations": "NONE",
+  "passClaim": false
+}

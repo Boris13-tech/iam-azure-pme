@@ -1,0 +1,48 @@
+# Resources timeout investigation — isolated environment only
+
+## Root cause and evidence boundary
+
+Affected case: `tests/resources/postgres-rls.test.ts` / `real create/update/bind/grant/revoke mutations are atomically audited`.
+The historical invocation reported 3,539,755 ms despite a configured 120,000 ms test budget. Windows Kernel-Power event 506 records Modern Standby / Idle Timeout at 2026-10-08T19:33:42.2803985Z; event 507 records wake at 2026-10-08T20:33:09.2596937Z. This positively identifies a roughly 59-minute host suspension during the anomalous execution interval. Host suspension prevents the JavaScript test timer and database client from progressing normally; increasing that timer is not a remedy.
+
+The historical SQL query, last assertion and transaction snapshot were not captured during that suspended run and cannot be reconstructed conclusively. No historical SQL deadlock is claimed or concealed. Current reproductions capture safe query fingerprints, transaction state, blockers, advisory locks and database deadlock counters independently while the exact case executes.
+
+## Reproduction conditions
+
+Operator-authorized replacement of temporary clone br-ancient-unit-ahy064za followed a redacted evidence archive (`PR14-FINAL-CLONE-ARCHIVE.json`, payload SHA-256 3b92a7560fc1c5e0a6b0933e055e6a32117ea0854e69d303c39fe7006be8d0ff). No unrelated branch was deleted.
+
+Fresh clone: br-small-mountain-ahs8b0nr, parent br-billowing-frog-ahtirmax, parent LSN 0/31CD9E0, created 2026-10-09T04:42:54Z, expires 2026-10-10T18:00:00Z. Production is never an execution target. Regression fixtures use separate newly created blank databases with all 19 migrations, not copied business fixtures.
+
+- First exact reproduction: database luxia_reviews_cert, one worker, deterministic fixture seed serial-fresh-01. PASS: 24,822 ms for the case; total 42.13 seconds. Exact mutation steps started 04:45:42.121Z; final assertion completed 04:46:05.986Z. Disconnect completed in 27 ms. No blocked query, ungranted advisory lock, persistent transaction or deadlock was observed. Three maximum observed backends included the independent observer. Cleanup retained only an idle pooled runtime backend with no transaction; this is pool reuse, not an open client transaction.
+- Guarded exact reproduction: fresh database luxia_resources_diag_awake01, one worker, seed serial-awake-01. PASS: total 52.78 seconds. Steps started 04:51:21.746Z; final assertion completed 04:51:56.565Z. Runtime/fixture disconnect completed in 34 ms. Safe samples are preserved in RESOURCES-TIMEOUT-AWAKE-2026-10-09.json.
+
+The test-only execution harness temporarily prevents automatic idle sleep with thread-scoped SetThreadExecutionState and restores the prior state in finally. It does not alter the Windows power plan. A real database readiness query verifies app_user posture before fixtures, without an arbitrary sleep. The already-used 120-second remote integration budget is retained, not increased to hide the hour-long interruption. The default five-second unit-test budget is insufficient for this multi-transaction remote integration case; observed individual operations take approximately 0.6–8 seconds. Application transaction deadlines remain unchanged.
+
+## SQL / cleanup review
+
+Resource services, onboarding, SoD triggers and Access Reviews use pg_advisory_xact_lock with the same Organization/Tenant governance key. These locks are transaction-scoped, not session-scoped. withTenantDb retains its existing 30-second transaction / 10-second acquisition deadlines. No authorization, SoD, review or onboarding business rule has been changed. Test observers use an independent direct connection, read-only transactions, bounded sampling and explicit disconnect. Every instrumented step clears its heartbeat and pending promise marker in finally.
+
+The SoD privilege test temporarily revokes a database-global function ACL and restores it in finally. The supported certification command already serializes files; concurrency is diagnostic only and must not silently invalidate that isolation assumption.
+
+## Further completed checks
+
+- Two-worker Resources suite: 12 files PASS, one conditional file skipped; 80 tests PASS / 11 intentionally skipped, 487.02 seconds. The exact atomic-mutation case passed in 22,227 ms. The full real HTTP Resources / SoD / Access Reviews case passed in 203,237 ms, within its existing 480-second deadline. Concurrent incompatible grants were refused. Safe observer capture contains 153 complete samples and one incomplete captured sample; the latter is not counted as complete evidence. Complete samples have zero blocked queries, zero ungranted advisory locks and zero database deadlocks. Final disconnect took 41 ms; cleanup shows no transaction or advisory lock, only idle pooled runtime backends. No observer failure occurred.
+- Security suite with explicitly injected isolated credentials: 25 files / 105 tests PASS, 256.06 seconds. A preceding invocation without database environment variables failed configuration validation; it is not counted as certification and did not exercise any database.
+- Dedicated clone runner negatives: 4 PASS / 1 intentionally skipped, 38.45 seconds. Inactive Subject, inactive Resource binding and real SoD conflict are denied without creating an Assignment; denial audits persist and temporary test fixtures are restored.
+- Dedicated clone runner PostgreSQL/RLS + real local HTTP ceremony: 4 PASS / 1 intentionally skipped, 77.85 seconds. DENY → exactly one bounded DIRECT RESOURCE Assignment → ALLOW → replay → revoke → DENY. Modified artifacts denied, revoked replay does not recreate, canonical evidence immutable, cross-tenant invisible, unrelated identities/grants/providers/legacy preserved. Final clone grant is REVOKED, not active. Certification deliberately establishes/revokes a clone-only test session; no Production authentication is manufactured.
+- Diagnostic instrumentation unit tests: 4 PASS. Instrumentation is inert by default, heartbeat/pending markers clear after success/failure, private payload/error content is not logged, and Production/unknown/mismatched endpoints fail before connecting. Fresh-fixture and exact CI-selector guards are covered.
+- TypeScript and diff whitespace: PASS. Identity operational report structural/evidence-reference check: PASS (CLOUD/HYBRID/SOVEREIGN, 14 gates); not a substitute for live provider certification.
+
+## Gates still pending
+
+A later global invocation incorrectly reused luxia_resources_diag_global01 after the standalone security suite. The already-completed security fixture `Role.name = Test Editor` caused P2002 in backfill-idempotency setup. That invocation is NOT PASS and was stopped after verifying the exact owned process identity. It was not a Resources timeout, and no legacy fixture/business rule was altered to hide it. A read-only, fail-closed empty-fixture preflight was added to the test harness; it positively rejects that reused database before running tests. The final complete suite uses the entirely new blank database luxia_resources_diag_ci02, created 2026-10-09T05:17:59Z, with fresh migrations and fixtures. Earlier successful component results remain separate; they are not substituted for this final global gate.
+
+The subsequent ci02 invocation used an overly broad generic Vitest selector. It imported two historical root-level ad-hoc executable scripts (cross-tenant-isolation.test.ts and migration-bridge.test.ts), which are not Vitest suites and are not selected by the actual GitHub workflow. That invocation was rejected and its verified owned process stopped; it is NOT PASS. Those scripts and legacy behavior were not modified. The diagnostic harness now selects exactly the workflow's five folders: tests/security, tests/resources, tests/provider-adapters, tests/identity and tests/operations. Final execution uses a third fresh blank database, luxia_resources_diag_ci03, created 2026-10-09T05:29:09Z; migrations and the empty-fixture preflight precede the tests. This certifies the CI-equivalent suite, not arbitrary historical scripts outside CI.
+
+Final serial CI-equivalent regression: PASS, 69 files / 360 tests, 1 conditional file / 11 conditional tests skipped, 931.06 seconds. The independently activated runner negative/positive cases are preserved separately, not represented as executed by this global run. Exact affected case: 25,676 ms. Real HTTP Resources/SoD/Reviews: 179,560 ms. Independent capture: 155 complete samples, zero incomplete samples, zero blockers, zero ungranted advisory locks, zero deadlocks. Final cleanup sample has no pending step, open transaction or advisory lock.
+
+Post-process read-only check at 2026-10-09T05:54:16.363Z: PASS across all seven isolated databases, no open transaction, blocked backend, advisory lock or deadlock. Only two idle app_user pooled backends remain; expected server-pool reuse, not leaked Prisma clients. app_user NOSUPERUSER/NOBYPASSRLS, ownership count zero. Evidence: RESOURCES-FINAL-CLEANUP-2026-10-09.json.
+
+Production build (including TypeScript/lint/Prisma generation/Next build): PASS. Existing unused-variable, deprecated next-lint and workspace-root warnings remain unrelated and unchanged. All 19 migration files pass the BOM gate. Identity operational report check: PASS, 14 gates. Real GitHub CI will certify Node 20 on the dedicated commit; local CI-equivalent used Node 24.13.0. No Production readiness or bootstrap approval is implied.
+
+No new Production manifest, Production assignment, rollback, deployment, business-data modification or provider call was performed.

@@ -1,0 +1,20 @@
+{
+  "source": "Windows System / Microsoft-Windows-Kernel-Power",
+  "events": [
+    {
+      "utc": "2026-10-08T20:33:09.2635445Z",
+      "eventId": 506,
+      "description": "Le système est en veille moderne \r\n\r\nmotif : 16777220. "
+    },
+    {
+      "utc": "2026-10-08T20:33:09.2596937Z",
+      "eventId": 507,
+      "description": "Le système quitte le mode de veille moderne \r\n\r\nmotif : 16777220. "
+    },
+    {
+      "utc": "2026-10-08T19:33:42.2803985Z",
+      "eventId": 506,
+      "description": "Le système est en veille moderne \r\n\r\nmotif : Idle Timeout. "
+    }
+  ]
+}

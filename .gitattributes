@@ -1,0 +1,2 @@
+# Preserve the exact bytes pinned by the operator runner's session-disposition gate.
+docs/certification/PR14-SESSION-DELTA-ATTRIBUTION-2026-10-08.md -text

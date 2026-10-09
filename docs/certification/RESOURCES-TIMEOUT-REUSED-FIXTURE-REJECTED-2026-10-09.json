@@ -1,0 +1,19 @@
+{
+  "environment": "CERTIFICATION_ONLY",
+  "branch": "br-small-mountain-ahs8b0nr",
+  "database": "luxia_resources_diag_global01",
+  "result": "NOT_PASS_STOPPED",
+  "reason": "DATABASE_REUSED_AFTER_SECURITY_SUITE",
+  "demonstratedFailure": {
+    "test": "tests/security/backfill-idempotency.test.ts",
+    "setup": "adminPrisma.role.create",
+    "sqlCode": "P2002",
+    "constraint": "Role.name",
+    "existingFixtureName": "Test Editor"
+  },
+  "notAResourcesTimeout": true,
+  "businessRuleChanges": "NONE",
+  "remediation": "new empty database luxia_resources_diag_ci02; strict read-only freshness preflight before any fixture creation",
+  "reusedDatabasePreflight": "DENY_DIAGNOSTIC_FIXTURE_DATABASE_NOT_EMPTY",
+  "productionMutations": "NONE"
+}

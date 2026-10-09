@@ -1,0 +1,13 @@
+{
+  "branch": "br-small-mountain-ahs8b0nr",
+  "database": "luxia_resources_diag_global01",
+  "environment": "CERTIFICATION_ONLY",
+  "result": "PASS",
+  "files": 25,
+  "tests": 105,
+  "durationSeconds": 256.06,
+  "workerCount": 1,
+  "scope": "Standalone security suite on its initially fresh regression database",
+  "laterReuse": "Rejected separately; not part of this PASS",
+  "providerCalls": "NONE"
+}

@@ -1,14 +1,25 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID as cryptoRandomUUID, createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { beforeAll, afterAll, describe, expect, it } from "vitest";
+import { beforeAll, afterAll, afterEach, describe, expect, it } from "vitest";
 import { authorize } from "../../lib/resources/authorization";
 import * as service from "../../lib/resources/service";
 import { withTenantDb } from "../../lib/db/scoped-client";
 import { SessionStore } from "../../lib/auth/session-store";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { applyGovernanceAdminBundle, rollbackGovernanceAdminBundle, GOVERNANCE_ADMIN_V2 } from "../../lib/resources/admin-bundle";
+import { diagnosticStep, pendingDiagnosticSteps } from "./diagnostic-step";
+import { createDiagnosticObserver } from "./diagnostic-observer";
+
+let diagnosticSequence = 0;
+function randomUUID(): string {
+  const seed = process.env.LUXIA_RESOURCE_DIAGNOSTIC_SEED;
+  if (process.env.LUXIA_RESOURCE_DIAGNOSTICS !== 'true' || !seed) return cryptoRandomUUID();
+  if (!/^[a-z0-9_-]{1,64}$/.test(seed)) throw new Error('DIAGNOSTIC_SEED_INVALID');
+  const h = createHash('sha256').update(`postgres-rls:${seed}:${diagnosticSequence++}`).digest('hex');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-8${h.slice(17,20)}-${h.slice(20,32)}`;
+}
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const org = randomUUID(), tenant = randomUUID(), otherTenant = randomUUID(), foreignOrg = randomUUID(), foreignTenant = randomUUID();
@@ -24,6 +35,7 @@ let owner: PrismaClient;
 let legacyBefore: unknown;
 let memberAssignment: string;
 let accountId: string;
+let observer: ReturnType<typeof createDiagnosticObserver> | undefined;
 
 async function owned<T>(scope: { organizationId: string; tenantId: string }, work: (tx: Prisma.TransactionClient) => Promise<T>) {
   return owner.$transaction(async tx => {
@@ -48,8 +60,21 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
     if (!process.env.DATABASE_MIGRATION_URL || !process.env.DATABASE_URL) throw new Error("ISOLATED_DB_REQUIRED");
     const endpoint = new URL(process.env.DATABASE_URL);
     if (!(["localhost", "127.0.0.1"].includes(endpoint.hostname) ||
+      (endpoint.hostname === "ep-solitary-wildflower-ahcqqg5r-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_reviews_cert","/luxia_resources_diag_awake01","/luxia_resources_diag_concurrency02","/luxia_resources_diag_global01","/luxia_resources_diag_ci02","/luxia_resources_diag_ci03"].includes(endpoint.pathname)) ||
       (["ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech", "ep-holy-forest-ah3ser8s-pooler.c-3.us-east-1.aws.neon.tech", "ep-ancient-base-ahfygu4z-pooler.c-3.us-east-1.aws.neon.tech", "ep-delicate-boat-ahnvfj7w-pooler.c-3.us-east-1.aws.neon.tech"].includes(endpoint.hostname) && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
+    const ownerEndpoint = new URL(process.env.DATABASE_MIGRATION_URL);
+    if (ownerEndpoint.hostname !== endpoint.hostname.replace('-pooler.', '.') || ownerEndpoint.pathname !== endpoint.pathname)
+      throw new Error('FIXTURE_OWNER_SCOPE_MISMATCH');
+    if (process.env.LUXIA_RESOURCE_DIAGNOSTICS === 'true') {
+      observer = createDiagnosticObserver(process.env.DATABASE_MIGRATION_URL, process.env.DATABASE_URL);
+      await observer.start();
+      await diagnosticStep('database-readiness', async () => {
+        const rows = await rawPrisma.$queryRaw<Array<{ current_user: string; rolsuper: boolean; rolbypassrls: boolean }>>`
+          SELECT current_user,rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user`;
+        expect(rows[0]).toEqual({current_user:'app_user',rolsuper:false,rolbypassrls:false});
+      });
+    }
     legacyBefore = await legacyDigest();
     await owned(auth, async tx => {
       await tx.organization.create({ data: { id: org, name: "Resource certification fixture" } });
@@ -86,7 +111,10 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
       await tx.tenant.create({ data: { id: foreignTenant, organizationId: foreignOrg, name: "Foreign tenant fixture" } });
     });
   }, 120_000);
-  afterAll(async () => { if (owner) await owner.$disconnect(); await rawPrisma.$disconnect(); });
+  afterEach(async () => { if (observer) { await observer.sample('CASE_COMPLETE'); expect(pendingDiagnosticSteps()).toEqual([]); } });
+  afterAll(async () => { await diagnosticStep('disconnect-runtime-and-fixtures', async () => {
+    if (owner) await owner.$disconnect(); await rawPrisma.$disconnect();
+  }); if (observer) await observer.stop(); });
   const request = () => ({ ...memberAuth, resourceId, entitlementKey: key, action: "read" });
   it("explicit governance bundle is scoped, atomic, audited and idempotent", async () => {
     const changeId = change();
@@ -164,22 +192,22 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
   });
   it("real create/update/bind/grant/revoke mutations are atomically audited", async () => {
     const changeId = change();
-    const resource = await service.createResource(auth, { name: "API certification", type: "API" }, changeId);
-    const audit = await withTenantDb(auth, tx => tx.canonicalAdminAuditEvent.findFirst({ where: { changeId } }));
-    expect(audit).toMatchObject({ result: "SUCCESS", metadata: { resourceId: resource.id, resourceType: "API" } });
-    await expect(service.createResource(auth, { name: "Duplicate request", type: "API" }, changeId)).rejects.toMatchObject({ code: "CHANGE_ALREADY_APPLIED" });
-    const scope = await service.createScope(auth, { key: randomUUID(), kind: "RESOURCE", resourceId: resource.id }, change());
-    const entitlement = await service.createEntitlement(auth, { scopeId: scope.id, action: "read", label: "Read" }, change());
-    await owned(auth, tx => tx.assignment.create({ data: { organizationId: org, tenantId: tenant, subjectId: actor, entitlementId: entitlement.id, source: "DIRECT" } })); // Explicit isolated bootstrap, not a product auto-grant.
+    const resource = await diagnosticStep('create-resource', () => service.createResource(auth, { name: "API certification", type: "API" }, changeId));
+    const audit = await diagnosticStep('read-create-audit', () => withTenantDb(auth, tx => tx.canonicalAdminAuditEvent.findFirst({ where: { changeId } })));
+    await diagnosticStep('assert-create-audit', async () => { expect(audit).toMatchObject({ result: "SUCCESS", metadata: { resourceId: resource.id, resourceType: "API" } }); });
+    await diagnosticStep('duplicate-request-deny', async () => { await expect(service.createResource(auth, { name: "Duplicate request", type: "API" }, changeId)).rejects.toMatchObject({ code: "CHANGE_ALREADY_APPLIED" }); });
+    const scope = await diagnosticStep('create-scope', () => service.createScope(auth, { key: randomUUID(), kind: "RESOURCE", resourceId: resource.id }, change()));
+    const entitlement = await diagnosticStep('create-entitlement', () => service.createEntitlement(auth, { scopeId: scope.id, action: "read", label: "Read" }, change()));
+    await diagnosticStep('fixture-owner-assignment', () => owned(auth, tx => tx.assignment.create({ data: { organizationId: org, tenantId: tenant, subjectId: actor, entitlementId: entitlement.id, source: "DIRECT" } }))); // Explicit isolated bootstrap, not a product auto-grant.
     const grantChange = change();
-    const assignment = await service.grantAssignment(auth, { subjectId: beneficiary, entitlementId: entitlement.id, validUntil: new Date(Date.now() + 60_000) }, grantChange);
-    expect((await authorize({ ...memberAuth, resourceId: resource.id, entitlementKey: entitlement.key, action: "read" })).allowed).toBe(true);
-    await service.revokeAssignment(auth, assignment.id, change());
-    expect((await authorize({ ...memberAuth, resourceId: resource.id, entitlementKey: entitlement.key, action: "read" })).allowed).toBe(false);
-    await service.updateResource(auth, resource.id, { active: false }, change());
-    await service.revokeEntitlement(auth, entitlement.id, change());
-    const grantAudit = await withTenantDb(auth, tx => tx.canonicalAdminAuditEvent.findFirst({ where: { changeId: grantChange } }));
-    expect(grantAudit?.assignmentIds).toEqual([assignment.id]);
+    const assignment = await diagnosticStep('grant-assignment', () => service.grantAssignment(auth, { subjectId: beneficiary, entitlementId: entitlement.id, validUntil: new Date(Date.now() + 60_000) }, grantChange));
+    await diagnosticStep('assert-allow', async () => { expect((await authorize({ ...memberAuth, resourceId: resource.id, entitlementKey: entitlement.key, action: "read" })).allowed).toBe(true); });
+    await diagnosticStep('revoke-assignment', () => service.revokeAssignment(auth, assignment.id, change()));
+    await diagnosticStep('assert-deny-after-revoke', async () => { expect((await authorize({ ...memberAuth, resourceId: resource.id, entitlementKey: entitlement.key, action: "read" })).allowed).toBe(false); });
+    await diagnosticStep('disable-resource', () => service.updateResource(auth, resource.id, { active: false }, change()));
+    await diagnosticStep('revoke-entitlement', () => service.revokeEntitlement(auth, entitlement.id, change()));
+    const grantAudit = await diagnosticStep('read-grant-audit', () => withTenantDb(auth, tx => tx.canonicalAdminAuditEvent.findFirst({ where: { changeId: grantChange } })));
+    await diagnosticStep('assert-grant-audit', async () => { expect(grantAudit?.assignmentIds).toEqual([assignment.id]); });
   });
   it("DENIED audit persists, no unauthorized mutation, foreign audit invisible", async () => {
     const changeId = change();

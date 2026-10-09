@@ -1,0 +1,891 @@
+{
+  "environment": "CERTIFICATION_ONLY",
+  "branch": "br-small-mountain-ahs8b0nr",
+  "database": "luxia_reviews_cert",
+  "workerCount": 1,
+  "test": "real create/update/bind/grant/revoke mutations are atomically audited",
+  "result": "PASS",
+  "testDurationMs": 24822,
+  "events": [
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-resource",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:42.121Z",
+      "wallElapsedMs": 2,
+      "monotonicElapsedMs": 0.5394
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:45:42.958Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:45:43.663Z",
+          "query_start": "2026-10-09T04:45:44.009Z",
+          "state_change": "2026-10-09T04:45:44.009Z",
+          "blockers": [],
+          "query_fingerprint": "00769ecf34aad1463ae469e7b76de7f7",
+          "query_kind": "SELECT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:43.385Z",
+          "state_change": "2026-10-09T04:45:43.386Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "188",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "create-resource"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:45:45.005Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:45:43.663Z",
+          "query_start": "2026-10-09T04:45:46.026Z",
+          "state_change": "2026-10-09T04:45:46.027Z",
+          "blockers": [],
+          "query_fingerprint": "fdeb664622d04f88c449507a9358fe45",
+          "query_kind": "INSERT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:43.385Z",
+          "state_change": "2026-10-09T04:45:43.386Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [
+        {
+          "pid": 1190,
+          "locktype": "advisory",
+          "mode": "ExclusiveLock",
+          "granted": true,
+          "n": 1
+        }
+      ],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "190",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "create-resource"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-resource",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:45.006Z",
+      "wallElapsedMs": 2887,
+      "monotonicElapsedMs": 2885.8517
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "read-create-audit",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:45.007Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0284
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "read-create-audit",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:46.035Z",
+      "wallElapsedMs": 1028,
+      "monotonicElapsedMs": 1028.6842
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-create-audit",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:46.036Z",
+      "wallElapsedMs": 1,
+      "monotonicElapsedMs": 0.0234
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-create-audit",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:46.037Z",
+      "wallElapsedMs": 2,
+      "monotonicElapsedMs": 1.7297
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "duplicate-request-deny",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:46.037Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0216
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "duplicate-request-deny",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:46.812Z",
+      "wallElapsedMs": 775,
+      "monotonicElapsedMs": 774.5116
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-scope",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:46.812Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0107
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:45:46.856Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:45:47.531Z",
+          "query_start": "2026-10-09T04:45:47.916Z",
+          "state_change": "2026-10-09T04:45:47.916Z",
+          "blockers": [],
+          "query_fingerprint": "edc5369ac147e3b52ee2a6c9ca6b2f47",
+          "query_kind": "ADVISORY_XACT_LOCK"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:43.385Z",
+          "state_change": "2026-10-09T04:45:43.386Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [
+        {
+          "pid": 1190,
+          "locktype": "advisory",
+          "mode": "ExclusiveLock",
+          "granted": true,
+          "n": 1
+        }
+      ],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "193",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "create-scope"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-scope",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:48.780Z",
+      "wallElapsedMs": 1968,
+      "monotonicElapsedMs": 1967.4672
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-entitlement",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:48.780Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0203
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:45:48.873Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:45:48.432Z",
+          "query_start": "2026-10-09T04:45:49.878Z",
+          "state_change": "2026-10-09T04:45:49.878Z",
+          "blockers": [],
+          "query_fingerprint": "83beeaa1f5cee55654073f0efb5fbb9e",
+          "query_kind": "INSERT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:43.385Z",
+          "state_change": "2026-10-09T04:45:43.386Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [
+        {
+          "pid": 1190,
+          "locktype": "advisory",
+          "mode": "ExclusiveLock",
+          "granted": true,
+          "n": 1
+        }
+      ],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "197",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "create-entitlement"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "create-entitlement",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:50.595Z",
+      "wallElapsedMs": 1815,
+      "monotonicElapsedMs": 1815.236
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "fixture-owner-assignment",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:50.596Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0126
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:45:50.875Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:45:50.273Z",
+          "query_start": "2026-10-09T04:45:51.828Z",
+          "state_change": "2026-10-09T04:45:51.829Z",
+          "blockers": [],
+          "query_fingerprint": "fdeb664622d04f88c449507a9358fe45",
+          "query_kind": "INSERT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:43.385Z",
+          "state_change": "2026-10-09T04:45:43.386Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "199",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "fixture-owner-assignment"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "fixture-owner-assignment",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:51.380Z",
+      "wallElapsedMs": 784,
+      "monotonicElapsedMs": 784.0614
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "grant-assignment",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:51.380Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0118
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:45:53.032Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:45:52.873Z",
+          "query_start": "2026-10-09T04:45:53.980Z",
+          "state_change": "2026-10-09T04:45:53.980Z",
+          "blockers": [],
+          "query_fingerprint": "e2e7db1b1ba498148626abfa0ae707c8",
+          "query_kind": "SELECT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:52.740Z",
+          "state_change": "2026-10-09T04:45:52.741Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [
+        {
+          "pid": 1190,
+          "locktype": "advisory",
+          "mode": "ExclusiveLock",
+          "granted": true,
+          "n": 1
+        }
+      ],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "202",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "grant-assignment"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "grant-assignment",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:55.683Z",
+      "wallElapsedMs": 4303,
+      "monotonicElapsedMs": 4302.7412
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-allow",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:55.684Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0108
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:45:56.898Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:45:57.175Z",
+          "query_start": "2026-10-09T04:45:57.961Z",
+          "state_change": "2026-10-09T04:45:57.961Z",
+          "blockers": [],
+          "query_fingerprint": "e2e7db1b1ba498148626abfa0ae707c8",
+          "query_kind": "SELECT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:52.740Z",
+          "state_change": "2026-10-09T04:45:52.741Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "205",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "assert-allow"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-allow",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:57.509Z",
+      "wallElapsedMs": 1825,
+      "monotonicElapsedMs": 1825.5341
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "revoke-assignment",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:57.509Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0067
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:45:58.904Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:45:59.002Z",
+          "query_start": "2026-10-09T04:45:59.921Z",
+          "state_change": "2026-10-09T04:45:59.921Z",
+          "blockers": [],
+          "query_fingerprint": "e2e7db1b1ba498148626abfa0ae707c8",
+          "query_kind": "SELECT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:52.740Z",
+          "state_change": "2026-10-09T04:45:52.741Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [
+        {
+          "pid": 1190,
+          "locktype": "advisory",
+          "mode": "ExclusiveLock",
+          "granted": true,
+          "n": 1
+        }
+      ],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "207",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "revoke-assignment"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "revoke-assignment",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:45:59.402Z",
+      "wallElapsedMs": 1893,
+      "monotonicElapsedMs": 1892.4718
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-deny-after-revoke",
+      "phase": "START",
+      "utc": "2026-10-09T04:45:59.402Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0092
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-deny-after-revoke",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:46:00.346Z",
+      "wallElapsedMs": 944,
+      "monotonicElapsedMs": 944.0814
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "disable-resource",
+      "phase": "START",
+      "utc": "2026-10-09T04:46:00.346Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0085
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:46:01.170Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:46:01.839Z",
+          "query_start": "2026-10-09T04:46:02.096Z",
+          "state_change": "2026-10-09T04:46:02.096Z",
+          "blockers": [],
+          "query_fingerprint": "d3e9cc789ee648b07d6ff966728b1201",
+          "query_kind": "SELECT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:52.740Z",
+          "state_change": "2026-10-09T04:45:52.741Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [
+        {
+          "pid": 1190,
+          "locktype": "advisory",
+          "mode": "ExclusiveLock",
+          "granted": true,
+          "n": 1
+        }
+      ],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "232",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "disable-resource"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "disable-resource",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:46:02.275Z",
+      "wallElapsedMs": 1929,
+      "monotonicElapsedMs": 1928.9948
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "revoke-entitlement",
+      "phase": "START",
+      "utc": "2026-10-09T04:46:02.276Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0093
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:46:03.051Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:46:03.906Z",
+          "query_start": "2026-10-09T04:46:04.075Z",
+          "state_change": "2026-10-09T04:46:04.075Z",
+          "blockers": [],
+          "query_fingerprint": "00769ecf34aad1463ae469e7b76de7f7",
+          "query_kind": "SELECT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:52.740Z",
+          "state_change": "2026-10-09T04:45:52.741Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "236",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "revoke-entitlement"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "PERIODIC",
+      "utc": "2026-10-09T04:46:05.040Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle in transaction",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": "2026-10-09T04:46:03.906Z",
+          "query_start": "2026-10-09T04:46:05.942Z",
+          "state_change": "2026-10-09T04:46:05.942Z",
+          "blockers": [],
+          "query_fingerprint": "0064e5244adc8d465bc81d82309537cf",
+          "query_kind": "SELECT"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:52.740Z",
+          "state_change": "2026-10-09T04:45:52.741Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [
+        {
+          "pid": 1190,
+          "locktype": "advisory",
+          "mode": "ExclusiveLock",
+          "granted": true,
+          "n": 1
+        }
+      ],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "237",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": [
+        "revoke-entitlement"
+      ]
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "revoke-entitlement",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:46:05.202Z",
+      "wallElapsedMs": 2926,
+      "monotonicElapsedMs": 2926.4716
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "read-grant-audit",
+      "phase": "START",
+      "utc": "2026-10-09T04:46:05.202Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0041
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "read-grant-audit",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:46:05.984Z",
+      "wallElapsedMs": 782,
+      "monotonicElapsedMs": 781.4433
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-grant-audit",
+      "phase": "START",
+      "utc": "2026-10-09T04:46:05.984Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0106
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "assert-grant-audit",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:46:05.986Z",
+      "wallElapsedMs": 2,
+      "monotonicElapsedMs": 1.4887
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "CASE_COMPLETE",
+      "utc": "2026-10-09T04:46:06.716Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:46:07.346Z",
+          "state_change": "2026-10-09T04:46:07.346Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        },
+        {
+          "pid": 1195,
+          "usename": "neondb_owner",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:45:52.740Z",
+          "state_change": "2026-10-09T04:45:52.741Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 3,
+          "xact_commit": "240",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": []
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "disconnect-runtime-and-fixtures",
+      "phase": "START",
+      "utc": "2026-10-09T04:46:06.918Z",
+      "wallElapsedMs": 0,
+      "monotonicElapsedMs": 0.0151
+    },
+    {
+      "diagnostic": "RESOURCE_TEST_STEP",
+      "label": "disconnect-runtime-and-fixtures",
+      "phase": "DONE",
+      "utc": "2026-10-09T04:46:06.945Z",
+      "wallElapsedMs": 27,
+      "monotonicElapsedMs": 27.2561
+    },
+    {
+      "diagnostic": "RESOURCE_DB_SAMPLE",
+      "phase": "CLEANUP",
+      "utc": "2026-10-09T04:46:07.658Z",
+      "activity": [
+        {
+          "pid": 1190,
+          "usename": "app_user",
+          "state": "idle",
+          "wait_event_type": "Client",
+          "wait_event": "ClientRead",
+          "xact_start": null,
+          "query_start": "2026-10-09T04:46:07.346Z",
+          "state_change": "2026-10-09T04:46:07.346Z",
+          "blockers": [],
+          "query_fingerprint": "1d0ba376e273b9d622641124d8c59264",
+          "query_kind": "OTHER"
+        }
+      ],
+      "locks": [],
+      "counters": [
+        {
+          "deadlocks": "0",
+          "numbackends": 2,
+          "xact_commit": "241",
+          "xact_rollback": "0"
+        }
+      ],
+      "pendingSteps": []
+    }
+  ]
+}
