@@ -9,6 +9,7 @@ import { rawPrisma } from "../../lib/db/raw-prisma";
 import { SessionStore } from "../../lib/auth/session-store";
 import { authorize } from "../../lib/resources/authorization";
 import { PrismaClient, type Prisma } from "@prisma/client";
+import { newBrowserProbe, verifyBrowserEvidence } from "../../scripts/operators/browser-evidence";
 
 const now = Date.now();
 const deploymentSha = "5704558f5c343ae653c8984917b90a760caeabf1";
@@ -104,13 +105,25 @@ describe.runIf(process.env.LUXIA_PRODUCTION_RUNNER_CERTIFICATION === 'true')('de
     const route=`${ex.origin}/api/resources/protected-resource-demo`, headers={cookie:`luxia_session=${session.rawToken}`};
     try {
       let ready=false;for(let i=0;i<120;i++){try{if((await fetch(route)).status===401){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,500));}expect(ready).toBe(true);
-      expect((await fetch(route,{headers})).status).toBe(403);
+      const usedBrowserEvidence=new Set<string>();
+      const verifiedBrowserRequest=async (expected:200|403)=>{
+        const probe=newBrowserProbe(expected),response=await fetch(route,{headers}),body=await response.json();
+        expect(response.status).toBe(expected);
+        const evidence=await withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.findFirst({where:{id:body.evidenceId}}));
+        const line=JSON.stringify({probeId:probe.probeId,httpStatus:response.status,evidenceId:body.evidenceId});
+        const id=verifyBrowserEvidence(probe,line,evidence,m.assignmentId,usedBrowserEvidence);
+        usedBrowserEvidence.add(id);
+        expect(()=>verifyBrowserEvidence(probe,line,evidence,m.assignmentId,usedBrowserEvidence)).toThrow();
+        expect(await withTenantDb({...auth,tenantId:randomUUID()},tx=>tx.canonicalAdminAuditEvent.count({where:{id}}))).toBe(0);
+        return response;
+      };
+      await verifiedBrowserRequest(403);
       for(const [candidate,attestation] of [[bytes+' ',approval],[bytes,undefined],[bytes,{...approval,manifestBinding:'wrong'}]] as const)
         await expect(ceremony(candidate,attestation,ex)).rejects.toBeDefined();
       const results=await Promise.allSettled([ceremony(bytes,approval,ex),ceremony(bytes,approval,ex)]);
       expect(results.every(x=>x.status==='fulfilled')).toBe(true);
       expect(results.flatMap(x=>x.status==='fulfilled'?[x.value.outcome]:[]).sort()).toEqual(['ALREADY_APPLIED','CREATED']);
-      const allowed=await fetch(route,{headers});expect(allowed.status).toBe(200);
+      const allowed=await verifiedBrowserRequest(200);expect(allowed.status).toBe(200);
       const receipt=await withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.findFirstOrThrow({where:{changeId:`bootstrap:${m.operationId}`}}));
       expect(receipt.assignmentIds).toEqual([m.assignmentId]);expect(receipt.metadata).toMatchObject({manifestBinding:hash(bytes),releaseBinding:hash(releaseBytes),deploymentSha,approval});
       const alteredReleaseBytes=releaseBytes+'\n';
@@ -124,7 +137,7 @@ describe.runIf(process.env.LUXIA_PRODUCTION_RUNNER_CERTIFICATION === 'true')('de
       expect(await withTenantDb(foreign,tx=>tx.canonicalAdminAuditEvent.count({where:{id:receipt.id}}))).toBe(0);
       await expect(withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.update({where:{id:receipt.id},data:{metadata:{}}}))).rejects.toBeDefined();
       expect(await ceremony(bytes,approval,ex,true)).toMatchObject({outcome:'REVOKED'});
-      expect((await fetch(route,{headers})).status).toBe(403);
+      await verifiedBrowserRequest(403);
       expect(await ceremony(bytes,approval,ex)).toMatchObject({outcome:'DENIED',reasonCode:'BOOTSTRAP_ALREADY_REVOKED_OR_CONFLICTING'});
       expect(await ceremony(bytes,approval,ex,true)).toMatchObject({outcome:'REVOKED',replay:true});
       const rows=await withTenantDb(auth,tx=>tx.assignment.findMany({where:{entitlementId:FIXED.entitlementId}}));expect(rows).toHaveLength(1);expect(rows[0].status).toBe('REVOKED');
@@ -147,7 +160,7 @@ describe.runIf(process.env.LUXIA_PRODUCTION_RUNNER_NEGATIVES === 'true')('clone-
     const resource=await withTenantDb(auth,tx=>tx.resource.findFirstOrThrow({where:{id:FIXED.resourceId}}));
     const otherId=randomUUID(),otherAssignment=randomUUID(),policyId=randomUUID(),ruleId=randomUUID();
     const ownerUrl=new URL(process.env.LUXIA_RUNNER_FIXTURE_OWNER_URL!);
-    if(ownerUrl.hostname!=='ep-still-morning-ah7s0usw.c-3.us-east-1.aws.neon.tech'||ownerUrl.pathname!=='/neondb')throw new Error('FIXTURE_CLONE_ONLY');
+    if(ownerUrl.hostname!=='ep-weathered-grass-ah5vrehj.c-3.us-east-1.aws.neon.tech'||ownerUrl.pathname!=='/neondb')throw new Error('FIXTURE_CLONE_ONLY');
     const owner=new PrismaClient({datasources:{db:{url:ownerUrl.toString()}}});
     const fixture=<T>(work:(tx:Prisma.TransactionClient)=>Promise<T>)=>owner.$transaction(async tx=>{
       await tx.$queryRaw`SELECT set_config('app.organization_id',${context.organizationId},true)`;
