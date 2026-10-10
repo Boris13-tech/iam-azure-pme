@@ -10,6 +10,13 @@ async function api(path: string, body?: unknown) {
   if (!response.ok) throw new Error(value.error ?? "REQUEST_DENIED");
   return value;
 }
+const SCOPE_KINDS: Record<string, string> = { RESOURCE: "ressource unique", RESOURCE_GROUP: "groupe de ressources", TENANT: "environnement entier" };
+const DECISIONS: Record<string, string> = { PENDING: "en attente", KEEP: "accès conservé", REVOKE: "accès retiré" };
+const REVIEW_STATES: Record<string, string> = { PENDING: "à examiner", REQUIRES_REMEDIATION: "à corriger", DECIDED: "décidé" };
+const REVIEW_EVENTS: Record<string, string> = { "ACCESS_REVIEW.CAMPAIGN.CREATE": "Campagne créée", "ACCESS_REVIEW.CAMPAIGN.COMPLETE": "Campagne clôturée",
+  "ACCESS_REVIEW.ITEM.KEEP": "Accès conservé", "ACCESS_REVIEW.ITEM.REVOKE": "Accès retiré" };
+const RESULTS: Record<string, string> = { SUCCESS: "réussi", DENIED: "refusé", FAILURE: "échec" };
+
 export default function ReviewConsole() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]), [selected, setSelected] = useState<Campaign | null>(null);
   const [items, setItems] = useState<Item[]>([]), [audit, setAudit] = useState<{ id: string; operation: string; result: string; occurredAt: string }[]>([]);
@@ -51,7 +58,7 @@ export default function ReviewConsole() {
     }); }}>
       <h2 className="font-bold">Créer une campagne</h2>
       <input aria-label="Nom de la campagne" required maxLength={120} value={name} onChange={event => setName(event.target.value)} placeholder="Nom de la campagne" className="border p-2" />
-      <select aria-label="Périmètre" required value={scopeId} onChange={event => setScope(event.target.value)} className="border p-2"><option value="">Choisir un périmètre</option>{configuration.scopes.map(scope => <option key={scope.id} value={scope.id}>{scope.key} ({scope.kind})</option>)}</select>
+      <select aria-label="Périmètre" required value={scopeId} onChange={event => setScope(event.target.value)} className="border p-2"><option value="">Choisir un périmètre</option>{configuration.scopes.map(scope => <option key={scope.id} value={scope.id}>{scope.key} ({SCOPE_KINDS[scope.kind] ?? scope.kind})</option>)}</select>
       <select aria-label="Réviseur" required value={reviewerSubjectId} onChange={event => setReviewer(event.target.value)} className="border p-2"><option value="">Choisir un réviseur</option>{configuration.reviewers.map(reviewer => <option key={reviewer.id} value={reviewer.id}>{reviewer.name}</option>)}</select>
       <label>Échéance <input type="datetime-local" required value={dueAt} onChange={event => setDue(event.target.value)} className="border p-2" /></label>
       <button disabled={busy} className="rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-strong">Créer la campagne</button>
@@ -66,7 +73,7 @@ export default function ReviewConsole() {
       {items.length === 0 && <p>Aucun accès à examiner.</p>}
       {items.map(item => <article key={item.id} className="border rounded p-4 bg-white space-y-2">
         <p>Identité : {item.subjectId}</p><p>Accès : {item.assignmentId}</p><p>Droit : {item.entitlementId}</p>
-        <p>Ressources couvertes : {item.resourceIds.join(", ")}</p><p>Décision : {item.decision}. État : {item.reviewState}.</p>
+        <p>Ressources couvertes : {item.resourceIds.join(", ")}</p><p>Décision : {DECISIONS[item.decision] ?? item.decision}. État : {REVIEW_STATES[item.reviewState] ?? item.reviewState}.</p>
         {item.justification && <p>Justification : {item.justification}</p>}
         {item.decision === "PENDING" && item.reviewerSubjectId === actor && permissions.includes("access_reviews.decide") && selected.status === "OPEN" && <>
           <label>Justification (ne saisissez aucun mot de passe ni secret)<textarea minLength={3} maxLength={2000} value={justifications[item.id] ?? ""} onChange={event => setJustifications({ ...justifications, [item.id]: event.target.value })} className="block border w-full p-2" /></label>
@@ -77,7 +84,7 @@ export default function ReviewConsole() {
       </article>)}
       {items.length > 0 && items.length % 100 === 0 && <button disabled={busy} onClick={() => void execute(async () => setItems([...items, ...await api(`/${selected.id}/items?after=${items[items.length - 1].id}${pending ? "&pending=true" : ""}`)]))}>Afficher plus</button>}
       {selected.status === "OPEN" && permissions.includes("access_reviews.manage") && <button disabled={busy} className="p-2 border rounded" onClick={() => void execute(async () => { await api(`/${selected.id}/complete`, {}); await load(); await detail(selected); })}>Clôturer la campagne (toutes les décisions doivent être prises)</button>}
-      <h3 className="font-bold">Historique</h3>{audit.map(event => <p key={event.id}>{event.operation} ({event.result}), le {new Date(event.occurredAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</p>)}
+      <h3 className="font-bold">Historique</h3>{audit.map(event => <p key={event.id}>{REVIEW_EVENTS[event.operation] ?? event.operation} ({RESULTS[event.result] ?? event.result}), le {new Date(event.occurredAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</p>)}
       {audit.length > 0 && audit.length % 100 === 0 && <button disabled={busy} onClick={() => void execute(async () => setAudit([...audit, ...await api(`/${selected.id}/audit?after=${audit[audit.length - 1].id}`)]))}>Afficher plus</button>}
     </div>}
   </section>;
