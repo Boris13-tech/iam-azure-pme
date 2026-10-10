@@ -21,6 +21,8 @@ export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze(
   "ACCESS_REVIEW.ITEM.KEEP": "Accès conservé après revue", "ACCESS_REVIEW.ITEM.REVOKE": "Accès retiré après revue",
   "SESSION.SIGN_OUT": "Déconnexion", "LOCAL_AUTHENTICATOR.ENROLL": "Clé d’accès ajoutée",
   "ORGANIZATION.CREATE": "Organisation créée",
+  "DOMAIN.ADD": "Domaine ajouté", "DOMAIN.CHECK": "Domaine contrôlé", "INVITATION.CREATE": "Invitation créée",
+  "INVITATION.REVOKE": "Invitation révoquée", "INVITATION.ACCEPT": "Invitation acceptée",
   "RESOURCE.AUTHORIZATION.CHECK": "Autorisation vérifiée", "RESOURCE.CAPABILITY.READ": "Accès à la ressource de test vérifié",
   // Consultations (read events)
   "AUDIT.READ": "Journal d’audit consulté", "DASHBOARD.POSTURE.READ": "Vue d’ensemble consultée", "SUBJECT.READ": "Identités consultées",
@@ -29,6 +31,7 @@ export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze(
   "RESOURCE.SCOPE.READ": "Périmètres consultés", "RESOURCE.ENTITLEMENT.READ": "Droits consultés", "RESOURCE.ASSIGNMENT.READ": "Accès aux ressources consultés",
   "RESOURCE.AUDIT.READ": "Historique des ressources consulté", "SOD.POLICY.READ": "Politiques de séparation consultées",
   "SOD.CONFLICT.READ": "Attributions bloquées consultées",
+  "DOMAIN.READ": "Domaines consultés", "INVITATION.READ": "Invitations consultées", "ONBOARDING.CHECKLIST.READ": "Mise en route consultée",
 });
 
 export const RESULT_LABELS: Readonly<Record<string, string>> = Object.freeze({ SUCCESS: "Réussi", DENIED: "Refusé", FAILURE: "Échec" });

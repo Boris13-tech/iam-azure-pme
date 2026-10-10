@@ -55,8 +55,10 @@ describe("Passkey registration checks (no session: signup and invitations)", () 
 
   it("signup never takes authority, tenant or organization from the browser", () => {
     const signup = readFileSync("lib/onboarding/signup.ts", "utf8");
-    expect(signup).toContain("grant(LUXIA_ORG_ADMIN_V1.entitlements");
-    expect(signup).toContain("grant(GOVERNANCE_ADMIN_V2");
+    expect(signup).toContain("grantAdministrator(tx, context, { subjectId: founder.id");
+    const provisioning = readFileSync("lib/onboarding/provisioning.ts", "utf8");
+    expect(provisioning).toContain("grant(LUXIA_ORG_ADMIN_V1.entitlements");
+    expect(provisioning).toContain("grant(GOVERNANCE_ADMIN_V2");
     expect(signup).not.toMatch(/input\.(role|entitlements|tenantId|organizationId|slug)\b/);
     const complete = readFileSync("app/api/auth/signup/complete/route.ts", "utf8");
     expect(complete).not.toMatch(/body\.(organization|slug|tenantId|role)/);

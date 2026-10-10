@@ -1,9 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { rawPrisma } from "../db/raw-prisma";
-import { CURRENT_WEBAUTHN_CRYPTO } from "../identity";
-import { LUXIA_ORG_ADMIN_V1 } from "../auth/native-role-catalog";
-import { GOVERNANCE_ADMIN_V2 } from "../resources/admin-bundle";
+import { createPasskeyIdentity, grantAdministrator } from "./provisioning";
 import { normalizeOrganizationSlug, normalizePrincipalName } from "../auth/organization-login";
 import { registrationChallenge, verifyPasskeyRegistration, type PasskeyRegistration } from "../provider-adapters/implementations/luxia-local/webauthn-registration";
 
@@ -81,41 +79,15 @@ export async function completeSignup(input: { code: unknown } & PasskeyRegistrat
       const connection = await tx.providerConnection.create({ data: { organizationId, providerType: "LUXIA_LOCAL", externalScopeId: tenantId, name: "LUXIA Local" } });
       await tx.providerConnectionTenantScope.create({ data: { ...context, providerConnectionId: connection.id } });
       const founder = await tx.subject.create({ data: { ...context, type: "HUMAN", name: payload.founderName } });
-      const account = await tx.identityAccount.create({ data: { ...context, subjectId: founder.id, providerConnectionId: connection.id, externalObjectId: randomUUID() } });
-      await tx.localIdentity.create({ data: { ...context, identityAccountId: account.id, principalName: payload.principalName } });
-      const authenticatorId = randomUUID();
-      await tx.localAuthenticator.create({ data: {
-        id: authenticatorId, ...context, identityAccountId: account.id, type: "PASSKEY", status: "ACTIVE",
-        credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", credentialFormatVersion: 1,
-        ...CURRENT_WEBAUTHN_CRYPTO, keyId: authenticatorId, keyVersion: 1, verifierPolicyVersion: 1,
-        // Attestation "none": the hardware cannot be proven, so it is not claimed.
-        hardwareBound: false, userVerificationRequired: true,
-        credentialId: passkey.credentialId, publicKey: passkey.publicKeyPem,
-        relyingPartyId: origin.rpId, allowedOrigin: origin.origin, signCount: 0,
-      } });
+      await createPasskeyIdentity(tx, context, { subjectId: founder.id, connectionId: connection.id, principalName: payload.principalName,
+        passkey, rpId: origin.rpId, origin: origin.origin, actorSubjectId: founder.id });
 
       // 3. First administrator: entitlement keys come only from the server catalog (requirement 7).
-      const grant = async (keys: readonly string[], sourceRef: string) => {
-        const ids: string[] = [];
-        for (const key of keys) {
-          const [resource, action] = key.split(".");
-          const entitlement = await tx.entitlement.create({ data: { ...context, key, resource, action, description: `${sourceRef}:${key}` } });
-          ids.push((await tx.assignment.create({ data: { ...context, subjectId: founder.id, entitlementId: entitlement.id, source: "DIRECT", sourceRef, validFrom: new Date() } })).id);
-        }
-        return ids;
-      };
-      const adminIds = await grant(LUXIA_ORG_ADMIN_V1.entitlements, LUXIA_ORG_ADMIN_V1.sourceRef);
-      const governanceIds = await grant(GOVERNANCE_ADMIN_V2, "native-role:LUXIA_ORG_ADMIN:v2");
+      await grantAdministrator(tx, context, { subjectId: founder.id, actorSubjectId: founder.id, changePrefix: `signup:${signupCodeId}`, metadata: { firstAdmin: true } });
 
       // 4. Audit, in the same transaction. No code, challenge or key material.
-      const audit = (operation: string, changeId: string, extra: Partial<Prisma.CanonicalAdminAuditEventUncheckedCreateInput> = {}) =>
-        tx.canonicalAdminAuditEvent.create({ data: { ...context, actorSubjectId: founder.id, targetSubjectId: founder.id, operation, changeId, result: "SUCCESS", ...extra } });
-      await audit("ORGANIZATION.CREATE", `signup:${signupCodeId}:organization`, { metadata: { signupCodeId, slug: payload.slug } });
-      await audit("ROLE_BUNDLE.GRANT", `signup:${signupCodeId}:admin`, { roleKey: LUXIA_ORG_ADMIN_V1.key, roleVersion: LUXIA_ORG_ADMIN_V1.version, assignmentIds: adminIds,
-        metadata: { sourceRef: LUXIA_ORG_ADMIN_V1.sourceRef, firstAdmin: true } });
-      await audit("ROLE.GOVERNANCE.GRANT", `signup:${signupCodeId}:governance`, { roleKey: "LUXIA_ORG_ADMIN", roleVersion: 2, assignmentIds: governanceIds,
-        metadata: { entitlementKeys: [...GOVERNANCE_ADMIN_V2], firstAdmin: true } });
-      await audit("LOCAL_AUTHENTICATOR.ENROLL", `enroll:${authenticatorId}`, { metadata: { type: "PASSKEY" } });
+      await tx.canonicalAdminAuditEvent.create({ data: { ...context, actorSubjectId: founder.id, targetSubjectId: founder.id,
+        operation: "ORGANIZATION.CREATE", changeId: `signup:${signupCodeId}:organization`, result: "SUCCESS", metadata: { signupCodeId, slug: payload.slug } } });
       return { organization: payload.slug };
     }, { maxWait: 10_000, timeout: 30_000 });
   } catch (error) {

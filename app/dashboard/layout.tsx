@@ -8,6 +8,7 @@ import { loadPlatformContext } from "@/lib/platform/context";
 const navigation = [
   { href: "/dashboard", label: "Vue d’ensemble", icon: Gauge, entitlement: null },
   { href: "/dashboard/users", label: "Identités", icon: Users, entitlement: "subjects.read" },
+  { href: "/dashboard/organization", label: "Organisation", icon: Building2, entitlement: "subjects.read" },
   { href: "/dashboard/settings", label: "Authentification", icon: ShieldCheck, entitlement: "providers.read" },
   { href: "/dashboard/resources", label: "Ressources", icon: Boxes, entitlement: "resources.read" },
   { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: Scale, entitlement: "sod.read" },
