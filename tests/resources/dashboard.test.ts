@@ -26,7 +26,10 @@ describe("Real tenant dashboard", () => {
   it("dashboard has no invented activity, health or recommendations", () => {
     const ui = readFileSync("app/dashboard/page.tsx", "utf8");
     expect(ui).not.toMatch(/Opérationnel|recommandations prioritaires|Connexion réussie|il y a|<a>Gérer/);
-    expect(ui).toContain("data.recentEvents.map"); expect(ui).toContain("data.entitlements.includes");
+    // Dashboard v1 renders only the server-gated posture contract (no client-side permission decisions).
+    expect(ui).toContain('fetch("/api/canonical/posture"'); expect(ui).toContain("data.attention.map"); expect(ui).toContain("data.sections[id]");
+    expect(ui).not.toMatch(/entitlements\.includes/);
+    expect(readFileSync("lib/dashboard/posture.ts", "utf8")).toContain("entitlement: { active: true, resourceScopeId: null }");
     expect(readFileSync("lib/platform/context.ts", "utf8")).toContain("entitlement: { active: true, resourceScopeId: null }");
   });
 });

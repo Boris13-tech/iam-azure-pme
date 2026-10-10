@@ -36,7 +36,8 @@ async function seed(tx: Prisma.TransactionClient, now: number) {
   await subject(ids.s2, "Suspended Two", "HUMAN", "SUSPENDED"); await subject(ids.s3, "Recovery Three", "HUMAN", "RECOVERY_REQUIRED");
   await subject(ids.s4, "Service Four", "SERVICE", "ACTIVE"); await subject(ids.vb, "Tenant B viewer", "HUMAN", "ACTIVE", B);
   const account = (id: string, subjectId: string, providerConnectionId: string, status: "ACTIVE" | "DISABLED", scope = A, ext: string = randomUUID()) =>
-    tx.identityAccount.create({ data: { ...scope, id, subjectId, providerConnectionId, externalObjectId: ext, status } });
+    tx.identityAccount.create({ data: { ...scope, id, subjectId, providerConnectionId, externalObjectId: ext, status,
+      disabledAt: status === "DISABLED" ? new Date(now) : null } });
   await account(acct.V, ids.V, entra, "ACTIVE", A, MARK.ext); await account(acct.L, ids.L, entra, "ACTIVE");
   await account(acct.N, ids.N, entra, "ACTIVE"); await account(acct.s1, ids.s1, entra, "ACTIVE");
   await account(acct.s2, ids.s2, local, "ACTIVE"); await account(acct.s3, ids.s3, entra, "DISABLED"); await account(acct.vb, ids.vb, entra, "ACTIVE", B);
@@ -54,10 +55,10 @@ async function seed(tx: Prisma.TransactionClient, now: number) {
   await session(randomUUID(), ids.vb, acct.vb, now - HOUR, now + DAY, undefined, B);
 
   await tx.localIdentity.create({ data: { ...A, identityAccountId: acct.s2, principalName: `s2-${randomUUID()}`, status: "LOCKED" } });
-  await tx.localAuthenticator.create({ data: { ...A, identityAccountId: acct.s2, type: "PASSKEY", status: "ACTIVE", credentialId: MARK.cred } });
-  await tx.localAuthenticator.create({ data: { ...A, identityAccountId: acct.s2, type: "PASSKEY", status: "COMPROMISED", credentialId: randomUUID(), compromisedAt: new Date(now) } });
+  await tx.localAuthenticator.create({ data: { ...A, identityAccountId: acct.s2, type: "PASSKEY", status: "ACTIVE", credentialId: MARK.cred, publicKey: "fixture-public-key" } });
+  await tx.localAuthenticator.create({ data: { ...A, identityAccountId: acct.s2, type: "PASSKEY", status: "COMPROMISED", credentialId: randomUUID(), publicKey: "fixture-public-key", compromisedAt: new Date(now) } });
   await tx.credentialReenrollmentRequirement.create({ data: { ...A, subjectId: ids.s2, originalCredentialId: randomUUID(), recoveryEpoch: BigInt(1), reasonCode: "FIXTURE" } });
-  await tx.credentialReenrollmentRequirement.create({ data: { ...A, subjectId: ids.s2, originalCredentialId: randomUUID(), recoveryEpoch: BigInt(1), reasonCode: "FIXTURE", status: "COMPLETED", completedAt: new Date(now) } });
+  await tx.credentialReenrollmentRequirement.create({ data: { ...A, subjectId: ids.s2, originalCredentialId: randomUUID(), recoveryEpoch: BigInt(1), reasonCode: "FIXTURE", status: "COMPLETED", completedCredentialId: randomUUID(), completedAt: new Date(now) } });
   const evidence = (outcome: "VERIFIED" | "REJECTED", phishingResistant: boolean, at: number) => tx.authenticationEvidence.create({ data: { ...A,
     subjectId: ids.s2, identityAccountId: acct.s2, providerConnectionId: local, method: "PASSKEY", outcome, assuranceLevel: "HIGH",
     assuranceProfile: "fixture", assuranceProfileVersion: 1, phishingResistant, hardwareBound: true, userVerification: "VERIFIED",
@@ -70,7 +71,7 @@ async function seed(tx: Prisma.TransactionClient, now: number) {
   for (const key of VIEWER_KEYS) keys.set(key, await ent(key));
   for (const key of VIEWER_KEYS) await tx.assignment.create({ data: { ...A, subjectId: ids.V, entitlementId: keys.get(key)!, source: "DIRECT" } });
   await tx.assignment.create({ data: { ...A, subjectId: ids.L, entitlementId: keys.get("subjects.read")!, source: "DIRECT" } });
-  await tx.assignment.create({ data: { ...A, subjectId: ids.s1, entitlementId: keys.get("audit.read")!, source: "LEGACY_ROLE" } });
+  await tx.assignment.create({ data: { ...A, subjectId: ids.s1, entitlementId: keys.get("audit.read")!, source: "LEGACY_ROLE", sourceRef: "legacy-role:fixture" } });
   const vbKey = await ent("subjects.read", B);
   await tx.assignment.create({ data: { ...B, subjectId: ids.vb, entitlementId: vbKey, source: "DIRECT" } });
 
