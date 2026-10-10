@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { Activity, AlertTriangle, Boxes, KeyRound, Scale, ShieldCheck, Users } from "lucide-react";
 import { RESULT_LABELS, operationLabel } from "../../lib/ui/activity-labels";
+import { OnboardingChecklist } from "./onboarding-checklist";
 import { breakdownTotal, type ActivityEntry, type Breakdown, type PostureResponse, type SectionId, type Widget, type WidgetId } from "../../lib/dashboard/posture-contract";
 
 // Identity security posture: real canonical data only, no score, no estimate.
@@ -184,6 +185,7 @@ export default function DashboardPage() {
     </header>
     {failed ? <p role="alert" className="posture-alert">Impossible de charger les données. Réessayez dans quelques instants.</p>
       : !data ? <p role="status" className="posture-muted">Chargement...</p> : <>
+      <OnboardingChecklist />
       <section className="luxia-panel posture-attention" aria-label="À traiter">
         <header><h2><AlertTriangle size={18} aria-hidden /> À traiter</h2></header>
         {data.attention.length === 0

@@ -1,33 +1,51 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { rawPrisma } from "@/lib/db/raw-prisma";
-import { withTenantDb } from "@/lib/db/scoped-client";
-import { SessionCreationDeniedError, SessionStore } from "@/lib/auth/session-store";
-import { recordRejectedSignIn } from "@/lib/auth/sign-in-evidence";
-import { getLuxiaLocalAdapter, localProviderContext } from "@/lib/auth/providers/luxia-local";
-import { ProviderAdapterError } from "@/lib/provider-adapters";
+import { withTenantDb } from "../../../../../lib/db/scoped-client";
+import { SessionCreationDeniedError, SessionStore } from "../../../../../lib/auth/session-store";
+import { recordRejectedSignIn } from "../../../../../lib/auth/sign-in-evidence";
+import { getLuxiaLocalAdapter, localProviderContext } from "../../../../../lib/auth/providers/luxia-local";
+import { normalizeOrganizationSlug, resolveLoginOrganization } from "../../../../../lib/auth/organization-login";
+import { ProviderAdapterError } from "../../../../../lib/provider-adapters";
+import { allowRequest, clientNetworkKey } from "../../../../../lib/security/rate-limit";
 
 export const runtime = "nodejs";
+// Every refusal is the same answer (anti-enumeration); the precise reason stays in server logs.
 const failure = () => NextResponse.json({ error: "LOCAL_AUTHENTICATION_FAILED" }, { status: 401 });
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as Record<string, string>;
-    const provider = await rawPrisma.providerConnection.findFirst({ where: { id: body.providerConnectionId, providerType: "LUXIA_LOCAL" }, select: { id: true, organizationId: true } });
-    if (!provider || !body.tenantId) return failure();
-    const context = localProviderContext({ organizationId: provider.organizationId, tenantId: body.tenantId, providerConnectionId: provider.id });
+    if (!await allowRequest("login-complete", clientNetworkKey(request)))
+      return NextResponse.json({ error: "RATE_LIMITED" }, { status: 429 });
+    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const field = (name: string) => typeof body?.[name] === "string" ? body[name] as string : "";
+    const slug = normalizeOrganizationSlug(body?.organization);
+    if (!slug || !UUID.test(field("transactionId"))) return failure();
+    // Organization, tenant and connection come from the server-side resolution, never the browser.
+    const organization = await resolveLoginOrganization(slug);
+    if (!organization?.localConnectionId) return failure();
+    const provider = { id: organization.localConnectionId, organizationId: organization.organizationId };
+    const tenantId = organization.tenantId;
+    // The identity is the one the challenge was issued for; the browser does not name it.
+    const pending = await withTenantDb({ organizationId: provider.organizationId, tenantId }, (tx) => tx.localAuthChallenge.findFirst({
+      where: { id: field("transactionId"), purpose: "AUTHENTICATION" },
+      select: { localIdentity: { select: { identityAccount: { select: { externalObjectId: true, providerConnectionId: true } } } } },
+    }));
+    const challengedAccount = pending?.localIdentity.identityAccount;
+    if (!challengedAccount || challengedAccount.providerConnectionId !== provider.id) return failure();
+    const context = localProviderContext({ organizationId: provider.organizationId, tenantId, providerConnectionId: provider.id });
     const verified = await getLuxiaLocalAdapter().completeAuthentication({
       context,
-      transactionId: body.transactionId,
+      transactionId: field("transactionId"),
       response: {
-        credentialType: "PASSKEY", challenge: body.challenge, externalObjectId: body.externalObjectId,
-        credentialId: body.credentialId, clientDataJSON: body.clientDataJSON,
-        authenticatorData: body.authenticatorData, signature: body.signature,
+        credentialType: "PASSKEY", challenge: field("challenge"), externalObjectId: challengedAccount.externalObjectId,
+        credentialId: field("credentialId"), clientDataJSON: field("clientDataJSON"),
+        authenticatorData: field("authenticatorData"), signature: field("signature"),
       },
     });
     // Identity resolved regardless of status so that refusals of known identities are attributable (W3).
-    const account = await withTenantDb({ organizationId: provider.organizationId, tenantId: body.tenantId }, (tx) => tx.identityAccount.findFirst({
+    const account = await withTenantDb({ organizationId: provider.organizationId, tenantId }, (tx) => tx.identityAccount.findFirst({
       where: { providerConnectionId: provider.id, externalObjectId: verified.identity.externalObjectId }, include: { subject: true },
     }));
     if (!account) return failure();
@@ -55,7 +73,7 @@ export async function POST(request: Request) {
     let created;
     try {
       // VERIFIED evidence is written in the session transaction: no evidence means no session.
-      created = await SessionStore.createSession({ organizationId: provider.organizationId, tenantId: body.tenantId, subjectId: account.subjectId, identityAccountId: account.id },
+      created = await SessionStore.createSession({ organizationId: provider.organizationId, tenantId, subjectId: account.subjectId, identityAccountId: account.id },
         request.headers.get("x-forwarded-for") ?? undefined, request.headers.get("user-agent") ?? undefined, { evidence: evidence("VERIFIED", e.reasonCode) });
     } catch (error) {
       if (error instanceof SessionCreationDeniedError) { await recordRejectedSignIn(evidence("REJECTED", error.reason)); return failure(); }
@@ -71,6 +89,6 @@ export async function POST(request: Request) {
       ? `${error.code}${error.safeDetails.reason ? `_${error.safeDetails.reason}` : ""}`
       : "LOCAL_AUTH_COMPLETE_FAILED";
     console.error("LOCAL_AUTH_COMPLETE_FAILED", safeCode);
-    return NextResponse.json({ error: safeCode }, { status: 401 });
+    return failure();
   }
 }

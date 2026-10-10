@@ -42,6 +42,9 @@ async function run() {
 
   const tenantId = tenant.id;
   const orgId = org.id;
+  // Sign-in resolves only connections scoped to the organization's tenant.
+  const scope = await adminPrisma.providerConnectionTenantScope.findFirst({ where: { organizationId: orgId, tenantId, providerConnectionId: provider.id } });
+  if (!scope) await adminPrisma.providerConnectionTenantScope.create({ data: { organizationId: orgId, tenantId, providerConnectionId: provider.id } });
 
   let user = await adminPrisma.user.findFirst({ where: { email: "e2e@example.com" }});
   if (!user) {
@@ -80,7 +83,9 @@ async function run() {
       await adminPrisma.legacyUserBridge.create({ data: { organizationId: orgId, legacyUserId: user.id, subjectId: user.id, status: "VALIDATED" } });
   }
 
-  const authLoginRes = await fetch(baseUrl + "/auth/login?tenant=" + tenantId + "&connection=" + provider.id, { redirect: "manual" });
+  // Customer Self-Onboarding v1: Microsoft sign-in is resolved on the server from the organization identifier.
+  const { slug } = await adminPrisma.organization.findUniqueOrThrow({ where: { id: orgId }, select: { slug: true } });
+  const authLoginRes = await fetch(baseUrl + "/auth/login?org=" + encodeURIComponent(slug), { redirect: "manual" });
   assert(authLoginRes.status === 302 || authLoginRes.status === 307, "Should redirect, got " + authLoginRes.status);
   console.log("/auth/login                     PASS");
   

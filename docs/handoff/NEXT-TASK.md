@@ -8,28 +8,26 @@ Read `docs/handoff/CURRENT-STATE.md` first.
 - Dashboard v1: Production certification PASS.
 - Security Journal v1: Production certification PASS (`dpl_EDZXLTXRrHDbBbVGqcEhCTF3SnpW` @ `2d7ec62`).
 
-## Next objective (operator roadmap: Customer Self-Onboarding)
+## In progress: Customer Self-Onboarding v1
 
-Write a **scope proposal**, docs only:
+- **Scope** validated by the operator (O1–O5 and 17 mandatory requirements). See PR #31, `docs/product/CUSTOMER-SELF-ONBOARDING-V1-SCOPE.md`.
+- **Code** is complete in **draft PR #32** (`feat/customer-self-onboarding-v1`), steps 1 to 8 of the approved order. CI is green on PostgreSQL.
+- **Traceability and certification plan**: `docs/architecture/CUSTOMER-SELF-ONBOARDING-V1.md`.
+- **Migration, rollback and forward-fix**: `docs/operations/CUSTOMER-SELF-ONBOARDING-V1-MIGRATION.md`.
 
-> Create Organization → Create Tenant → Verify Domain → Establish First Admin → Configure Auth → Connect Provider → Invite Team → Register Resources → Define Entitlements → Assign Access → Configure Governance
+## Next: step 9, certification on a real second organization (each gate needs explicit approval)
 
-The goal is no manual SQL, no Neon access and no operator script for a normal onboarding. The proposal must include:
-- the first-admin threat model (domain proof, invitation, optional approval);
-- reuse of the Security Journal for every onboarding step;
-- no weakening of RLS, default deny or "no implicit first owner".
+1. The operator reviews PR #32 and confirms the four decisions listed in its description.
+2. Rehearsal on an isolated Neon clone of Production: migration, identical business digest, privilege gate.
+3. Merge PR #32 (pinned SHA), with CI on the merge SHA.
+4. Production migration with the owner connection, with a read-only digest before and after.
+5. Deployment of the exact SHA, keeping the previous deployment as rollback.
+6. A beta code issued by the operator, then a real second organization created end to end, with the ten proofs of the plan.
 
-## Allowed
-
-Review, documentation, non-mutating verification, scope proposals.
+Order matters: the migration comes before the deployment (the new code needs the new functions). The previous code runs unchanged on the new schema.
 
 ## Forbidden
 
-- Implementation before the scope is approved.
-- Production grants or business-data mutation.
+- Production grants or business-data mutation outside the approved ceremony.
 - Merge, deploy, env or migration changes without explicit human approval.
 - Any change to PR12.
-
-## Stop condition
-
-STOP after the proposal, and wait for approval before any code.
