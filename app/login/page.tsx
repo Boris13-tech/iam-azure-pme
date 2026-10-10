@@ -35,45 +35,42 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const errorMsg = sp?.error || "";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-500/20 blur-[120px]"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/20 blur-[150px]"></div>
-      </div>
-
-      <div className="max-w-md w-full bg-slate-800/60 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-8 shadow-2xl z-10 transform transition-all hover:scale-[1.01] duration-500">
-        <div className="flex flex-col items-center mb-10">
-          <div className="w-20 h-20 bg-gradient-to-tr from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30 mb-6 transform rotate-3 hover:rotate-6 transition-transform duration-300">
-            <ShieldCheck className="w-10 h-10 text-white" />
+    <div className="min-h-screen bg-[#f7f8fa] flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8">
+        <div className="mb-8">
+          <div className="mb-6 flex items-center gap-2 text-slate-900">
+            <ShieldCheck className="h-6 w-6 text-[#1f5fbf]" aria-hidden />
+            <span className="text-lg font-bold tracking-wide">LUXIA</span>
+            <span className="text-lg text-slate-500">Identity</span>
           </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">LUXIA Secure Access</h1>
-          <p className="text-slate-400 mt-2 text-center text-sm font-medium">Accès souverain par fournisseur d’identité vérifié.</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Connexion</h1>
+          <p className="mt-1 text-base text-slate-600">Choisissez votre méthode de connexion.</p>
         </div>
 
         {errorMsg && (
-          <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-xl text-red-200 text-sm flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <p className="break-words font-medium">{errorMsg}</p>
+          <div className="mb-6 flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" aria-hidden />
+            <p className="break-words">{errorMsg}</p>
           </div>
         )}
 
         <div className="space-y-6">
           <div className="space-y-4">
             {discovery.state === 'UNAVAILABLE' ? (
-              <div className="p-4 bg-red-500/20 border border-red-500/50 rounded-xl text-red-200 text-sm text-center">
-                Service d’identité temporairement indisponible. Aucun accès n’a été accordé.
+              <div className="rounded-md border border-red-200 bg-red-50 p-4 text-center text-sm text-red-800">
+                Le service de connexion est temporairement indisponible. Réessayez dans quelques minutes.
               </div>
             ) : provider && defaultTenantId ? (
               <Link 
                 href={`/auth/login?tenant=${defaultTenantId}&connection=${provider.id}`}
-                className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-300 shadow-lg shadow-blue-600/20 hover:shadow-blue-500/40 group"
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-[#1f5fbf] px-4 py-2.5 text-base font-medium text-white hover:bg-[#194e9e]"
               >
-                <Lock className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                Connexion avec Microsoft
+                <Lock className="h-5 w-5" aria-hidden />
+                Se connecter avec Microsoft
               </Link>
             ) : (
-              <div className="p-4 bg-yellow-500/20 border border-yellow-500/50 rounded-xl text-yellow-200 text-sm text-center">
-                Aucune configuration Entra ID trouvée pour cette instance.
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-900">
+                La connexion Microsoft n’est pas configurée.
               </div>
             )}
             {localProvider?.organization?.tenants?.[0]?.id && (

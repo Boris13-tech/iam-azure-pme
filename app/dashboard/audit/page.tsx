@@ -15,7 +15,7 @@ export default function AuditPage() {
   }, []);
 
   return (
-    <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+    <div className="space-y-6">
       <div className="pb-4 border-b border-gray-200">
         <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Journal d'Audit Général</h2>
         <p className="text-sm text-slate-500 mt-1 font-medium">Traçabilité complète des actions de sécurité et modifications.</p>
@@ -24,11 +24,11 @@ export default function AuditPage() {
       <div className="flex gap-4 mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
         <div className="flex-1">
           <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Date</label>
-          <input type="date" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500" />
+          <input type="date" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-accent focus:border-accent" />
         </div>
         <div className="flex-1">
           <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Type d'Événement</label>
-          <select className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+          <select className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-accent focus:border-accent bg-white">
             <option>Tous les événements</option>
             <option>LOGIN</option>
             <option>CREATE_USER</option>

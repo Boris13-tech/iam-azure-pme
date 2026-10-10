@@ -57,7 +57,7 @@ export function PasskeyEnrollment() {
     <div className="flex items-start gap-4">
       <div className="rounded-xl bg-emerald-100 p-3 text-emerald-700"><Fingerprint className="h-7 w-7" /></div>
       <div className="flex-1">
-        <h3 className="font-bold text-slate-900">LUXIA_LOCAL — Passkey biométrique</h3>
+        <h3 className="font-bold text-slate-900">Clé d’accès (passkey)</h3>
         <p className="mt-1 text-sm text-slate-600">Ajoutez Windows Hello, Touch ID ou le verrouillage biométrique de votre appareil. La biométrie reste dans l’appareil ; LUXIA conserve uniquement la clé publique.</p>
         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
           <input value={principalName} onChange={e => setPrincipalName(e.target.value)} className="flex-1 rounded-xl border border-emerald-200 bg-white px-4 py-3" placeholder="Identifiant local (ex. contact@entreprise.com)" />

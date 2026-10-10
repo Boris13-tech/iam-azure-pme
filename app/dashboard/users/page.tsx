@@ -47,7 +47,7 @@ export default function IdentitiesPage() {
   return <div className="space-y-6">
     <header className="border-b border-slate-200 pb-4">
       <h2 className="text-2xl font-bold text-slate-900">Identités & cycle de vie</h2>
-      <p className="mt-1 text-sm text-slate-500">Joiner, Mover, Leaver sur le modèle canonique LUXIA — jamais sur les comptes de démonstration legacy.</p>
+      <p className="mt-1 text-sm text-slate-500">Arrivées, mobilités et départs des identités.</p>
     </header>
     <form onSubmit={createJoiner} className="flex flex-col gap-3 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:flex-row sm:items-end">
       <div className="flex-1"><label className="mb-1 block text-sm font-semibold text-slate-700">Nom de la nouvelle personne</label><input value={name} onChange={e => setName(e.target.value)} required maxLength={200} className="w-full rounded-xl border border-slate-300 px-4 py-3" placeholder="Nom complet" /></div>

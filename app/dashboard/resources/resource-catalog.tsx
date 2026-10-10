@@ -67,6 +67,6 @@ export default function ResourceCatalog() {
     <table className="w-full text-left"><thead><tr><th>Nom</th><th>Type</th><th>État</th><th>Détail</th></tr></thead><tbody>{resources.filter(row => !category || row.type === category).map(row => <tr key={row.id}><td>{row.name}</td><td>{row.type}</td><td>{row.active ? "Active" : "Désactivée"}</td><td><button disabled={busy} onClick={() => detail(row.id)}>Lire</button></td></tr>)}</tbody></table>
     {!busy && !resources.length && !error && <p>Aucune ressource enregistrée dans ce tenant.</p>}
     {hasNext && <button disabled={busy} onClick={() => load(resources.at(-1)?.id)}>Charger la suite</button>}
-    {selected && <article className="rounded border p-4"><h2 className="font-bold">{selected.name}</h2><p>{selected.type} · {selected.active ? "Active" : "Désactivée"}</p><p>Resource ID : {selected.id}</p><p>Organization : {selected.organizationId} · Tenant : {selected.tenantId}</p></article>}
+    {selected && <article className="rounded border p-4"><h2 className="font-bold">{selected.name}</h2><p>{selected.type}, {selected.active ? "active" : "désactivée"}</p><p>Identifiant : {selected.id}</p><p>Organisation : {selected.organizationId}</p><p>Environnement : {selected.tenantId}</p></article>}
   </section>;
 }

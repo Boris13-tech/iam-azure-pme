@@ -57,7 +57,7 @@ export default function AccessPoliciesPage() {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300">
+    <div className="space-y-8">
       <PasskeyEnrollment />
       <div className="flex justify-between items-center pb-4 border-b border-gray-200">
         <div>
@@ -66,7 +66,7 @@ export default function AccessPoliciesPage() {
         </div>
         <div className="flex items-center gap-4">
           {showSaved && (
-            <span className="flex items-center text-sm font-semibold text-green-600 animate-in fade-in slide-in-from-right-4">
+            <span className="flex items-center text-sm font-semibold text-green-600">
               <CheckCircle2 className="w-4 h-4 mr-1.5" />
               Modifications enregistrées
             </span>
@@ -74,7 +74,7 @@ export default function AccessPoliciesPage() {
           <button 
             onClick={handleSave}
             disabled={isSaving}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
+            className="bg-accent hover:bg-accent-strong disabled:opacity-70 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
           >
             {isSaving ? "Sauvegarde..." : "Appliquer les politiques"}
           </button>
@@ -83,8 +83,8 @@ export default function AccessPoliciesPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Card 1 */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex items-start gap-4 hover:border-indigo-200 transition-colors">
-          <div className={`p-3 rounded-xl ${policies.mfa ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'} transition-colors`}>
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex items-start gap-4 hover:border-accent-line transition-colors">
+          <div className={`p-3 rounded-xl ${policies.mfa ? 'bg-accent-soft text-accent' : 'bg-slate-100 text-slate-400'} transition-colors`}>
             <Smartphone className="w-6 h-6" />
           </div>
           <div className="flex-1">
@@ -92,7 +92,7 @@ export default function AccessPoliciesPage() {
               <h3 className="font-bold text-slate-900">Authentification Multifacteur (MFA)</h3>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" className="sr-only peer" checked={policies.mfa} onChange={() => togglePolicy('mfa')} />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
               </label>
             </div>
             <p className="text-sm text-slate-500 leading-relaxed">Exige une vérification secondaire (SMS, Authenticator) pour toutes les connexions depuis de nouveaux appareils.</p>
@@ -100,8 +100,8 @@ export default function AccessPoliciesPage() {
         </div>
 
         {/* Card 2 */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex items-start gap-4 hover:border-indigo-200 transition-colors">
-          <div className={`p-3 rounded-xl ${policies.sessionTimeout ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'} transition-colors`}>
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex items-start gap-4 hover:border-accent-line transition-colors">
+          <div className={`p-3 rounded-xl ${policies.sessionTimeout ? 'bg-accent-soft text-accent' : 'bg-slate-100 text-slate-400'} transition-colors`}>
             <Clock className="w-6 h-6" />
           </div>
           <div className="flex-1">
@@ -109,7 +109,7 @@ export default function AccessPoliciesPage() {
               <h3 className="font-bold text-slate-900">Expiration de Session Stricte</h3>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" className="sr-only peer" checked={policies.sessionTimeout} onChange={() => togglePolicy('sessionTimeout')} />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
               </label>
             </div>
             <p className="text-sm text-slate-500 leading-relaxed">Déconnecte automatiquement les utilisateurs après 15 minutes d'inactivité totale.</p>
@@ -117,8 +117,8 @@ export default function AccessPoliciesPage() {
         </div>
 
         {/* Card 3 */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex items-start gap-4 hover:border-indigo-200 transition-colors">
-          <div className={`p-3 rounded-xl ${policies.passwordRotation ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'} transition-colors`}>
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex items-start gap-4 hover:border-accent-line transition-colors">
+          <div className={`p-3 rounded-xl ${policies.passwordRotation ? 'bg-accent-soft text-accent' : 'bg-slate-100 text-slate-400'} transition-colors`}>
             <Key className="w-6 h-6" />
           </div>
           <div className="flex-1">
@@ -126,7 +126,7 @@ export default function AccessPoliciesPage() {
               <h3 className="font-bold text-slate-900">Rotation Obligatoire des Mots de Passe</h3>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" className="sr-only peer" checked={policies.passwordRotation} onChange={() => togglePolicy('passwordRotation')} />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
               </label>
             </div>
             <p className="text-sm text-slate-500 leading-relaxed">Force les utilisateurs à changer leur mot de passe tous les 90 jours. (Sauf SSO Azure AD).</p>
@@ -134,8 +134,8 @@ export default function AccessPoliciesPage() {
         </div>
 
         {/* Card 4 */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex items-start gap-4 hover:border-indigo-200 transition-colors">
-          <div className={`p-3 rounded-xl ${policies.geoBlock ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'} transition-colors`}>
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex items-start gap-4 hover:border-accent-line transition-colors">
+          <div className={`p-3 rounded-xl ${policies.geoBlock ? 'bg-accent-soft text-accent' : 'bg-slate-100 text-slate-400'} transition-colors`}>
             <Globe className="w-6 h-6" />
           </div>
           <div className="flex-1">
@@ -143,7 +143,7 @@ export default function AccessPoliciesPage() {
               <h3 className="font-bold text-slate-900">Blocage Géographique (Géo-fencing)</h3>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" className="sr-only peer" checked={policies.geoBlock} onChange={() => togglePolicy('geoBlock')} />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
               </label>
             </div>
             <p className="text-sm text-slate-500 leading-relaxed">Restreint les connexions uniquement aux adresses IP provenant du territoire national.</p>

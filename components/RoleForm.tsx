@@ -48,7 +48,7 @@ export default function RoleForm({ initialData, onSubmit, onCancel }: RoleFormPr
           <input 
             type="text" 
             required
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none"
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-accent focus:border-accent transition-all outline-none"
             placeholder="Ex: Superviseur"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -58,7 +58,7 @@ export default function RoleForm({ initialData, onSubmit, onCancel }: RoleFormPr
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-2">Description</label>
           <textarea 
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none"
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-accent focus:border-accent transition-all outline-none"
             placeholder="Description des accès..."
             value={description}
             rows={3}
@@ -70,14 +70,14 @@ export default function RoleForm({ initialData, onSubmit, onCancel }: RoleFormPr
           <label className="block text-sm font-semibold text-slate-700 mb-3">Permissions</label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {AVAILABLE_PERMISSIONS.map(perm => (
-              <label key={perm.id} className={`flex items-center p-3 border rounded-xl cursor-pointer transition-colors ${selectedPerms.includes(perm.id) ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+              <label key={perm.id} className={`flex items-center p-3 border rounded-xl cursor-pointer transition-colors ${selectedPerms.includes(perm.id) ? 'bg-accent-soft border-accent-line' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
                 <input 
                   type="checkbox" 
-                  className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                  className="w-4 h-4 text-accent rounded border-gray-300 focus:ring-accent"
                   checked={selectedPerms.includes(perm.id)}
                   onChange={() => togglePermission(perm.id)}
                 />
-                <span className={`ml-3 text-sm font-medium ${selectedPerms.includes(perm.id) ? 'text-indigo-900' : 'text-slate-700'}`}>
+                <span className={`ml-3 text-sm font-medium ${selectedPerms.includes(perm.id) ? 'text-accent-strong' : 'text-slate-700'}`}>
                   {perm.label}
                 </span>
               </label>
@@ -95,7 +95,7 @@ export default function RoleForm({ initialData, onSubmit, onCancel }: RoleFormPr
           </button>
           <button 
             type="submit" 
-            className="px-5 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-200 transition-all"
+            className="px-5 py-2.5 text-sm font-bold text-white bg-accent hover:bg-accent-strong rounded-xl shadow-md shadow-accent-line transition-all"
           >
             {initialData ? "Sauvegarder" : "Créer le rôle"}
           </button>

@@ -52,22 +52,22 @@ export default function Onboarding() {
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {configuration && <>
       <h2>{configuration.capability.name}</h2>
-      <p>GET {configuration.capability.route} · action : {configuration.capability.action} · scope : RESOURCE</p>
+      <p>Route : GET {configuration.capability.route}. Action : {configuration.capability.action}. Périmètre : ressource unique.</p>
       <p>Binding canonique : {configuration.configured ? "confirmé par le serveur" : "non configuré"}.</p>
-      <p>Délégation : {configuration.delegation} — approbation opérateur du premier propriétaire requise.</p>
+      <p>Délégation : {configuration.delegation}. Le premier propriétaire doit être approuvé par un opérateur.</p>
       <label className="block">Subject existant <select value={target} onChange={event => { setTarget(event.target.value); setPlan(null); }} className="border p-2">
         <option value="">Sélectionner une identité réelle</option>
-        {configuration.subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name ?? subject.id} · {subject.type}</option>)}
+        {configuration.subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name ?? subject.id} ({subject.type})</option>)}
       </select></label>
-      <label className="block">Validité proposée (minutes, 1–60) <input type="number" min={1} max={60} value={minutes}
+      <label className="block">Durée de validité en minutes (de 1 à 60) <input type="number" min={1} max={60} value={minutes}
         onChange={event => { setMinutes(Number(event.target.value)); setPlan(null); }} className="border p-2" /></label>
       <button disabled={busy || !target || minutes < 1 || minutes > 60} onClick={() => run("plan")} className="rounded border p-2">Préparer le plan sans grant</button>
     </>}
     {plan && <article className="space-y-2 rounded border p-4">
-      <h2>Aperçu exact</h2><p>Subject : {plan.plan.targetSubjectId} · expiration proposée : {plan.plan.validUntil}</p>
+      <h2>Aperçu</h2><p>Identité : {plan.plan.targetSubjectId}. Expiration proposée : {plan.plan.validUntil}.</p>
       <p>1 Resource API, 1 scope RESOURCE, 1 Entitlement resource.read. Assignments créés : 0.</p>
-      <p>Resource : {configuration?.capability.resourceId} · Scope : {configuration?.capability.scopeId}</p>
-      <p>Operation ID serveur : {plan.operationId} · plan valable jusqu’au {plan.plan.expiresAt}</p>
+      <p>Ressource : {configuration?.capability.resourceId}. Périmètre : {configuration?.capability.scopeId}.</p>
+      <p>Identifiant d’opération : {plan.operationId}. Valable jusqu’au {plan.plan.expiresAt}.</p>
       <button disabled={busy} onClick={() => run("configure")} className="rounded border p-2">Confirmer uniquement la configuration</button>
     </article>}
     <button disabled={busy} onClick={exercise} className="rounded border p-2">Vérifier l’accès à la route serveur</button>

@@ -21,7 +21,7 @@ export default function SoDConsole() {
   }
   useEffect(() => { refresh().catch(e => setError(e.message)); }, [refresh]);
   return <section className="space-y-6 p-6">
-    <h1 className="text-2xl font-semibold">Gouvernance — Séparation des tâches</h1>
+    <h1 className="text-2xl font-semibold">Séparation des tâches</h1>
     <p>Règles explicites entre deux droits sur des ressources du tenant courant. Aucun rôle legacy n’intervient.</p>
     {error && <p role="alert" className="text-red-700">{error}</p>}
     <form className="flex flex-wrap gap-3" onSubmit={e => { e.preventDefault(); void mutate("policies", "POST", { key, scopeId }); }}>
@@ -38,12 +38,12 @@ export default function SoDConsole() {
     <h2 className="text-xl font-semibold">Policies</h2>
     {!policies.length && <p>Aucune policy accessible.</p>}
     {policies.map(p => <article key={p.id} className="rounded border bg-white p-4">
-      <h3>{p.key} — {p.status}</h3><p>Scope : {p.scopeId}</p>
+      <h3>{p.key} ({p.status === "ACTIVE" ? "active" : "désactivée"})</h3><p>Périmètre : {p.scopeId}</p>
       <button disabled={busy} onClick={() => void mutate(`policies/${p.id}`, "PATCH", { status: p.status === "ACTIVE" ? "DISABLED" : "ACTIVE" })} className="border p-2">{p.status === "ACTIVE" ? "Désactiver" : "Activer"}</button>
-      {p.rules.map(r => <div key={r.id} className="mt-2">{r.entitlementAId} + {r.entitlementBId} — {r.enabled ? "Exclusion" : "Désactivée"}
+      {p.rules.map(r => <div key={r.id} className="mt-2">{r.entitlementAId} + {r.entitlementBId} : {r.enabled ? "exclusion active" : "règle désactivée"}
         {r.enabled && <button disabled={busy} onClick={() => void mutate(`rules/${r.id}`, "DELETE")} className="ml-3 border p-2">Désactiver la règle</button>}</div>)}
     </article>)}
-    <h2 className="text-xl font-semibold">Conflits refusés — preuves canoniques</h2>
+    <h2 className="text-xl font-semibold">Attributions bloquées</h2>
     {!conflicts.length && <p>Aucun refus accessible.</p>}
     {conflicts.map(c => <article key={c.id} className="rounded border p-3"><time>{c.occurredAt}</time><pre className="overflow-auto">{JSON.stringify(c.metadata, null, 2)}</pre></article>)}
   </section>;

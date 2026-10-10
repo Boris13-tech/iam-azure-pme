@@ -42,7 +42,7 @@ export default function ReviewConsole() {
     finally { setBusy(false); }
   };
   return <section className="p-6 space-y-5">
-    <h1 className="text-2xl font-bold">Gouvernance — Revues d’accès</h1>
+    <h1 className="text-2xl font-bold">Revues d’accès</h1>
     <p>Réexaminez les accès existants. KEEP confirme un accès ; REVOKE retire l’Assignment entier, sur toutes ses ressources. Aucun nouvel accès n’est créé.</p>
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {configuration && <form className="p-4 border rounded bg-white space-y-3" onSubmit={event => { event.preventDefault(); void execute(async () => {
@@ -58,7 +58,7 @@ export default function ReviewConsole() {
       <p>Auto-review interdite. Une campagne contenant les propres accès du reviewer est refusée. Maximum 1 000 Assignments par snapshot.</p>
     </form>}
     <div className="space-y-2"><h2 className="font-bold">Campagnes</h2>{campaigns.length === 0 && <p>Aucune campagne accessible.</p>}
-      {campaigns.map(campaign => <button key={campaign.id} disabled={busy} onClick={() => void execute(() => detail(campaign))} className="block p-3 border bg-white rounded">{campaign.name} — {campaign.status} — {campaign.scopeType} — {new Date(campaign.dueAt).toLocaleString()}</button>)}
+      {campaigns.map(campaign => <button key={campaign.id} disabled={busy} onClick={() => void execute(() => detail(campaign))} className="block p-3 border bg-white rounded"><span className="font-medium">{campaign.name}</span> <span className="text-slate-600">{campaign.status === "OPEN" ? "En cours" : "Terminée"}, échéance le {new Date(campaign.dueAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</span></button>)}
       {campaigns.length > 0 && campaigns.length % 100 === 0 && <button disabled={busy} onClick={() => void execute(async () => setCampaigns([...campaigns, ...await api(`?after=${campaigns[campaigns.length - 1].id}`)]))}>Charger les campagnes suivantes</button>}
     </div>
     {selected && <div className="space-y-3"><h2 className="text-xl font-bold">{selected.name}</h2>
@@ -66,18 +66,18 @@ export default function ReviewConsole() {
       {items.length === 0 && <p>Aucun item dans cette vue.</p>}
       {items.map(item => <article key={item.id} className="border rounded p-4 bg-white space-y-2">
         <p>Subject : {item.subjectId}</p><p>Assignment : {item.assignmentId}</p><p>Entitlement : {item.entitlementId}</p>
-        <p>Ressources couvertes : {item.resourceIds.join(", ")}</p><p>{item.decision} — {item.reviewState}</p>
+        <p>Ressources couvertes : {item.resourceIds.join(", ")}</p><p>Décision : {item.decision}. État : {item.reviewState}.</p>
         {item.justification && <p>Justification : {item.justification}</p>}
         {item.decision === "PENDING" && item.reviewerSubjectId === actor && permissions.includes("access_reviews.decide") && selected.status === "OPEN" && <>
           <label>Justification (sans secret)<textarea minLength={3} maxLength={2000} value={justifications[item.id] ?? ""} onChange={event => setJustifications({ ...justifications, [item.id]: event.target.value })} className="block border w-full p-2" /></label>
           {(["KEEP", "REVOKE"] as const).map(decision => <button key={decision} disabled={busy || (justifications[item.id] ?? "").trim().length < 3} className="border rounded p-2 mr-2" onClick={() => void execute(async () => {
             await api(`/${selected.id}/items/${item.id}/decision`, { decision, justification: justifications[item.id] }); await detail(selected);
-          })}>{decision === "KEEP" ? "KEEP — Maintenir" : "REVOKE — Retirer tout l’Assignment"}</button>)}
+          })}>{decision === "KEEP" ? "Conserver l’accès" : "Retirer l’accès"}</button>)}
         </>}
       </article>)}
       {items.length > 0 && items.length % 100 === 0 && <button disabled={busy} onClick={() => void execute(async () => setItems([...items, ...await api(`/${selected.id}/items?after=${items[items.length - 1].id}${pending ? "&pending=true" : ""}`)]))}>Charger les items suivants</button>}
       {selected.status === "OPEN" && permissions.includes("access_reviews.manage") && <button disabled={busy} className="p-2 border rounded" onClick={() => void execute(async () => { await api(`/${selected.id}/complete`, {}); await load(); await detail(selected); })}>Clôturer (tous les items doivent être décidés)</button>}
-      <h3 className="font-bold">Preuves canoniques</h3>{audit.map(event => <p key={event.id}>{event.operation} — {event.result} — {new Date(event.occurredAt).toLocaleString()}</p>)}
+      <h3 className="font-bold">Historique</h3>{audit.map(event => <p key={event.id}>{event.operation} ({event.result}), le {new Date(event.occurredAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</p>)}
       {audit.length > 0 && audit.length % 100 === 0 && <button disabled={busy} onClick={() => void execute(async () => setAudit([...audit, ...await api(`/${selected.id}/audit?after=${audit[audit.length - 1].id}`)]))}>Charger les preuves suivantes</button>}
     </div>}
   </section>;

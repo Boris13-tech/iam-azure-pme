@@ -4,65 +4,65 @@ import Link from "next/link";
 import { Activity, AlertTriangle, Boxes, KeyRound, Scale, ShieldCheck, Users } from "lucide-react";
 import { breakdownTotal, type ActivityEntry, type Breakdown, type PostureResponse, type SectionId, type Widget, type WidgetId } from "../../lib/dashboard/posture-contract";
 
-// Identity Security Posture — real canonical data only. No score, no estimate.
-// 0 = real zero · Indisponible = unavailable · Non disponible = not implemented · masqué = restricted.
+// Identity security posture: real canonical data only, no score, no estimate.
+// A real 0 is shown as 0; unavailable, not implemented and restricted (hidden) are rendered distinctly.
 
-const SECTIONS: Record<SectionId, { title: string; question: string; icon: typeof Users }> = {
-  identity: { title: "Identités", question: "Qui existe ?", icon: Users },
-  sessions: { title: "Sessions & authentification", question: "Qui est authentifié ?", icon: KeyRound },
-  access: { title: "Accès", question: "Qui a accès à quoi ?", icon: ShieldCheck },
-  resources: { title: "Ressources", question: "Quelles ressources sont protégées ?", icon: Boxes },
-  governance: { title: "Gouvernance", question: "Quelle action de gouvernance est attendue ?", icon: Scale },
-  activity: { title: "Activité de sécurité récente", question: "Que s’est-il passé ?", icon: Activity },
+const SECTIONS: Record<SectionId, { title: string; icon: typeof Users }> = {
+  identity: { title: "Identités", icon: Users },
+  sessions: { title: "Sessions et authentification", icon: KeyRound },
+  access: { title: "Accès", icon: ShieldCheck },
+  resources: { title: "Ressources", icon: Boxes },
+  governance: { title: "Gouvernance", icon: Scale },
+  activity: { title: "Activité récente", icon: Activity },
 };
 
 const LABELS: Record<WidgetId, string> = {
-  "identity.subjectsByLifecycle": "Sujets par cycle de vie",
-  "identity.subjectsByType": "Sujets par type",
-  "identity.accountsByProvider": "Comptes d’identité par fournisseur et statut",
-  "identity.recoveryRequiredSubjects": "Sujets en récupération requise",
-  "identity.activeSubjectsWithoutActiveAccount": "Sujets actifs sans compte d’identité actif",
-  "identity.unresolvedProviderCollisions": "Collisions d’identité fournisseur non résolues",
+  "identity.subjectsByLifecycle": "Identités par statut",
+  "identity.subjectsByType": "Identités par type",
+  "identity.accountsByProvider": "Comptes par fournisseur",
+  "identity.recoveryRequiredSubjects": "Identités en récupération",
+  "identity.activeSubjectsWithoutActiveAccount": "Identités actives sans compte actif",
+  "identity.unresolvedProviderCollisions": "Conflits d’identité non résolus",
   "sessions.active": "Sessions actives",
-  "sessions.activeSubjects": "Sujets avec une session active",
+  "sessions.activeSubjects": "Identités connectées",
   "sessions.activeByProvider": "Sessions actives par fournisseur",
   "sessions.started24h": "Sessions ouvertes (24 h)",
-  "sessions.started7d": "Sessions ouvertes (7 j)",
-  "sessions.revoked7d": "Sessions révoquées (7 j)",
-  "auth.localAuthenticatorsByStatus": "Authentificateurs LUXIA_LOCAL par type et statut",
-  "auth.compromisedLocalAuthenticators": "Authentificateurs locaux compromis",
-  "auth.lockedLocalIdentities": "Identités locales verrouillées ou en récupération",
-  "auth.pendingCredentialReenrollments": "Ré-enrôlements d’identifiants en attente",
-  "auth.localSignInEvidence7d": "Preuves de connexion LUXIA_LOCAL (7 j)",
-  "auth.entraSignInEvidence": "Preuves de connexion Microsoft Entra",
-  "auth.entraMfaConditionalAccess": "MFA / accès conditionnel Entra",
-  "access.effectiveAssignments": "Assignations effectives",
-  "access.effectiveHolders": "Détenteurs d’accès effectifs",
-  "access.effectiveBySource": "Assignations effectives par source",
-  "access.timeBoundVsPermanent": "Accès bornés dans le temps / permanents",
-  "access.administrativeEntitlementHolders": "Détenteurs de droits d’administration",
-  "access.nonActiveSubjectsWithEffectiveAccess": "Sujets non actifs disposant encore d’un accès effectif",
+  "sessions.started7d": "Sessions ouvertes (7 jours)",
+  "sessions.revoked7d": "Sessions révoquées (7 jours)",
+  "auth.localAuthenticatorsByStatus": "Moyens d’authentification locaux",
+  "auth.compromisedLocalAuthenticators": "Moyens d’authentification compromis",
+  "auth.lockedLocalIdentities": "Comptes locaux verrouillés",
+  "auth.pendingCredentialReenrollments": "Réinscriptions en attente",
+  "auth.localSignInEvidence7d": "Connexions locales (7 jours)",
+  "auth.entraSignInEvidence": "Connexions Microsoft Entra ID",
+  "auth.entraMfaConditionalAccess": "MFA et accès conditionnel Entra",
+  "access.effectiveAssignments": "Accès en vigueur",
+  "access.effectiveHolders": "Identités disposant d’un accès",
+  "access.effectiveBySource": "Accès par origine",
+  "access.timeBoundVsPermanent": "Durée des accès",
+  "access.administrativeEntitlementHolders": "Personnes par droit d’administration",
+  "access.nonActiveSubjectsWithEffectiveAccess": "Identités inactives ayant encore un accès",
   "access.expiringWithin7d": "Accès expirant sous 7 jours",
-  "access.activeRowsPastValidity": "Assignations « actives » dont la validité est terminée",
-  "access.effectiveLegacyRoleAssignments": "Accès effectifs issus de rôles hérités",
-  "resources.activeByType": "Ressources actives par type",
-  "resources.activeScopesByKind": "Périmètres actifs par nature",
-  "resources.activeScopedEntitlements": "Entitlements de ressource actifs",
-  "resources.withoutEffectiveHolder": "Ressources protégées sans aucun détenteur effectif",
-  "resources.providerBoundVsNative": "Ressources liées à un fournisseur / natives",
-  "governance.sodPoliciesByStatus": "Politiques SoD par statut",
-  "governance.sodEnabledRules": "Règles SoD activées",
-  "governance.sodDeniedAttempts30d": "Attributions refusées par SoD (30 j)",
-  "governance.sodExistingViolations": "Conflits SoD parmi les accès existants",
-  "governance.reviewCampaignsByStatus": "Campagnes de revue par statut",
+  "access.activeRowsPastValidity": "Accès expirés encore marqués actifs",
+  "access.effectiveLegacyRoleAssignments": "Accès issus d’anciens rôles",
+  "resources.activeByType": "Ressources par type",
+  "resources.activeScopesByKind": "Périmètres par type",
+  "resources.activeScopedEntitlements": "Droits définis sur les ressources",
+  "resources.withoutEffectiveHolder": "Ressources sans aucun accès attribué",
+  "resources.providerBoundVsNative": "Origine des ressources",
+  "governance.sodPoliciesByStatus": "Politiques de séparation des tâches",
+  "governance.sodEnabledRules": "Règles de séparation actives",
+  "governance.sodDeniedAttempts30d": "Attributions bloquées (30 jours)",
+  "governance.sodExistingViolations": "Conflits parmi les accès existants",
+  "governance.reviewCampaignsByStatus": "Campagnes de revue",
   "governance.overdueReviewCampaigns": "Campagnes de revue en retard",
-  "governance.pendingReviewItems": "Éléments de revue en attente",
-  "governance.reviewItemsRequiringRemediation": "Éléments de revue à remédier",
+  "governance.pendingReviewItems": "Accès en attente de revue",
+  "governance.reviewItemsRequiringRemediation": "Accès à corriger après revue",
   "governance.myPendingReviewDecisions": "Mes décisions de revue en attente",
-  "activity.recentChangesAndDenials": "Derniers changements et refus",
-  "activity.deniedOrFailed24h": "Refus ou échecs (24 h)",
-  "activity.deniedOrFailed7d": "Refus ou échecs (7 j)",
-  "activity.privilegedChanges7d": "Changements privilégiés (7 j)",
+  "activity.recentChangesAndDenials": "Derniers événements",
+  "activity.deniedOrFailed24h": "Refus et échecs (24 h)",
+  "activity.deniedOrFailed7d": "Refus et échecs (7 jours)",
+  "activity.privilegedChanges7d": "Modifications sensibles (7 jours)",
 };
 
 const DRILL: Partial<Record<WidgetId, string>> = {
@@ -81,31 +81,89 @@ const DRILL: Partial<Record<WidgetId, string>> = {
 };
 
 const REASONS: Record<string, string> = {
-  QUERY_FAILED: "La donnée n’a pas pu être lue. Aucune valeur estimée n’est affichée.",
-  ENTRA_EVIDENCE_NOT_RECORDED: "Les connexions Entra ne sont pas encore enregistrées comme preuves canoniques.",
-  REQUIRES_PROVIDER_GRAPH_INTEGRATION: "Nécessite l’intégration Microsoft Graph (gestion des fournisseurs).",
-  SOD_ENGINE_IS_PREVENTIVE_ONLY: "Le moteur SoD bloque les nouveaux conflits ; la détection des conflits existants n’est pas encore disponible.",
+  QUERY_FAILED: "Cette donnée n’a pas pu être chargée.",
+  ENTRA_EVIDENCE_NOT_RECORDED: "Les connexions Microsoft Entra ID ne sont pas encore enregistrées.",
+  REQUIRES_PROVIDER_GRAPH_INTEGRATION: "Nécessite l’intégration Microsoft Graph.",
+  SOD_ENGINE_IS_PREVENTIVE_ONLY: "Pour l’instant, seules les nouvelles attributions sont contrôlées.",
 };
+
+// Readable labels for canonical codes. Unknown codes are shown unchanged rather than guessed.
+const TERMS: Record<string, string> = {
+  PROVISIONING: "En création", ACTIVE: "Actives", SUSPENDED: "Suspendues", DISABLED: "Désactivées", RECOVERY_REQUIRED: "En récupération", RETIRED: "Retirées",
+  HUMAN: "Personnes", WORKLOAD: "Charges de travail", SERVICE: "Services", DEVICE: "Appareils", AI_AGENT: "Agents IA",
+  MICROSOFT_ENTRA: "Microsoft Entra ID", LUXIA_LOCAL: "Compte local LUXIA", LDAP: "LDAP", ACTIVE_DIRECTORY: "Active Directory", SAMBA_AD: "Samba AD",
+  AWS: "AWS", GOOGLE_WORKSPACE: "Google Workspace", GITHUB: "GitHub", CUSTOM: "Autre",
+  VERIFIED: "Réussies", REJECTED: "Refusées", VERIFIED_PHISHING_RESISTANT: "dont résistantes à l’hameçonnage",
+  LEGACY_ROLE: "Ancien rôle", DIRECT: "Attribution directe", PROVIDER: "Fournisseur", POLICY: "Politique", SYSTEM: "Système",
+  TIME_BOUND: "Limités dans le temps", PERMANENT: "Permanents",
+  APPLICATION: "Applications", API: "API", DATASET: "Jeux de données", DATABASE: "Bases de données", REPOSITORY: "Dépôts de code",
+  CLOUD_RESOURCE: "Ressources cloud", SAAS: "Applications SaaS", STORAGE: "Stockage", SECRET: "Secrets", AI_TOOL: "Outils IA", OTHER: "Autres",
+  RESOURCE: "Ressource unique", RESOURCE_GROUP: "Groupe de ressources", TENANT: "Environnement entier",
+  PROVIDER_BOUND: "Liées à un fournisseur", NATIVE: "Créées dans LUXIA", OPEN: "En cours", COMPLETED: "Terminées",
+};
+const ACCOUNT_STATUS: Record<string, string> = { ACTIVE: "actifs", DISABLED: "désactivés" };
+const AUTHENTICATOR: Record<string, string> = { PASSKEY: "Clés d’accès", TOTP: "Codes à usage unique", SECURITY_KEY: "Clés de sécurité",
+  SMART_CARD: "Cartes à puce", MANAGED_DEVICE: "Appareils gérés", CUSTOM: "Autres" };
+const AUTHENTICATOR_STATUS: Record<string, string> = { PENDING: "en attente", ACTIVE: "actives", SUSPENDED: "suspendues", REVOKED: "révoquées",
+  COMPROMISED: "compromises", EXPIRED: "expirées", SUPERSEDED: "remplacées" };
+const RIGHTS: Record<string, string> = {
+  "users.create": "Créer des utilisateurs (ancien)", "users.update": "Modifier des utilisateurs (ancien)", "users.delete": "Supprimer des utilisateurs (ancien)",
+  "roles.create": "Créer des rôles (ancien)", "roles.update": "Modifier des rôles (ancien)", "roles.delete": "Supprimer des rôles (ancien)", "roles.manage": "Gérer les rôles (ancien)",
+  "settings.update": "Modifier les paramètres", "subjects.create": "Créer des identités", "subjects.update": "Modifier des identités",
+  "identity_accounts.link": "Lier des comptes", "identity_accounts.disable": "Désactiver des comptes", "assignments.manage": "Attribuer des accès",
+  "sessions.revoke": "Révoquer des sessions", "providers.manage": "Gérer les fournisseurs", "resources.manage": "Gérer les ressources",
+  "sod.manage": "Gérer la séparation des tâches", "access_reviews.create": "Créer des revues d’accès", "access_reviews.decide": "Décider des revues d’accès",
+  "access_reviews.manage": "Gérer les revues d’accès",
+};
+const OPERATIONS: Record<string, string> = {
+  "RESOURCE.ONBOARDING.BOOTSTRAP": "Accès initial accordé", "RESOURCE.ONBOARDING.BOOTSTRAP.REVOKE": "Accès initial révoqué",
+  "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED": "Accès initial refusé", "RESOURCE.ONBOARDING.CONFIGURE": "Ressource configurée",
+  "RESOURCE.ONBOARDING.PLAN": "Intégration de ressource préparée", "RESOURCE.ONBOARDING.PLAN.DENIED": "Intégration de ressource refusée",
+  "RESOURCE.ONBOARDING.REQUEST.DENIED": "Demande d’intégration refusée",
+  "ROLE.GOVERNANCE.GRANT": "Droits de gouvernance accordés", "ROLE.GOVERNANCE.REVOKE": "Droits de gouvernance retirés",
+  "ROLE_BUNDLE.GRANT": "Rôle d’administration accordé", "LOCAL_IDENTITY.RECOVERY_UNLOCK": "Compte local déverrouillé",
+  "ASSIGNMENT.GRANT": "Accès accordé", "ASSIGNMENT.REVOKE": "Accès révoqué", "ASSIGNMENT.DENIED.SOD": "Accès bloqué (séparation des tâches)",
+  "RESOURCE.ASSIGNMENT.GRANT": "Accès à une ressource accordé", "RESOURCE.ASSIGNMENT.REVOKE": "Accès à une ressource révoqué",
+  "RESOURCE.ASSIGNMENT.UPDATE": "Accès à une ressource modifié", "AUTHORIZATION.DENIED": "Action refusée",
+  "SESSION.REVOKE": "Session révoquée", "IDENTITY_ACCOUNT.DISABLE": "Compte désactivé", "IDENTITY_ACCOUNT.LINK": "Compte lié",
+  "SUBJECT.CREATE": "Identité créée", "SUBJECT.UPDATE": "Identité modifiée", "PROVIDER.CREATE": "Fournisseur ajouté", "PROVIDER.UPDATE": "Fournisseur modifié",
+  "RESOURCE.CREATE": "Ressource créée", "RESOURCE.UPDATE": "Ressource modifiée", "RESOURCE.CATALOG.CREATE": "Ressource créée",
+  "RESOURCE.CATALOG.UPDATE": "Ressource modifiée", "RESOURCE.SCOPE.CREATE": "Périmètre créé", "RESOURCE.ENTITLEMENT.CREATE": "Droit créé",
+  "RESOURCE.ENTITLEMENT.REVOKE": "Droit retiré", "SOD.POLICY.CREATE": "Politique de séparation créée", "SOD.POLICY.UPDATE": "Politique de séparation modifiée",
+  "SOD.RULE.CREATE": "Règle de séparation créée", "SOD.RULE.DISABLE": "Règle de séparation désactivée",
+  "ACCESS_REVIEW.CAMPAIGN.CREATE": "Campagne de revue créée", "ACCESS_REVIEW.CAMPAIGN.COMPLETE": "Campagne de revue terminée",
+};
+const RESULTS: Record<string, string> = { SUCCESS: "Réussi", DENIED: "Refusé", FAILURE: "Échec" };
+
+function categoryLabel(id: WidgetId, key: string): string {
+  if (id === "access.administrativeEntitlementHolders") return RIGHTS[key] ?? key;
+  if (id === "identity.accountsByProvider") { const [p, s] = key.split("."); return `${TERMS[p] ?? p}, ${ACCOUNT_STATUS[s] ?? s}`; }
+  if (id === "auth.localAuthenticatorsByStatus") { const [t, s] = key.split("."); return `${AUTHENTICATOR[t] ?? t}, ${AUTHENTICATOR_STATUS[s] ?? s}`; }
+  return TERMS[key] ?? key;
+}
 
 const fr = (n: number) => n.toLocaleString("fr-FR");
 
 function BreakdownView({ id, value }: { id: WidgetId; value: Breakdown }) {
-  const entries = Object.entries(value);
-  const nonZero = entries.filter(([, n]) => n > 0);
-  // Overlapping categories (subset, or one holder per right) are never summed.
+  const nonZero = Object.entries(value).filter(([, n]) => n > 0);
+  // Overlapping categories (a subset, or one holder per right) are never summed into a total.
   const total = breakdownTotal(id, value);
-  return <div className="posture-breakdown">{total === null ? <small>Catégories non cumulables</small> : <strong>{fr(total)}</strong>}
-    {nonZero.length > 0 && <ul>{nonZero.map(([k, n]) => <li key={k}><span>{k.replaceAll("_", " ").replaceAll(".", " · ")}</span><b>{fr(n)}</b></li>)}</ul>}
-    {nonZero.length < entries.length && <small>{nonZero.length ? "Autres catégories : 0" : "Toutes les catégories : 0"}</small>}
+  return <div className="posture-breakdown">
+    {total !== null ? <strong>{fr(total)}</strong> : nonZero.length === 0 && <strong>0</strong>}
+    {nonZero.length > 0 && <ul>{nonZero.map(([k, n]) => <li key={k}><span>{categoryLabel(id, k)}</span><b>{fr(n)}</b></li>)}</ul>}
   </div>;
 }
 
 function ActivityView({ value }: { value: readonly ActivityEntry[] }) {
-  if (value.length === 0) return <p className="posture-muted">Aucun changement ni refus enregistré.</p>;
-  return <ul className="posture-activity">{value.map(e => <li key={e.id}>
-    <span className={e.result === "SUCCESS" ? "ok" : "danger"} aria-hidden />
-    <div><b>{e.operation}</b><small>{e.result}{e.actorName ? ` · par ${e.actorName}` : ""}{e.targetName ? ` · cible ${e.targetName}` : ""}</small></div>
-    <time dateTime={e.occurredAt}>{new Date(e.occurredAt).toLocaleString("fr-FR")}</time></li>)}</ul>;
+  if (value.length === 0) return <p className="posture-muted">Aucun événement.</p>;
+  return <ul className="posture-activity">{value.map(e => {
+    const who = e.actorName ? (e.targetName && e.targetName !== e.actorName ? `Par ${e.actorName}, pour ${e.targetName}` : `Par ${e.actorName}`) : null;
+    return <li key={e.id}>
+      <span className={e.result === "SUCCESS" ? "ok" : "danger"} aria-hidden />
+      <div><b>{OPERATIONS[e.operation] ?? e.operation}</b><small>{RESULTS[e.result] ?? e.result}{who ? `. ${who}.` : "."}</small></div>
+      <time dateTime={e.occurredAt}>{new Date(e.occurredAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</time>
+    </li>;
+  })}</ul>;
 }
 
 function WidgetCard({ widget, attention }: { widget: Exclude<Widget, { state: "restricted" }>; attention: boolean }) {
@@ -115,10 +173,10 @@ function WidgetCard({ widget, attention }: { widget: Exclude<Widget, { state: "r
       : Array.isArray(widget.value) ? <ActivityView value={widget.value as readonly ActivityEntry[]} />
       : <BreakdownView id={widget.id} value={widget.value as Breakdown} />
     : widget.state === "unavailable" ? <p className="posture-state unavailable"><b>Indisponible</b><small>{REASONS[widget.reason] ?? widget.reason}</small></p>
-    : <p className="posture-state not-implemented"><b>Non disponible dans cette version</b><small>{REASONS[widget.reason] ?? widget.reason}</small></p>;
+    : <p className="posture-state not-implemented"><b>Pas encore disponible</b><small>{REASONS[widget.reason] ?? widget.reason}</small></p>;
   const flagged = attention && widget.state === "ok" && typeof widget.value === "number" && widget.value > 0;
   return <article className={`posture-widget${flagged ? " is-attention" : ""}${widget.id === "activity.recentChangesAndDenials" ? " is-wide" : ""}`}>
-    <header><h3>{LABELS[widget.id]}</h3>{href && <Link href={href}>Détail</Link>}</header>{body}
+    <header><h3>{LABELS[widget.id]}</h3>{href && <Link href={href}>Voir</Link>}</header>{body}
   </article>;
 }
 
@@ -134,18 +192,16 @@ export default function DashboardPage() {
   }, []);
   const attentionIds = new Set(data?.attention.map(a => a.id));
   return <div className="luxia-dashboard">
-    <section className="luxia-hero"><div className="luxia-hero-copy">
-      <small>LUXIA IDENTITY · POSTURE DE SÉCURITÉ DES IDENTITÉS</small>
-      <h1>{data ? `${data.organization.name} — ${data.tenant.name}` : "Posture de sécurité des identités"}</h1>
-      <p>Données canoniques réelles de votre tenant, sans score ni estimation. Les indicateurs visibles dépendent de vos droits.
-        {data && <> Données au {new Date(data.asOf).toLocaleString("fr-FR")}.</>}</p>
-    </div></section>
-    {failed ? <p role="alert" className="posture-alert">Les données sont indisponibles. Aucun indicateur estimé n’est affiché.</p>
-      : !data ? <p role="status">Chargement des données du tenant…</p> : <>
-      <section className="luxia-panel posture-attention" aria-label="Points d’attention">
-        <header><h2><AlertTriangle size={15} /> Points d’attention</h2></header>
+    <header className="luxia-page-header">
+      <h1>Vue d’ensemble</h1>
+      {data && <p>{data.organization.name}, environnement {data.tenant.name}. Mis à jour le {new Date(data.asOf).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.</p>}
+    </header>
+    {failed ? <p role="alert" className="posture-alert">Impossible de charger les données. Réessayez dans quelques instants.</p>
+      : !data ? <p role="status" className="posture-muted">Chargement...</p> : <>
+      <section className="luxia-panel posture-attention" aria-label="À traiter">
+        <header><h2><AlertTriangle size={18} aria-hidden /> À traiter</h2></header>
         {data.attention.length === 0
-          ? <p className="posture-muted">Aucun point d’attention détecté sur les données visibles pour votre compte.</p>
+          ? <p className="posture-muted">Aucun point à traiter.</p>
           : <ul>{data.attention.map(a => <li key={a.id}><b>{fr(a.count)}</b><span>{LABELS[a.id]}</span>
               {DRILL[a.id] && <Link href={DRILL[a.id]!}>Voir</Link>}</li>)}</ul>}
       </section>
@@ -153,11 +209,11 @@ export default function DashboardPage() {
         const widgets = data.sections[id];
         const visible = widgets.filter((w): w is Exclude<Widget, { state: "restricted" }> => w.state !== "restricted");
         const hidden = widgets.length - visible.length;
-        const { title, question, icon: Icon } = SECTIONS[id];
+        const { title, icon: Icon } = SECTIONS[id];
         return <section className="luxia-panel posture-section" key={id} aria-label={title}>
-          <header><h2><Icon size={15} /> {title} <small>{question}</small></h2></header>
+          <header><h2><Icon size={18} aria-hidden /> {title}</h2></header>
           {visible.length > 0 && <div className="posture-grid">{visible.map(w => <WidgetCard key={w.id} widget={w} attention={attentionIds.has(w.id)} />)}</div>}
-          {hidden > 0 && <p className="posture-muted">{visible.length === 0 ? "Section masquée : " : ""}{hidden} indicateur{hidden > 1 ? "s" : ""} masqué{hidden > 1 ? "s" : ""} faute de droits.</p>}
+          {hidden > 0 && <p className="posture-muted">{visible.length === 0 ? "Vous n’avez pas accès à cette section." : `${hidden} indicateur${hidden > 1 ? "s" : ""} masqué${hidden > 1 ? "s" : ""} (droits insuffisants).`}</p>}
         </section>;
       })}
     </>}

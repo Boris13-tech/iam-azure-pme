@@ -9,7 +9,7 @@ export default function AuditLogViewer({ logs }: { logs: any[] }) {
           <li key={log.id}>
             <div className="px-5 py-5 hover:bg-slate-50 transition-colors duration-150">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-indigo-700 truncate">
+                <p className="text-sm font-bold text-accent-strong truncate">
                   {log.action}
                 </p>
                 <div className="ml-2 flex-shrink-0 flex">

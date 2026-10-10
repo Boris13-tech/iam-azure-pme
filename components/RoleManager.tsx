@@ -11,7 +11,7 @@ export default function RoleManager({ roles, onEdit, onDelete }: RoleManagerProp
   return (
     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
       {roles.map(role => (
-        <div key={role.id} className="bg-white overflow-hidden shadow-sm rounded-xl border border-gray-200 hover:shadow-lg hover:border-indigo-200 transition-all duration-300">
+        <div key={role.id} className="bg-white overflow-hidden shadow-sm rounded-xl border border-gray-200 hover:shadow-lg hover:border-accent-line transition-all duration-300">
           <div className="px-5 py-6">
             <div className="flex justify-between items-start">
               <h3 className="text-xl leading-6 font-bold text-slate-800">{role.name}</h3>
@@ -27,7 +27,7 @@ export default function RoleManager({ roles, onEdit, onDelete }: RoleManagerProp
             </div>
             <p className="mt-2 max-w-2xl text-sm text-slate-500">{role.description || "Aucune description fournie"}</p>
             <div className="mt-5">
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700">
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-accent-soft text-accent-strong">
                 {role._count?.users || 0} utilisateurs
               </span>
             </div>
@@ -40,7 +40,7 @@ export default function RoleManager({ roles, onEdit, onDelete }: RoleManagerProp
                   </li>
                 ))}
                 {role.permissions?.length > 3 && (
-                  <li className="text-xs text-indigo-500 font-medium pl-2">+ {role.permissions.length - 3} autres permissions</li>
+                  <li className="text-xs text-accent font-medium pl-2">+ {role.permissions.length - 3} autres permissions</li>
                 )}
                 {(!role.permissions || role.permissions.length === 0) && (
                   <li className="text-xs text-slate-400 italic">Aucune permission</li>
@@ -51,7 +51,7 @@ export default function RoleManager({ roles, onEdit, onDelete }: RoleManagerProp
           <div className="px-5 py-4 bg-slate-50 border-t border-gray-100 flex justify-between items-center">
             <button 
               onClick={() => onEdit(role)}
-              className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+              className="text-sm font-semibold text-accent hover:text-accent-strong transition-colors"
             >
               Modifier les accès
             </button>
