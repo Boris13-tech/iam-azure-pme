@@ -1,5 +1,7 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-10 21:1xZ — SECURITY JOURNAL V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/SECURITY-JOURNAL-V1-PRODUCTION-2026-10-10.md`). Production = `dpl_EDZXLTXRrHDbBbVGqcEhCTF3SnpW` @ `2d7ec62`. Also shipped since the dashboard certification: sober UI and readable copy (#25, #26), canonical audit journal and legacy roles out of navigation (#27). This header supersedes older deployment rows below.
+
 > **2026-10-10 17:2xZ — DASHBOARD V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/DASHBOARD-V1-PRODUCTION-2026-10-10.md`). Production = `dpl_48xvYWVVJUiZg1k9A53tyD7yf7tu` @ `5c71df8`. This header supersedes the deployment rows in section 1.
 
 > **2026-10-10 15:41Z — RESOURCE ACCESS ONBOARDING V1 — PRODUCTION END-TO-END CERTIFICATION: PASS.** See `docs/certification/RESOURCE-ACCESS-PRODUCTION-E2E-2026-10-10.md`. Sections 4–11 below are updated accordingly; the post-ceremony state supersedes the pre-ceremony preflight figures.
@@ -150,7 +152,7 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 
 ## 11. Blockers / next gates
 
-1. Resource Access tranche: CLOSED (Production E2E PASS).
-2. Phase 0, Dashboard v1: CLOSED (Production certification PASS). Minor follow-ups are listed in the certification doc.
-3. Next, per the operator roadmap: **Customer Self-Onboarding**, starting with a scope proposal that must be approved before any code. Then First Admin / Break-glass → Access Requests → Observability → Backup/Restore → Provider certification (PR12) → Docs/API → Billing/Legal → Private Beta → GA.
+1. Resource Access tranche: CLOSED. Dashboard v1: CLOSED. Security Journal v1: CLOSED (Production PASS).
+2. Next, per the operator roadmap: **Customer Self-Onboarding**, starting with a scope proposal that must be approved before any code.
+3. Known v1 limits: pre-identity sign-in failures are not recorded (S3, needs a migration); passkey revocation is not offered (S2); there is no Entra MFA evidence (needs `amr`/Graph, PR12).
 4. PR12: live provider credentials/consent/issuer, and a rebase.
