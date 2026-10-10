@@ -52,7 +52,7 @@ export default function Onboarding() {
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {configuration && <>
       <h2>{configuration.capability.name}</h2>
-      <p>Route : GET {configuration.capability.route}. Action : {configuration.capability.action}. Périmètre : ressource unique.</p>
+      <p>Accès vérifié : lecture de cette ressource uniquement.</p>
       <p>Configuration : {configuration.configured ? "confirmée" : "non configurée"}.</p>
       <p>Délégation : {configuration.delegation === "BLOCKED" ? "bloquée" : configuration.delegation}. Le premier propriétaire doit être approuvé par un opérateur.</p>
       <label className="block">Identité <select value={target} onChange={event => { setTarget(event.target.value); setPlan(null); }} className="border p-2">

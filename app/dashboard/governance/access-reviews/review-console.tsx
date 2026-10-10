@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 type Campaign = { id: string; name: string; scopeType: string; status: string; dueAt: string; reviewerSubjectId: string };
 type Item = { id: string; subjectId: string; assignmentId: string; entitlementId: string; resourceIds: string[]; reviewerSubjectId: string; decision: string; reviewState: string; justification: string | null };
-type Configuration = { scopes: { id: string; key: string; kind: string }[]; reviewers: { id: string; name: string }[] };
+type Configuration = { scopes: { id: string; key: string; kind: string; resource?: { name: string } | null }[]; reviewers: { id: string; name: string }[] };
 async function api(path: string, body?: unknown) {
   const response = await fetch(`/api/canonical/access-reviews${path}`, { cache: "no-store", ...(body ? { method: "POST", headers: { "content-type": "application/json", "x-luxia-change-id": `review-ui:${crypto.randomUUID()}` }, body: JSON.stringify(body) } : {}) });
   const value = await response.json();
@@ -58,7 +58,7 @@ export default function ReviewConsole() {
     }); }}>
       <h2 className="font-bold">Créer une campagne</h2>
       <input aria-label="Nom de la campagne" required maxLength={120} value={name} onChange={event => setName(event.target.value)} placeholder="Nom de la campagne" className="border p-2" />
-      <select aria-label="Périmètre" required value={scopeId} onChange={event => setScope(event.target.value)} className="border p-2"><option value="">Choisir un périmètre</option>{configuration.scopes.map(scope => <option key={scope.id} value={scope.id}>{scope.key} ({SCOPE_KINDS[scope.kind] ?? scope.kind})</option>)}</select>
+      <select aria-label="Périmètre" required value={scopeId} onChange={event => setScope(event.target.value)} className="border p-2"><option value="">Choisir un périmètre</option>{configuration.scopes.map(scope => <option key={scope.id} value={scope.id}>{scope.resource?.name ?? scope.key} ({SCOPE_KINDS[scope.kind] ?? scope.kind})</option>)}</select>
       <select aria-label="Réviseur" required value={reviewerSubjectId} onChange={event => setReviewer(event.target.value)} className="border p-2"><option value="">Choisir un réviseur</option>{configuration.reviewers.map(reviewer => <option key={reviewer.id} value={reviewer.id}>{reviewer.name}</option>)}</select>
       <label>Échéance <input type="datetime-local" required value={dueAt} onChange={event => setDue(event.target.value)} className="border p-2" /></label>
       <button disabled={busy} className="rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-strong">Créer la campagne</button>

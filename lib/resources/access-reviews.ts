@@ -109,7 +109,7 @@ export function listReviewItems(auth: AuthContext, id: string, after?: string, p
 export function reviewConfiguration(auth: AuthContext) {
   return withTenantDb(auth, async tx => {
     await requireNative(tx, auth, "access_reviews.create");
-    const scopes = await tx.resourceScope.findMany({ where: { ...scope(auth), active: true }, orderBy: { id: "asc" }, take: 100 });
+    const scopes = await tx.resourceScope.findMany({ where: { ...scope(auth), active: true }, include: { resource: { select: { name: true } } }, orderBy: { id: "asc" }, take: 100 });
     const now = new Date();
     const reviewers = await tx.subject.findMany({ where: { ...scope(auth), type: "HUMAN", lifecycleState: "ACTIVE", Assignment: { some: {
       status: "ACTIVE", source: { not: "LEGACY_ROLE" }, OR: [{ validFrom: null }, { validFrom: { lte: now } }],
