@@ -104,21 +104,25 @@ export async function locateMicrosoftEntraConnection(input: {
       message: "Tenant is outside the requested organization",
     });
   }
-  const connection = await rawPrisma.providerConnection.findFirst({
+  // Never a "first result" (Customer Self-Onboarding v1, requirement 14): exactly one connection
+  // of this organization, otherwise the choice is ambiguous and refused.
+  const connections = await rawPrisma.providerConnection.findMany({
     where: {
       organizationId: input.organizationId,
       providerType: "MICROSOFT_ENTRA",
     },
-    orderBy: { createdAt: "asc" },
     select: { id: true },
+    take: 2,
   });
-  if (!connection) {
+  if (connections.length !== 1) {
     throw new ProviderAdapterError({
       code: "NOT_FOUND",
-      message: "No Microsoft Entra connection is configured for this scope",
+      message: connections.length === 0
+        ? "No Microsoft Entra connection is configured for this scope"
+        : "Several Microsoft Entra connections are configured for this scope; none is chosen implicitly",
     });
   }
-  return connection.id;
+  return connections[0].id;
 }
 
 function firstValue(keys: string[]): string | undefined {

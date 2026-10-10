@@ -96,6 +96,7 @@ jobs:
         GRANT EXECUTE ON FUNCTION public.luxia_signup_reserve(TEXT,TEXT,JSONB,INTEGER) TO app_user;
         GRANT EXECUTE ON FUNCTION public.luxia_signup_consume(TEXT,TEXT) TO app_user;
         GRANT EXECUTE ON FUNCTION public.luxia_invitation_resolve(TEXT) TO app_user;
+        GRANT EXECUTE ON FUNCTION public.luxia_login_decoy(TEXT) TO app_user;
         GRANT CONNECT ON DATABASE luxia_db TO app_user;
         GRANT USAGE ON SCHEMA public TO app_user;
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;

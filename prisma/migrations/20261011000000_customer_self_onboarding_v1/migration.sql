@@ -406,6 +406,25 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION luxia_invitation_resolve(TEXT) FROM PUBLIC;
 
+-- Requirement 2: anti-enumeration at sign-in. Returns a stable value that only the database can
+-- compute (peppered), so a decoy answer for an unknown organization or identifier is the same on
+-- every request and cannot be predicted or told apart from a real one.
+CREATE FUNCTION luxia_login_decoy(p_input_hash TEXT)
+RETURNS TEXT LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+  v_pepper TEXT;
+BEGIN
+  IF NOT coalesce(p_input_hash ~ '^[0-9a-f]{64}$', false) THEN
+    RAISE EXCEPTION 'LOGIN_DECOY_INVALID_ARGUMENT' USING ERRCODE = '22023';
+  END IF;
+  SELECT c."pepper" INTO v_pepper FROM "RateLimitConfig" c WHERE c."id" = 1;
+  IF v_pepper IS NULL THEN
+    RAISE EXCEPTION 'RATE_LIMIT_NOT_CONFIGURED' USING ERRCODE = '55000';
+  END IF;
+  RETURN encode(sha256(convert_to(v_pepper || ':login-decoy:' || p_input_hash, 'UTF8')), 'hex');
+END $$;
+REVOKE ALL ON FUNCTION luxia_login_decoy(TEXT) FROM PUBLIC;
+
 -- ---------------------------------------------------------------------------
 -- Runtime grants. In CI app_user is created after migrations (see ci.yml bootstrap).
 -- ---------------------------------------------------------------------------
@@ -422,5 +441,6 @@ DO $$ BEGIN
     GRANT EXECUTE ON FUNCTION luxia_signup_reserve(TEXT, TEXT, JSONB, INTEGER) TO app_user;
     GRANT EXECUTE ON FUNCTION luxia_signup_consume(TEXT, TEXT) TO app_user;
     GRANT EXECUTE ON FUNCTION luxia_invitation_resolve(TEXT) TO app_user;
+    GRANT EXECUTE ON FUNCTION luxia_login_decoy(TEXT) TO app_user;
   END IF;
 END $$;

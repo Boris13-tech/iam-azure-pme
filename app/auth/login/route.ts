@@ -2,45 +2,34 @@ import { NextResponse } from "next/server";
 import { beginEntraAuthentication } from "../../../lib/auth/providers/entra";
 import { AuthTransactionStore } from "../../../lib/auth/auth-transaction-store";
 import { rawPrisma } from "../../../lib/db/raw-prisma";
+import { normalizeOrganizationSlug, resolveLoginOrganization, safeReturnTo } from "../../../lib/auth/organization-login";
+import { allowRequest, clientNetworkKey } from "../../../lib/security/rate-limit";
 
 export const runtime = "nodejs";
 
+// Microsoft sign-in for one organization, resolved on the server from its identifier (slug).
+// Unknown organization, organization without exactly one Microsoft connection, or a rate-limited
+// client: the same generic return to the login page. A known organization with Microsoft redirects
+// to Microsoft (home-realm discovery, accepted residual risk); no organization data is shown.
+const back = (request: Request, error: string) => NextResponse.redirect(new URL(`/login?error=${error}`, request.url), 303);
+
 export async function GET(request: Request) {
   try {
+    if (!await allowRequest("login-entra", clientNetworkKey(request))) return back(request, "rate_limited");
     const { searchParams } = new URL(request.url);
-    const returnTo = searchParams.get("returnTo") || "/dashboard";
-    const tenantId = searchParams.get("tenant");
-    const connectionId = searchParams.get("connection");
+    const slug = normalizeOrganizationSlug(searchParams.get("org"));
+    const returnTo = safeReturnTo(searchParams.get("returnTo"));
+    const organization = slug ? await resolveLoginOrganization(slug) : null;
+    if (!organization?.entraConnectionId) return back(request, "signin");
 
-    if (!tenantId || !connectionId) {
-      return NextResponse.json({ error: "Missing tenant or connection parameter" }, { status: 400 });
-    }
+    const provider = await rawPrisma.providerConnection.findUnique({ where: { id: organization.entraConnectionId } });
+    if (!provider || provider.organizationId !== organization.organizationId || provider.providerType !== "MICROSOFT_ENTRA")
+      return back(request, "signin");
 
-    // 1. Lookup Tenant and ProviderConnection
-    const tenant = await rawPrisma.tenant.findUnique({
-      where: { id: tenantId }
-    });
-    
-    if (!tenant) {
-      return NextResponse.json({ error: "Invalid tenant" }, { status: 400 });
-    }
-
-    const provider = await rawPrisma.providerConnection.findUnique({
-      where: { id: connectionId }
-    });
-
-    if (!provider || provider.organizationId !== tenant.organizationId) {
-      return NextResponse.json({ error: "Invalid connection for this tenant" }, { status: 400 });
-    }
-
-    if (provider.providerType !== "MICROSOFT_ENTRA") {
-      return NextResponse.json({ error: "Unsupported provider type" }, { status: 400 });
-    }
-
-    // 2. Build the provider request behind the adapter boundary.
+    // Build the provider request behind the adapter boundary.
     const challenge = await beginEntraAuthentication({
       providerConnection: provider,
-      tenantId: tenant.id,
+      tenantId: organization.tenantId,
       returnTo,
     });
     const state = challenge.transactionId;
@@ -50,23 +39,22 @@ export async function GET(request: Request) {
       throw new Error("Invalid Microsoft Entra authentication challenge");
     }
 
-    // 4. Persist the auth transaction securely
+    // Persist the auth transaction securely.
     await AuthTransactionStore.createTransaction({
       stateHash: state,
       nonce,
       codeVerifier,
       expectedOrganizationId: provider.organizationId,
-      expectedTenantId: tenant.id,
+      expectedTenantId: organization.tenantId,
       expectedProviderConnectionId: provider.id,
       returnTo,
       expiresInMinutes: 10
     });
 
-    // 5. Redirect to the URL validated and produced by the adapter.
+    // Redirect to the URL validated and produced by the adapter.
     return NextResponse.redirect(challenge.redirectUrl);
-
-  } catch (error) {
-    console.error("Login Error:", error);
-    return NextResponse.json({ error: "Failed to initiate login" }, { status: 500 });
+  } catch {
+    console.error("ENTRA_LOGIN_BEGIN_FAILED");
+    return back(request, "unavailable");
   }
 }

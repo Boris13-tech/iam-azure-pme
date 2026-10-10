@@ -36,7 +36,7 @@ async function main() {
   assert.equal(result.status,0,'CANDIDATE_MIGRATIONS_FAILED');
   const matrix = await db.$queryRawUnsafe(`SELECT p.proname,has_function_privilege('public',p.oid,'EXECUTE') AS public_execute,has_function_privilege('app_user',p.oid,'EXECUTE') AS runtime_execute,has_function_privilege(current_user,p.oid,'EXECUTE') AS owner_execute FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'luxia_%' ORDER BY p.proname`);
   assert.equal(matrix.length,3);
-  for(const row of matrix){assert.equal(row.public_execute,false);assert.equal(row.owner_execute,true);assert.equal(row.runtime_execute,['luxia_sod_scope_contains','luxia_rate_limit_hit','luxia_signup_reserve','luxia_signup_consume','luxia_invitation_resolve'].includes(row.proname));}
+  for(const row of matrix){assert.equal(row.public_execute,false);assert.equal(row.owner_execute,true);assert.equal(row.runtime_execute,['luxia_sod_scope_contains','luxia_rate_limit_hit','luxia_signup_reserve','luxia_signup_consume','luxia_invitation_resolve','luxia_login_decoy'].includes(row.proname));}
   const after = await snapshot();
   assert.deepEqual(after.filter(row=>before.some(old=>old.oid===row.oid)),before);
   assert.deepEqual(await db.$queryRawUnsafe(`SELECT p.oid::text,p.proacl::text,p.prosrc,has_function_privilege('app_user',p.oid,'EXECUTE') AS runtime_execute FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='resolve_session'`),resolver);

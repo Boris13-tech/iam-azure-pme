@@ -4,10 +4,10 @@ import { rawPrisma } from "../../lib/db/raw-prisma";
 
 const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "luxia_review_immutable_guard", "luxia_resource_onboarding_evidence_guard",
   "luxia_organization_slug_guard", "luxia_signup_code_guard", "luxia_invitation_guard", "luxia_organization_domain_guard",
-  "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve"];
-// The only functions app_user may execute. Customer Self-Onboarding v1 adds four narrow SECURITY DEFINER
+  "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy"];
+// The only functions app_user may execute. Customer Self-Onboarding v1 adds five narrow SECURITY DEFINER
 // entry points that take hashes only; trigger guards stay owner-only.
-const runtime = ["luxia_sod_scope_contains", "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve"];
+const runtime = ["luxia_sod_scope_contains", "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy"];
 describe("LUXIA SQL function privilege architecture", () => {
   it("every function introduced by these migrations explicitly revokes PUBLIC", () => {
     const files = ["20261004120000_resource_governance_foundation", "20261004160000_static_sod_v1", "20261004180000_access_reviews_v1", "20261008040000_resource_onboarding_evidence",

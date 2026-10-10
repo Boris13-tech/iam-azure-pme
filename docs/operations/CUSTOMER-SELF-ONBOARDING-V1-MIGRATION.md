@@ -15,8 +15,8 @@ Scope: `docs/product/CUSTOMER-SELF-ONBOARDING-V1-SCOPE.md`, sections 9 and 10.
 | `Invitation` | Token hash and role. The expiry is set by the database (`createdAt + 7 days`) and can't be changed. Tenant, person, role, token and inviter are immutable. Accepted or revoked is final, and acceptance after expiry is refused. Only one open invitation per person. |
 | `RateLimitBucket`, `RateLimitConfig` | Peppered key hashes and a single random pepper. |
 | RLS | Forced on all five tables. The two tenant tables get the standard tenant policy. The three internal tables get **no policy**, and app_user has no privilege on them. |
-| Functions | Trigger guards: `luxia_organization_slug_guard`, `luxia_signup_code_guard`, `luxia_invitation_guard`, `luxia_organization_domain_guard`. These are owner only. Runtime entry points: `luxia_rate_limit_hit`, `luxia_signup_reserve`, `luxia_signup_consume`, `luxia_invitation_resolve`. These are `SECURITY DEFINER` with a pinned `search_path`, PUBLIC is revoked, and only `app_user` gets EXECUTE. They accept hashes only. |
-| Grants | app_user gets `SELECT, INSERT, UPDATE` on `OrganizationDomain` and `Invitation` (no `DELETE`), and EXECUTE on the four runtime functions. Nothing else changes. |
+| Functions | Trigger guards: `luxia_organization_slug_guard`, `luxia_signup_code_guard`, `luxia_invitation_guard`, `luxia_organization_domain_guard`. These are owner only. Runtime entry points: `luxia_rate_limit_hit`, `luxia_signup_reserve`, `luxia_signup_consume`, `luxia_invitation_resolve`, `luxia_login_decoy`. These are `SECURITY DEFINER` with a pinned `search_path`, PUBLIC is revoked, and only `app_user` gets EXECUTE. They accept hashes only. |
+| Grants | app_user gets `SELECT, INSERT, UPDATE` on `OrganizationDomain` and `Invitation` (no `DELETE`), and EXECUTE on the five runtime functions. Nothing else changes. |
 
 ## Pre-flight (Production, read-only)
 
@@ -49,7 +49,7 @@ DO $$ BEGIN
 END $$;
 DROP TABLE "Invitation", "OrganizationDomain", "SignupCode", "RateLimitBucket", "RateLimitConfig";
 DROP FUNCTION luxia_rate_limit_hit(TEXT, TEXT, INTEGER, INTEGER), luxia_signup_reserve(TEXT, TEXT, JSONB, INTEGER),
-  luxia_signup_consume(TEXT, TEXT), luxia_invitation_resolve(TEXT),
+  luxia_signup_consume(TEXT, TEXT), luxia_invitation_resolve(TEXT), luxia_login_decoy(TEXT),
   luxia_signup_code_guard(), luxia_invitation_guard(), luxia_organization_domain_guard();
 DROP TRIGGER organization_slug_immutable ON "Organization";
 DROP FUNCTION luxia_organization_slug_guard();
@@ -69,4 +69,4 @@ Once a second organization, an invitation or a verified domain exists, **do not 
 - **Slug change** (requirement 4): this is not a v1 feature. A future change is an explicit operator procedure in a dedicated migration that disables `organization_slug_immutable` for one `UPDATE`, re-enables it in the same transaction, and writes an audit event in the organization's journal. A slug is never reassigned to another organization.
 - **Abused or leaked signup code**: as the owner, set `status = 'REVOKED'`, `revokedAt = now()` and `revokedBy`, and clear the `pending*` fields. The trigger keeps the change final.
 - **Invitation sent to the wrong person**: an admin revokes it in the product, which sets `revokedAt`. Rows are never deleted.
-- **Rate-limit pepper**: rotating it only resets the counters. As the owner, run `UPDATE "RateLimitConfig" SET pepper = <new 64-hex>`.
+- **Rate-limit pepper**: rotating it resets the counters and changes the sign-in decoys. As the owner, run `UPDATE "RateLimitConfig" SET pepper = <new 64-hex>`.
