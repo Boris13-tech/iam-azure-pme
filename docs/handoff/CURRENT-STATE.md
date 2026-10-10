@@ -140,7 +140,7 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 - Browser evidence is bound to its probe by time only: the event must be fresh after the probe starts. The server event does not carry the probeId. Fixed actor/tenant/resource/action/assignment checks and a consumed-ID set mitigate this.
 - Evidence freshness compares the app server's `occurredAt` with the operator's local clock, with no lower-bound tolerance. Clock skew fails closed.
 - In the runner, the modified-replay check is a local `validate()` refusal. The ceremony-level modified-bytes refusal is covered by clone tests.
-- **Repo hygiene issue:** a tracked file named `" README.md"` (leading space) breaks a plain checkout on Windows. Workaround: `git config core.longpaths true` plus a sparse-checkout excluding `/ README.md`. A separate fix is proposed (rename or remove).
+- Repo hygiene: the tracked `" README.md"` (leading space), which broke Windows checkouts, is renamed to `README.md` by the hygiene PR (`chore/fix-leading-space-readme`). After that merge, no sparse-checkout workaround is needed. Long paths still require `git config core.longpaths true` on Windows.
 - Windows operators must run operator shell scripts through Git Bash (`C:\Program Files\Git\bin\bash.exe`). In PowerShell, `bash` resolves to the WSL launcher.
 - PR12 must be rebased onto current `main` before any review.
 
