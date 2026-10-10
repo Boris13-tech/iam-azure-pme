@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ENTITLEMENT_CATALOG_V1 } from "../../lib/auth/entitlements-catalog";
-import { WIDGETS, WIDGET_IDS, attentionCount, isPermitted, type Widget, type WidgetId } from "../../lib/dashboard/posture-contract";
+import { WIDGETS, WIDGET_IDS, attentionCount, breakdownTotal, isPermitted, type Widget, type WidgetId } from "../../lib/dashboard/posture-contract";
 import { POSTURE_QUERIES } from "../../lib/dashboard/posture-queries";
 
 describe("Identity Security Posture v1 contract", () => {
@@ -59,5 +59,15 @@ describe("Identity Security Posture v1 contract", () => {
     // No computed score anywhere (wording such as "sans score" is allowed).
     for (const source of [page, readFileSync("lib/dashboard/posture.ts", "utf8"), readFileSync("lib/dashboard/posture-queries.ts", "utf8")])
       expect(source).not.toMatch(/\bscore\w*\s*[=:(]/i);
+  });
+
+  it("never sums overlapping breakdowns (Production finding 2026-10-10: 13 sign-ins shown as 26, 1 admin as 12)", () => {
+    expect(breakdownTotal("auth.localSignInEvidence7d", { VERIFIED: 13, REJECTED: 0, VERIFIED_PHISHING_RESISTANT: 13 })).toBeNull();
+    expect(breakdownTotal("access.administrativeEntitlementHolders", { "assignments.manage": 1, "sessions.revoke": 1 })).toBeNull();
+    expect(breakdownTotal("sessions.activeByProvider", { MICROSOFT_ENTRA: 4, LUXIA_LOCAL: 1 })).toBe(5);
+    expect(breakdownTotal("identity.subjectsByLifecycle", { ACTIVE: 0, SUSPENDED: 0 })).toBe(0);
+    const page = readFileSync("app/dashboard/page.tsx", "utf8");
+    expect(page).toContain("breakdownTotal(id, value)");
+    expect(page).not.toMatch(/entries\.reduce/);
   });
 });
