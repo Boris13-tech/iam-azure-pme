@@ -39,6 +39,8 @@ describe("Logout Security", () => {
   });
 
   afterAll(async () => {
+    // Security Journal v1: sign-out events now reference the subject.
+    await adminPrisma.canonicalAdminAuditEvent.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });

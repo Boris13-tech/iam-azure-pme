@@ -60,6 +60,8 @@ describe("OIDC Callback Security", () => {
 
   afterAll(async () => {
     await rawPrisma.authTransaction.deleteMany({});
+    // Security Journal v1: sign-in evidence now references the identity account.
+    await adminPrisma.authenticationEvidence.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
     await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
@@ -116,6 +118,13 @@ describe("OIDC Callback Security", () => {
         sameSite: "lax",
       })
     );
+
+    // Security Journal v1 (W1, S1): exactly one provider-attested sign-in evidence with the session.
+    const evidence = await adminPrisma.authenticationEvidence.findMany({ where: { organizationId: orgId, identityAccountId } });
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({ subjectId, method: "FEDERATED_OIDC", outcome: "VERIFIED", source: "EXTERNAL_PROVIDER",
+      assuranceLevel: "LOW", userVerification: "PROVIDER_ASSERTED", phishingResistant: false, reasonCode: "ENTRA_OIDC_VERIFIED" });
+    expect(await adminPrisma.session.count({ where: { organizationId: orgId, subjectId } })).toBe(1);
   });
 
   it("should reject replayed OIDC state", async () => {
