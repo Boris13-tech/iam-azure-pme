@@ -1,0 +1,98 @@
+{
+  "environment": "PRODUCTION",
+  "certification": "RESOURCE ACCESS ONBOARDING V1 — PRODUCTION END-TO-END",
+  "result": "PASS",
+  "deployment": {
+    "vercelDeploymentId": "dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U",
+    "sha": "8acea18fae902aad1d444db3b21eef721b4e0760"
+  },
+  "manifestBytes": "{\"manifestVersion\":1,\"environment\":\"PRODUCTION\",\"projectId\":\"hidden-leaf-91460552\",\"database\":\"neondb\",\"organizationId\":\"4841428a-80b4-4f07-bb3f-c94612dfd4a2\",\"tenantId\":\"c68ae9ee-11a8-42f9-bc9c-b19c42ec7914\",\"actorSubjectId\":\"30a15eda-24d3-40ef-8705-11c2e6e1b929\",\"targetSubjectId\":\"30a15eda-24d3-40ef-8705-11c2e6e1b929\",\"resourceId\":\"ed8c9111-a930-4724-a76d-bd541538a621\",\"scopeId\":\"3952f920-c064-46a2-9d22-d31d338c8a54\",\"entitlementId\":\"d6605f22-64f1-467b-b4e4-de806d2c957c\",\"action\":\"resource.read\",\"entitlementKey\":\"resource-scope:3952f920-c064-46a2-9d22-d31d338c8a54:resource.read\",\"productionDeploymentSha\":\"8acea18fae902aad1d444db3b21eef721b4e0760\",\"branch\":\"br-billowing-frog-ahtirmax\",\"scopeType\":\"RESOURCE\",\"purpose\":\"INITIAL_BOUNDED_RESOURCE_OWNER\",\"source\":\"DIRECT\",\"assignmentId\":\"abea167e-16dd-4fdd-87a2-30ae0f8c1041\",\"operationId\":\"d10049e4-0f2a-4d89-ba7c-0b6dee7998f2\",\"validFrom\":\"2026-10-10T15:34:00Z\",\"validUntil\":\"2026-10-10T16:34:00Z\",\"approvedAt\":\"PENDING_EXPLICIT_HUMAN_APPROVAL\",\"approvedBy\":\"PENDING_EXPLICIT_HUMAN_APPROVAL\",\"approvalReference\":\"PENDING_EXPLICIT_HUMAN_APPROVAL\",\"requiredResourceBinding\":\"EXACT_ACTIVE_RESOURCE_SCOPE_ENTITLEMENT\"}",
+  "manifestBinding": "e2db955070cc09ee6b69fe10774ce62b78839f90dad9628f6794946ee339ee2b",
+  "releaseBytes": "{\"releaseVersion\":1,\"environment\":\"PRODUCTION\",\"projectId\":\"hidden-leaf-91460552\",\"branch\":\"br-billowing-frog-ahtirmax\",\"database\":\"neondb\",\"vercelProjectId\":\"prj_dZ6YOYRdONsicgWdlmofh7NwtoSP\",\"deployedSha\":\"8acea18fae902aad1d444db3b21eef721b4e0760\",\"deploymentId\":\"dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U\",\"manifestBinding\":\"e2db955070cc09ee6b69fe10774ce62b78839f90dad9628f6794946ee339ee2b\"}",
+  "releaseBinding": "2219c78e6419d665542df7af8f1cebd2f2f9ece37f551ad83a83d134451aaf70",
+  "approval": {
+    "manifestBinding": "e2db955070cc09ee6b69fe10774ce62b78839f90dad9628f6794946ee339ee2b",
+    "releaseBinding": "2219c78e6419d665542df7af8f1cebd2f2f9ece37f551ad83a83d134451aaf70",
+    "approvedAt": "2026-10-10T15:39:33Z",
+    "approvedBy": "Human operator Boris13-tech (explicit chat approval in Claude Code session)",
+    "approvalReference": "explicit-human-approval:e2db955070cc09ee6b69fe10774ce62b78839f90dad9628f6794946ee339ee2b: J'approuve le manifeste e2db9550"
+  },
+  "preflightBefore": {
+    "utc": "2026-10-10T15:34:03.584Z",
+    "verdict": "PASS",
+    "bootstrapAssignments": 0,
+    "assignmentDigest": "83e7540cab85667c96e63da4ba5f2183",
+    "assignmentCount": 21
+  },
+  "runnerTranscript": [
+    "start 2026-10-10T15:39:58.164Z",
+    "runner: {\"event\":\"BROWSER_PROBE_REQUIRED\",\"probeId\":\"e96d095a-1811-47f8-a871-8585850b3f8a\",\"route\":\"https://iam-azure-pme.vercel.app/api/resources/protected-resource-demo\",\"expectedStatus\":403,\"deadline\":\"2026-10-10T15:41:46.246Z\"}",
+    "relay: forwarded {\"probeId\":\"e96d095a-1811-47f8-a871-8585850b3f8a\",\"httpStatus\":403,\"evidenceId\":\"1225d30a-473e-46d5-8077-8b103b8d257a\"}",
+    "runner: {\"event\":\"BROWSER_PROBE_REQUIRED\",\"probeId\":\"1c01907a-eb5b-486e-8efc-607d52188d41\",\"route\":\"https://iam-azure-pme.vercel.app/api/resources/protected-resource-demo\",\"expectedStatus\":200,\"deadline\":\"2026-10-10T15:42:18.337Z\"}",
+    "relay: forwarded {\"probeId\":\"1c01907a-eb5b-486e-8efc-607d52188d41\",\"httpStatus\":200,\"evidenceId\":\"4fb39915-37f0-49aa-984f-c0cbcdf7121c\"}",
+    "runner: {\"event\":\"BROWSER_PROBE_REQUIRED\",\"probeId\":\"3500ecf8-ace8-411d-9c7e-3042ea56f857\",\"route\":\"https://iam-azure-pme.vercel.app/api/resources/protected-resource-demo\",\"expectedStatus\":403,\"deadline\":\"2026-10-10T15:42:50.823Z\"}",
+    "relay: forwarded {\"probeId\":\"3500ecf8-ace8-411d-9c7e-3042ea56f857\",\"httpStatus\":403,\"evidenceId\":\"5279d6a8-d369-49b5-8102-13fc1117a27a\"}",
+    "runner: {\"manifestBinding\":\"e2db955070cc09ee6b69fe10774ce62b78839f90dad9628f6794946ee339ee2b\",\"before\":\"1225d30a-473e-46d5-8077-8b103b8d257a\",\"allowed\":\"4fb39915-37f0-49aa-984f-c0cbcdf7121c\",\"denied\":\"5279d6a8-d369-49b5-8102-13fc1117a27a\",\"grant\":\"REVOKED\",\"result\":\"PASS\"}",
+    "exit 0 2026-10-10T15:41:40.728Z"
+  ],
+  "runnerResult": {
+    "manifestBinding": "e2db955070cc09ee6b69fe10774ce62b78839f90dad9628f6794946ee339ee2b",
+    "before": "1225d30a-473e-46d5-8077-8b103b8d257a",
+    "allowed": "4fb39915-37f0-49aa-984f-c0cbcdf7121c",
+    "denied": "5279d6a8-d369-49b5-8102-13fc1117a27a",
+    "grant": "REVOKED",
+    "result": "PASS"
+  },
+  "postVerification": {
+    "utc": "2026-10-10T15:42:51.432Z",
+    "onEntitlement": [
+      {
+        "id": "abea167e-16dd-4fdd-87a2-30ae0f8c1041",
+        "subjectId": "30a15eda-24d3-40ef-8705-11c2e6e1b929",
+        "status": "REVOKED",
+        "source": "DIRECT",
+        "sourceRef": "bootstrap:d10049e4-0f2a-4d89-ba7c-0b6dee7998f2",
+        "validFrom": "2026-10-10T15:34:00.000Z",
+        "validUntil": "2026-10-10T16:34:00.000Z"
+      }
+    ],
+    "activeOnEntitlement": 0,
+    "otherAssignments": {
+      "n": 21,
+      "digest": "83e7540cab85667c96e63da4ba5f2183"
+    },
+    "events": [
+      {
+        "changeId": "bootstrap:d10049e4-0f2a-4d89-ba7c-0b6dee7998f2",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP",
+        "result": "SUCCESS",
+        "assignmentIds": [
+          "abea167e-16dd-4fdd-87a2-30ae0f8c1041"
+        ],
+        "occurredAt": "2026-10-10T15:40:42.212Z"
+      },
+      {
+        "changeId": "bootstrap:d10049e4-0f2a-4d89-ba7c-0b6dee7998f2:revoke",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.REVOKE",
+        "result": "SUCCESS",
+        "assignmentIds": [
+          "abea167e-16dd-4fdd-87a2-30ae0f8c1041"
+        ],
+        "occurredAt": "2026-10-10T15:41:16.317Z"
+      },
+      {
+        "changeId": "bootstrap:d10049e4-0f2a-4d89-ba7c-0b6dee7998f2:denied:BOOTSTRAP_ALREADY_REVOKED_OR_CONFLICTING",
+        "operation": "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED",
+        "result": "DENIED",
+        "assignmentIds": [],
+        "occurredAt": "2026-10-10T15:41:37.814Z",
+        "reasonCode": "BOOTSTRAP_ALREADY_REVOKED_OR_CONFLICTING"
+      }
+    ],
+    "protectedAuthorization": "DENY"
+  },
+  "abandoned": {
+    "manifestBinding": "7d1d9a7d59455e2cf9a0506a412daca598078a01a33cc7ca400c746355707451",
+    "reason": "expired 2026-10-10T12:49:00Z unused; runner stopped at the initial DENY probe (browser not authenticated); no grant; proven by preflight 2026-10-10T14:34:01Z"
+  }
+}
