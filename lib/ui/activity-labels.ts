@@ -19,6 +19,7 @@ export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze(
   "SOD.RULE.CREATE": "Règle de séparation créée", "SOD.RULE.DISABLE": "Règle de séparation désactivée", "SOD.EVALUATE": "Séparation des tâches vérifiée",
   "ACCESS_REVIEW.CAMPAIGN.CREATE": "Campagne de revue créée", "ACCESS_REVIEW.CAMPAIGN.COMPLETE": "Campagne de revue clôturée",
   "ACCESS_REVIEW.ITEM.KEEP": "Accès conservé après revue", "ACCESS_REVIEW.ITEM.REVOKE": "Accès retiré après revue",
+  "SESSION.SIGN_OUT": "Déconnexion", "LOCAL_AUTHENTICATOR.ENROLL": "Clé d’accès ajoutée",
   "RESOURCE.AUTHORIZATION.CHECK": "Autorisation vérifiée", "RESOURCE.CAPABILITY.READ": "Accès à la ressource de test vérifié",
   // Consultations (read events)
   "AUDIT.READ": "Journal d’audit consulté", "DASHBOARD.POSTURE.READ": "Vue d’ensemble consultée", "SUBJECT.READ": "Identités consultées",
@@ -40,3 +41,14 @@ export function operationLabel(operation: string): string | null {
   }
   return null;
 }
+
+/** Sign-in labels (Security Journal v1). Entra is "attestée par Microsoft": never MFA (decision S1). */
+export const SIGN_IN_METHOD_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  FEDERATED_OIDC: "Microsoft Entra ID", PASSKEY: "Clé d’accès", SECURITY_KEY: "Clé de sécurité", TOTP: "Code à usage unique",
+});
+export const ASSURANCE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  PROVIDER_ATTESTED: "Connexion attestée par Microsoft", PHISHING_RESISTANT: "Résistante à l’hameçonnage", STANDARD: "Standard",
+});
+export const REFUSAL_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  SUBJECT_NOT_ACTIVE: "Identité non active", IDENTITY_ACCOUNT_DISABLED: "Compte désactivé",
+});

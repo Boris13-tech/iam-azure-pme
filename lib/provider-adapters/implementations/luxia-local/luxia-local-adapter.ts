@@ -156,7 +156,7 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
   async enrollPasskey(context: ProviderOperationContext, input: {
     identityAccountId: string; enrollmentTransactionId: string; enrollmentChallenge: string;
     credentialId: string; publicKey: string; relyingPartyId: string; allowedOrigin: string;
-    hardwareBound?: boolean; userVerificationRequired?: boolean;
+    hardwareBound?: boolean; userVerificationRequired?: boolean; enrolledBySubjectId?: string;
   }): Promise<string> {
     await this.validate(context, "AUTHENTICATION");
     if (!input.credentialId || !input.publicKey || !input.relyingPartyId || !input.allowedOrigin) invalid("Incomplete passkey enrollment");
@@ -170,7 +170,7 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
       userVerificationRequired: input.userVerificationRequired ?? false,
       credentialId: input.credentialId, publicKey: input.publicKey,
       relyingPartyId: input.relyingPartyId, allowedOrigin: input.allowedOrigin, signCount: 0,
-    });
+    }, input.enrolledBySubjectId ? { enrollmentAudit: { actorSubjectId: input.enrolledBySubjectId } } : undefined);
     return id;
   }
 

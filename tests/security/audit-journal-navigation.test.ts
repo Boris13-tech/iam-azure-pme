@@ -13,7 +13,7 @@ describe("audit journal and navigation (legacy role model out of user journeys)"
 
   it("the audit journal reads the canonical journal, not the legacy AuditLog", () => {
     const page = readFileSync("app/dashboard/audit/page.tsx", "utf8");
-    expect(page).toContain("/api/canonical/audit");
+    expect(page).toContain("/api/canonical/security-journal");
     expect(page).not.toMatch(/["'`]\/api\/audit|AuditLogViewer|0\.0\.0\.0/);
   });
 

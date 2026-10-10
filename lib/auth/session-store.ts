@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { rawPrisma } from "../db/raw-prisma";
 import { withTenantDb } from "../db/scoped-client";
 import * as crypto from "crypto";
@@ -21,7 +22,8 @@ export class SessionStore {
    * Creates a new session.
    * Returns the unhashed token for the browser and the persisted session object.
    */
-  static async createSession(ctx: SessionContext, ip?: string, userAgent?: string) {
+  static async createSession(ctx: SessionContext, ip?: string, userAgent?: string,
+    options: { evidence?: Prisma.AuthenticationEvidenceUncheckedCreateInput } = {}) {
     const rawToken = crypto.randomBytes(32).toString("hex");
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     
@@ -40,6 +42,13 @@ export class SessionStore {
         }
         if (account.subject.lifecycleState !== "ACTIVE") {
           throw new SessionCreationDeniedError("SUBJECT_NOT_ACTIVE");
+        }
+        // Security Journal v1 (W1): the sign-in evidence is written in the same transaction as the
+        // session. If it cannot be written, the transaction fails and no session exists (fail closed).
+        if (options.evidence) {
+          if (options.evidence.outcome !== "VERIFIED" || options.evidence.subjectId !== ctx.subjectId ||
+            options.evidence.identityAccountId !== ctx.identityAccountId) throw new Error("SIGN_IN_EVIDENCE_MISMATCH");
+          await tx.authenticationEvidence.create({ data: options.evidence });
         }
         return tx.session.create({
         data: {
@@ -105,7 +114,7 @@ export class SessionStore {
    * Revokes a specific session securely (idempotent).
    * Returns the revoked session if it existed, otherwise null.
    */
-  static async revokeByToken(rawToken: string) {
+  static async revokeByToken(rawToken: string, options: { signOutAudit?: boolean } = {}) {
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     
     // Resolve first using primitive
@@ -141,6 +150,15 @@ export class SessionStore {
           where: { id: hashedToken },
           data: { revokedAt: new Date() }
         });
+        // Security Journal v1 (W4): sign-out recorded atomically with the revocation, once.
+        if (options.signOutAudit) {
+          await tx.canonicalAdminAuditEvent.create({ data: {
+            organizationId: session.organizationId, tenantId: session.tenantId,
+            actorSubjectId: session.subjectId, targetSubjectId: session.subjectId,
+            operation: "SESSION.SIGN_OUT", result: "SUCCESS", changeId: `signout:${crypto.randomUUID()}`,
+            metadata: { providerType: session.identityAccount?.providerConnection?.providerType ?? null },
+          } });
+        }
       }
 
       return session;

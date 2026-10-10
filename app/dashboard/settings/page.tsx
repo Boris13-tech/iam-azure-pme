@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { PasskeyEnrollment } from "./passkey-enrollment";
+import { MyAuthenticators, MySessions } from "./my-security";
 
 // Only real, enforced capabilities are shown here. The former MFA / session timeout / password
 // rotation / geo-blocking switches were removed: nothing enforced them and saving was refused by
@@ -12,6 +13,8 @@ export default function AuthenticationSettingsPage() {
         <h1 className="text-2xl font-semibold text-slate-900">Authentification</h1>
         <p className="mt-1 text-base text-slate-600">Gérez vos moyens de connexion.</p>
       </div>
+      <MySessions />
+      <MyAuthenticators />
       <PasskeyEnrollment />
       <div className="rounded-lg border border-slate-200 bg-white p-5">
         <h2 className="text-base font-semibold text-slate-900">Politiques d’authentification</h2>

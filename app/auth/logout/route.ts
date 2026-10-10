@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
 
   // 2. Revoke LUXIA Session
   if (rawToken) {
-    session = await SessionStore.revokeByToken(rawToken);
+    session = await SessionStore.revokeByToken(rawToken, { signOutAudit: true });
   }
 
   // 3. Clear cookie

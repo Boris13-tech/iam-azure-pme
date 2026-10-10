@@ -35,7 +35,9 @@ const LABELS: Record<WidgetId, string> = {
   "auth.lockedLocalIdentities": "Comptes locaux verrouillés",
   "auth.pendingCredentialReenrollments": "Réinscriptions en attente",
   "auth.localSignInEvidence7d": "Connexions locales (7 jours)",
-  "auth.entraSignInEvidence": "Connexions Microsoft Entra ID",
+  "auth.entraSignInEvidence": "Connexions Microsoft Entra ID (7 jours)",
+  "auth.signIns24hByMethod": "Connexions réussies (24 h)",
+  "auth.rejectedSignIns24h": "Connexions refusées (24 h)",
   "auth.entraMfaConditionalAccess": "MFA et accès conditionnel Entra",
   "access.effectiveAssignments": "Accès en vigueur",
   "access.effectiveHolders": "Identités disposant d’un accès",
@@ -83,7 +85,7 @@ const DRILL: Partial<Record<WidgetId, string>> = {
 
 const REASONS: Record<string, string> = {
   QUERY_FAILED: "Cette donnée n’a pas pu être chargée.",
-  ENTRA_EVIDENCE_NOT_RECORDED: "Les connexions Microsoft Entra ID ne sont pas encore enregistrées.",
+  ENTRA_EVIDENCE_NOT_RECORDED: "Aucune connexion Microsoft Entra ID enregistrée pour l’instant.",
   REQUIRES_PROVIDER_GRAPH_INTEGRATION: "Nécessite l’intégration Microsoft Graph.",
   SOD_ENGINE_IS_PREVENTIVE_ONLY: "Pour l’instant, seules les nouvelles attributions sont contrôlées.",
 };
@@ -95,6 +97,7 @@ const TERMS: Record<string, string> = {
   MICROSOFT_ENTRA: "Microsoft Entra ID", LUXIA_LOCAL: "Compte local LUXIA", LDAP: "LDAP", ACTIVE_DIRECTORY: "Active Directory", SAMBA_AD: "Samba AD",
   AWS: "AWS", GOOGLE_WORKSPACE: "Google Workspace", GITHUB: "GitHub", CUSTOM: "Autre",
   VERIFIED: "Réussies", REJECTED: "Refusées", VERIFIED_PHISHING_RESISTANT: "dont résistantes à l’hameçonnage",
+  FEDERATED_OIDC: "Microsoft Entra ID", PASSKEY: "Clé d’accès", SECURITY_KEY: "Clé de sécurité", TOTP: "Code à usage unique",
   LEGACY_ROLE: "Ancien rôle", DIRECT: "Attribution directe", PROVIDER: "Fournisseur", POLICY: "Politique", SYSTEM: "Système",
   TIME_BOUND: "Limités dans le temps", PERMANENT: "Permanents",
   APPLICATION: "Applications", API: "API", DATASET: "Jeux de données", DATABASE: "Bases de données", REPOSITORY: "Dépôts de code",
@@ -126,13 +129,14 @@ function categoryLabel(id: WidgetId, key: string): string {
 
 const fr = (n: number) => n.toLocaleString("fr-FR");
 
-function BreakdownView({ id, value }: { id: WidgetId; value: Breakdown }) {
+function BreakdownView({ id, value, since }: { id: WidgetId; value: Breakdown; since?: string }) {
   const nonZero = Object.entries(value).filter(([, n]) => n > 0);
   // Overlapping categories (a subset, or one holder per right) are never summed into a total.
   const total = breakdownTotal(id, value);
   return <div className="posture-breakdown">
     {total !== null ? <strong>{fr(total)}</strong> : nonZero.length === 0 && <strong>0</strong>}
     {nonZero.length > 0 && <ul>{nonZero.map(([k, n]) => <li key={k}><span>{categoryLabel(id, k)}</span><b>{fr(n)}</b></li>)}</ul>}
+    {since && <small>Enregistrées depuis le {new Date(since).toLocaleDateString("fr-FR")}</small>}
   </div>;
 }
 
@@ -153,7 +157,7 @@ function WidgetCard({ widget, attention }: { widget: Exclude<Widget, { state: "r
   const body = widget.state === "ok"
     ? typeof widget.value === "number" ? <strong className="posture-number">{fr(widget.value)}</strong>
       : Array.isArray(widget.value) ? <ActivityView value={widget.value as readonly ActivityEntry[]} />
-      : <BreakdownView id={widget.id} value={widget.value as Breakdown} />
+      : <BreakdownView id={widget.id} value={widget.value as Breakdown} since={widget.since} />
     : widget.state === "unavailable" ? <p className="posture-state unavailable"><b>Indisponible</b><small>{REASONS[widget.reason] ?? widget.reason}</small></p>
     : <p className="posture-state not-implemented"><b>Pas encore disponible</b><small>{REASONS[widget.reason] ?? widget.reason}</small></p>;
   const flagged = attention && widget.state === "ok" && typeof widget.value === "number" && widget.value > 0;

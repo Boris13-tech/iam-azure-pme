@@ -76,7 +76,7 @@ export class PrismaLocalIdentityStore implements LocalIdentityStore {
       allowedOrigin: row.allowedOrigin ?? undefined, signCount: Number(row.signCount),
       lastTotpStep: row.lastTotpStep === null ? undefined : Number(row.lastTotpStep), expiresAt: row.expiresAt?.toISOString() })));
   }
-  async saveAuthenticator(context: ProviderOperationContext, value: LocalAuthenticatorRecord): Promise<void> {
+  async saveAuthenticator(context: ProviderOperationContext, value: LocalAuthenticatorRecord, options?: { enrollmentAudit?: { actorSubjectId: string } }): Promise<void> {
     await withTenantDb(scope(context), async (tx) => { await tx.localAuthenticator.create({ data: {
       id: value.id, organizationId: context.organizationId, tenantId: context.tenantId, identityAccountId: value.identityAccountId,
       type: value.type, status: value.status, credentialId: value.credentialId, publicKey: value.publicKey,
@@ -89,7 +89,13 @@ export class PrismaLocalIdentityStore implements LocalIdentityStore {
       secretRef: value.secretRef?.key, secretVersion: value.secretRef?.version, relyingPartyId: value.relyingPartyId, allowedOrigin: value.allowedOrigin,
       signCount: value.signCount, lastTotpStep: value.lastTotpStep,
       expiresAt: value.expiresAt ? new Date(value.expiresAt) : undefined,
-    } }); });
+    } });
+      // Security Journal v1 (W5): enrolment audited in the same transaction; no credential material.
+      if (options?.enrollmentAudit) await tx.canonicalAdminAuditEvent.create({ data: {
+        organizationId: context.organizationId, tenantId: context.tenantId,
+        actorSubjectId: options.enrollmentAudit.actorSubjectId, targetSubjectId: options.enrollmentAudit.actorSubjectId,
+        operation: "LOCAL_AUTHENTICATOR.ENROLL", result: "SUCCESS", changeId: `enroll:${value.id}`,
+        metadata: { type: value.type } } }); });
   }
   async revokeAuthenticator(context: ProviderOperationContext, id: string): Promise<void> {
     await withTenantDb(scope(context), async (tx) => { const result = await tx.localAuthenticator.updateMany({ where: {

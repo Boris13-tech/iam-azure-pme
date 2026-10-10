@@ -32,6 +32,7 @@ export async function POST(request: Request) {
       allowedOrigin: new URL(request.url).origin,
       hardwareBound: true,
       userVerificationRequired: true,
+      enrolledBySubjectId: auth.subjectId,
     });
     return NextResponse.json({ authenticatorId: id, status: "ENROLLED" });
   } catch (error) {
