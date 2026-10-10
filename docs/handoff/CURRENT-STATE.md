@@ -7,6 +7,7 @@ Evidence labels:
 
 - **VERIFIED 2026-10-10**: observed directly in this snapshot (GitHub API, CI, Vercel API, HTTP, git objects, source review, or the read-only preflight run by the operator).
 - **VERIFIED FROM PRIOR CERTIFICATION EVIDENCE**: taken from committed `docs/certification/*` files. **Not** re-executed in this snapshot.
+- **OPERATOR-REPORTED 2026-10-10**: performed and reported by the human operator in chat; not independently observed by the agent.
 - **PENDING**: not yet observed.
 
 ## 1. Branches, SHAs, deployment
@@ -97,10 +98,10 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 | PR16 merge-SHA CI + exact-SHA Production deployment | VERIFIED 2026-10-10 |
 | Production unauthenticated HTTP smoke on `8acea18`: `/login` 200; `/dashboard` 307 → `/login`; `/api/resources/protected-resource-demo` 401 `{"error":"Unauthorized"}` | VERIFIED 2026-10-10 |
 | Production read-only DB preflight (section 4) | VERIFIED 2026-10-10 |
+| Production authenticated smoke on `8acea18`: (1) Entra login reaches the dashboard; (2) `/dashboard/users`, `/dashboard/resources`, `/dashboard/governance/sod`, `/dashboard/governance/access-reviews` and `/dashboard/resources/onboarding` render; (3) the authenticated protected route returns 403 `RESOURCE_ACCESS_DENIED` with an `evidenceId`; (4) sign-out, then LUXIA_LOCAL passkey login reaches the dashboard. **All 4 OK.** | OPERATOR-REPORTED 2026-10-10 |
 
 ## 7. Pending certifications
 
-- **Production authenticated smoke (operator browser)**: PENDING. Covers Entra login, LUXIA_LOCAL/passkey login, canonical session, the dashboard, JML (`/dashboard/users`), `/dashboard/resources`, `/dashboard/governance/sod`, `/dashboard/governance/access-reviews`, `/dashboard/resources/onboarding`, and an authenticated protected route returning 403 `RESOURCE_ACCESS_DENIED`.
 - **Resource Access Onboarding v1 Production end-to-end**: NOT EXECUTED. No Production grant has ever run.
 - PR12 live provider certification: Entra BLOCKED (dedicated credentials/consent missing), Google BLOCKED (same), OIDC BLOCKED (no approved issuer).
 
@@ -133,7 +134,7 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 
 ## 11. Blockers / next gates
 
-1. Operator authenticated browser smoke (section 7): PENDING. This is the only remaining gate before manifest preparation.
-2. New manifest: generate it only after (1) passes, with new assignmentId/operationId/validFrom, validUntil ≤ 1 h and a new binding, revalidated against section 4. Then **STOP for explicit human approval**.
+1. Operator authenticated browser smoke: DONE (OPERATOR-REPORTED 2026-10-10, all 4 steps OK).
+2. New manifest: requires explicit human approval to generate. Generate it only at the start of a ceremony session (validity window ≤ 1 h), with new assignmentId/operationId/validFrom, validUntil ≤ 1 h and a new binding, revalidated against section 4. Then **STOP for explicit human approval**.
 3. Production ceremony: only after explicit approval of that new manifest.
 4. PR12: live provider credentials/consent/issuer, and a rebase.

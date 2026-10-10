@@ -6,16 +6,20 @@ Read `docs/handoff/CURRENT-STATE.md` first.
 
 PR #16 was promoted and merged (`8acea18`). Merge-SHA CI PASS. Exact-SHA Production deployment `dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U` READY. Unauthenticated HTTP smoke PASS. Read-only Production DB preflight PASS (bootstrap Assignment count 0, protected capability DENY).
 
+## Also completed (2026-10-10)
+
+Production authenticated smoke: all 4 steps OK (OPERATOR-REPORTED).
+
 ## Next objective
 
-Production **authenticated** smoke on `8acea18`, performed by the human operator in a browser:
+Prepare the Production first-owner ceremony session. This needs **explicit human approval to start**.
 
-1. Entra login reaches the dashboard.
-2. Pages render: `/dashboard/users` (JML), `/dashboard/resources`, `/dashboard/governance/sod`, `/dashboard/governance/access-reviews`, `/dashboard/resources/onboarding`.
-3. `GET /api/resources/protected-resource-demo` returns 403 `RESOURCE_ACCESS_DENIED` with an `evidenceId`.
-4. Sign out, then LUXIA_LOCAL passkey login reaches the dashboard.
-
-Expected side effects: new Session rows and one `RESOURCE.CAPABILITY.READ` DENIED audit event. No authorization state change.
+Constraints for that session:
+- The manifest validity window is ≤ 1 hour. Generate it only at the start of a session where the operator is available for the whole hour.
+- Before generating, re-run the read-only preflight: count 0, DENY, Subject ACTIVE, SoD no conflict, binding exact, and Production deployment still `dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U` / `8acea18`.
+- The manifest needs a new assignmentId, operationId, validFrom and binding, and validUntil ≤ validFrom + 1 h. It also needs a release artifact binding the Vercel deployment ID and SHA.
+- After generation, STOP and present the exact bytes and digests for **explicit human approval**.
+- The ceremony (`scripts/operators/run-production-resource-bootstrap.ts <manifest> <approval> --browser-evidence`) is run by the operator, with browser evidence. Each probe must be answered within 90 seconds.
 
 ## Allowed
 
@@ -33,10 +37,10 @@ Expected side effects: new Session rows and one `RESOURCE.CAPABILITY.READ` DENIE
 
 ## Success criteria
 
-- The authenticated smoke passes, and the operator's observations are recorded in CURRENT-STATE.
-- A re-run of the read-only preflight still shows bootstrap Assignment count 0 and DENY.
+- Session start explicitly approved by the human operator.
+- Manifest generated, revalidated and explicitly approved, then the ceremony completes: DENY → one bounded grant → ALLOW → replay idempotent → modified replay DENY → revoke → DENY → no recreation.
 - No scope broadening.
 
 ## Stop condition
 
-STOP after recording the authenticated smoke result. Manifest generation and the Production ceremony each require their own explicit human approval. Never infer PASS.
+STOP before manifest generation, and again before the ceremony. Each step requires its own explicit human approval. Never infer PASS.
