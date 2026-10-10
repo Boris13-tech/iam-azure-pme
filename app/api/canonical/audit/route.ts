@@ -16,6 +16,7 @@ export async function GET(request: Request) {
       skip: Number(url.searchParams.get("skip") ?? 0),
       take: Number(url.searchParams.get("take") ?? 50),
       operation: url.searchParams.get("operation") ?? undefined,
+      excludeReads: url.searchParams.get("excludeReads") === "true",
       changeId: readChangeId("audit"),
     });
     return NextResponse.json(events);

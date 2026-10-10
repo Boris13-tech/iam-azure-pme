@@ -129,17 +129,22 @@ export async function recordDeniedAdminAccess(
 
 export async function listCanonicalAdminAudit(
   auth: AuthContext,
-  input: { skip?: number; take?: number; operation?: string; changeId: string },
+  input: { skip?: number; take?: number; operation?: string; excludeReads?: boolean; changeId: string },
 ) {
   return withTenantDb(auth, async (tx) => {
     await writeAudit(tx, auth, {
       operation: "AUDIT.READ",
       changeId: input.changeId,
-      metadata: { filterOperation: input.operation ?? null },
+      metadata: { filterOperation: input.operation ?? null, excludeReads: input.excludeReads === true },
     });
     return tx.canonicalAdminAuditEvent.findMany({
-      where: input.operation ? { operation: input.operation } : undefined,
-      orderBy: { occurredAt: "desc" },
+      where: {
+        ...(input.operation ? { operation: input.operation } : {}),
+        ...(input.excludeReads ? { NOT: { operation: { endsWith: ".READ" } } } : {}),
+      },
+      // Display names only (tenant-scoped relations under RLS); no other subject fields.
+      include: { actor: { select: { name: true } }, target: { select: { name: true } } },
+      orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
       skip: Math.max(0, input.skip ?? 0),
       take: Math.min(100, Math.max(1, input.take ?? 50)),
     });

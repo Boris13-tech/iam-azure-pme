@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Boxes, Building2, ClipboardCheck, Fingerprint, Gauge, KeyRound, Scale, ShieldCheck, Users } from "lucide-react";
+import { Boxes, Building2, ClipboardCheck, Fingerprint, Gauge, Scale, ShieldCheck, Users } from "lucide-react";
 import { getAuthContext } from "@/lib/auth/auth-context";
 import { loadPlatformContext } from "@/lib/platform/context";
 
@@ -9,7 +9,6 @@ const navigation = [
   { href: "/dashboard", label: "Vue d’ensemble", icon: Gauge, entitlement: null },
   { href: "/dashboard/users", label: "Identités", icon: Users, entitlement: "subjects.read" },
   { href: "/dashboard/settings", label: "Authentification", icon: ShieldCheck, entitlement: "providers.read" },
-  { href: "/dashboard/roles", label: "Accès", icon: KeyRound, entitlement: "assignments.read" },
   { href: "/dashboard/resources", label: "Ressources", icon: Boxes, entitlement: "resources.read" },
   { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: Scale, entitlement: "sod.read" },
   { href: "/dashboard/governance/access-reviews", label: "Revues d’accès", icon: ClipboardCheck, entitlement: "access_reviews.read" },

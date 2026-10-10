@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { Activity, AlertTriangle, Boxes, KeyRound, Scale, ShieldCheck, Users } from "lucide-react";
+import { RESULT_LABELS, operationLabel } from "../../lib/ui/activity-labels";
 import { breakdownTotal, type ActivityEntry, type Breakdown, type PostureResponse, type SectionId, type Widget, type WidgetId } from "../../lib/dashboard/posture-contract";
 
 // Identity security posture: real canonical data only, no score, no estimate.
@@ -115,25 +116,6 @@ const RIGHTS: Record<string, string> = {
   "sod.manage": "Gérer la séparation des tâches", "access_reviews.create": "Créer des revues d’accès", "access_reviews.decide": "Décider des revues d’accès",
   "access_reviews.manage": "Gérer les revues d’accès",
 };
-const OPERATIONS: Record<string, string> = {
-  "RESOURCE.ONBOARDING.BOOTSTRAP": "Accès initial accordé", "RESOURCE.ONBOARDING.BOOTSTRAP.REVOKE": "Accès initial révoqué",
-  "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED": "Accès initial refusé", "RESOURCE.ONBOARDING.CONFIGURE": "Ressource configurée",
-  "RESOURCE.ONBOARDING.PLAN": "Intégration de ressource préparée", "RESOURCE.ONBOARDING.PLAN.DENIED": "Intégration de ressource refusée",
-  "RESOURCE.ONBOARDING.REQUEST.DENIED": "Demande d’intégration refusée",
-  "ROLE.GOVERNANCE.GRANT": "Droits de gouvernance accordés", "ROLE.GOVERNANCE.REVOKE": "Droits de gouvernance retirés",
-  "ROLE_BUNDLE.GRANT": "Rôle d’administration accordé", "LOCAL_IDENTITY.RECOVERY_UNLOCK": "Compte local déverrouillé",
-  "ASSIGNMENT.GRANT": "Accès accordé", "ASSIGNMENT.REVOKE": "Accès révoqué", "ASSIGNMENT.DENIED.SOD": "Accès bloqué (séparation des tâches)",
-  "RESOURCE.ASSIGNMENT.GRANT": "Accès à une ressource accordé", "RESOURCE.ASSIGNMENT.REVOKE": "Accès à une ressource révoqué",
-  "RESOURCE.ASSIGNMENT.UPDATE": "Accès à une ressource modifié", "AUTHORIZATION.DENIED": "Action refusée",
-  "SESSION.REVOKE": "Session révoquée", "IDENTITY_ACCOUNT.DISABLE": "Compte désactivé", "IDENTITY_ACCOUNT.LINK": "Compte lié",
-  "SUBJECT.CREATE": "Identité créée", "SUBJECT.UPDATE": "Identité modifiée", "PROVIDER.CREATE": "Fournisseur ajouté", "PROVIDER.UPDATE": "Fournisseur modifié",
-  "RESOURCE.CREATE": "Ressource créée", "RESOURCE.UPDATE": "Ressource modifiée", "RESOURCE.CATALOG.CREATE": "Ressource créée",
-  "RESOURCE.CATALOG.UPDATE": "Ressource modifiée", "RESOURCE.SCOPE.CREATE": "Périmètre créé", "RESOURCE.ENTITLEMENT.CREATE": "Droit créé",
-  "RESOURCE.ENTITLEMENT.REVOKE": "Droit retiré", "SOD.POLICY.CREATE": "Politique de séparation créée", "SOD.POLICY.UPDATE": "Politique de séparation modifiée",
-  "SOD.RULE.CREATE": "Règle de séparation créée", "SOD.RULE.DISABLE": "Règle de séparation désactivée",
-  "ACCESS_REVIEW.CAMPAIGN.CREATE": "Campagne de revue créée", "ACCESS_REVIEW.CAMPAIGN.COMPLETE": "Campagne de revue terminée",
-};
-const RESULTS: Record<string, string> = { SUCCESS: "Réussi", DENIED: "Refusé", FAILURE: "Échec" };
 
 function categoryLabel(id: WidgetId, key: string): string {
   if (id === "access.administrativeEntitlementHolders") return RIGHTS[key] ?? key;
@@ -160,7 +142,7 @@ function ActivityView({ value }: { value: readonly ActivityEntry[] }) {
     const who = e.actorName ? (e.targetName && e.targetName !== e.actorName ? `Par ${e.actorName}, pour ${e.targetName}` : `Par ${e.actorName}`) : null;
     return <li key={e.id}>
       <span className={e.result === "SUCCESS" ? "ok" : "danger"} aria-hidden />
-      <div><b>{OPERATIONS[e.operation] ?? e.operation}</b><small>{RESULTS[e.result] ?? e.result}{who ? `. ${who}.` : "."}</small></div>
+      <div><b title={e.operation}>{operationLabel(e.operation) ?? "Autre action"}</b><small>{RESULT_LABELS[e.result] ?? e.result}{who ? `. ${who}.` : "."}</small></div>
       <time dateTime={e.occurredAt}>{new Date(e.occurredAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</time>
     </li>;
   })}</ul>;
