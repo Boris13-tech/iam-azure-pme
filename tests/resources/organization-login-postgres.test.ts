@@ -158,8 +158,8 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
   it("requirement 3: sign-in is rate limited per client, with the same answer for every organization", async () => {
     const address = ip();
     let allowed = 0;
-    while (await allowRequest("login-begin", `ip:${address}`) && allowed < 100) allowed++;
-    expect(allowed).toBeLessThanOrEqual(30);
+    while (await allowRequest("login-begin", `ip:${address}`) && allowed < 400) allowed++;
+    expect(allowed).toBeLessThanOrEqual(300);
     for (const organization of [a.slug, `zulu-${suffix}`]) {
       const response = await post(begin, "/api/auth/local/begin", { organization, principalName: "alice" }, address);
       expect(response.status).toBe(429);

@@ -3,14 +3,16 @@ import { rawPrisma } from "../db/raw-prisma";
 
 // Customer Self-Onboarding v1, requirement 3. Counters live in PostgreSQL (luxia_rate_limit_hit):
 // only a peppered hash of SHA-256(client key) is stored, never an address or identifier.
+// Per client network address unless stated. Sign-in limits allow a whole office behind one address
+// to sign in at the same time; nothing there can be guessed (passkeys, decoys for unknown names).
 export const RATE_LIMITS = {
-  "login-begin": { windowSeconds: 600, max: 30 },
-  "login-complete": { windowSeconds: 600, max: 30 },
-  "login-entra": { windowSeconds: 600, max: 30 },
+  "login-begin": { windowSeconds: 600, max: 300 },
+  "login-complete": { windowSeconds: 600, max: 300 },
+  "login-entra": { windowSeconds: 600, max: 300 },
   "signup": { windowSeconds: 3600, max: 10 },
-  "invitation-accept": { windowSeconds: 3600, max: 20 },
-  "invitation-create": { windowSeconds: 86400, max: 100 },
-  "dns-verify": { windowSeconds: 3600, max: 30 },
+  "invitation-accept": { windowSeconds: 3600, max: 200 },
+  "invitation-create": { windowSeconds: 86400, max: 500 }, // per administrator
+  "dns-verify": { windowSeconds: 3600, max: 30 },          // per organization
 } as const;
 export type RateLimitScope = keyof typeof RATE_LIMITS;
 
