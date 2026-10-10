@@ -55,7 +55,7 @@ describe("Identity Security Posture v1 contract", () => {
     const page = readFileSync("app/dashboard/page.tsx", "utf8");
     expect(page).not.toMatch(/\?\?\s*0|\|\|\s*0/);
     expect(page).toContain("Indisponible");
-    expect(page).toContain("Non disponible dans cette version");
+    expect(page).toContain("Pas encore disponible");
     // No computed score anywhere (wording such as "sans score" is allowed).
     for (const source of [page, readFileSync("lib/dashboard/posture.ts", "utf8"), readFileSync("lib/dashboard/posture-queries.ts", "utf8")])
       expect(source).not.toMatch(/\bscore\w*\s*[=:(]/i);

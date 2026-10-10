@@ -9,7 +9,7 @@ export default function AuditLogViewer({ logs }: { logs: any[] }) {
           <li key={log.id}>
             <div className="px-5 py-5 hover:bg-slate-50 transition-colors duration-150">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-indigo-700 truncate">
+                <p className="text-sm font-bold text-accent-strong truncate">
                   {log.action}
                 </p>
                 <div className="ml-2 flex-shrink-0 flex">
@@ -21,13 +21,13 @@ export default function AuditLogViewer({ logs }: { logs: any[] }) {
               <div className="mt-3 sm:flex sm:justify-between items-center">
                 <div className="sm:flex sm:space-x-6 text-sm text-slate-500 font-medium">
                   <p className="flex items-center">
-                    <span className="bg-slate-100 px-2 py-1 rounded text-slate-700 mr-2">Acteur:</span> {log.actor?.name || log.actorId || "Système"}
+                    <span className="bg-slate-100 px-2 py-1 rounded text-slate-700 mr-2">Auteur</span> {log.actor?.name || log.actorId || "Système"}
                   </p>
                   <p className="mt-2 flex items-center sm:mt-0">
-                    <span className="bg-slate-100 px-2 py-1 rounded text-slate-700 mr-2">Cible:</span> {log.target || "N/A"}
+                    <span className="bg-slate-100 px-2 py-1 rounded text-slate-700 mr-2">Cible</span> {log.target || "Non renseignée"}
                   </p>
                   <p className="mt-2 flex items-center sm:mt-0">
-                    <span className="bg-slate-100 px-2 py-1 rounded text-slate-700 mr-2">IP:</span> {log.ip || "0.0.0.0"}
+                    <span className="bg-slate-100 px-2 py-1 rounded text-slate-700 mr-2">Adresse IP</span> {log.ip || "Non renseignée"}
                   </p>
                 </div>
                 <div className="mt-3 flex items-center text-xs text-slate-400 font-semibold sm:mt-0">

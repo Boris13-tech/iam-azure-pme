@@ -10,6 +10,8 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        // Single LUXIA accent (see app/globals.css tokens).
+        accent: { DEFAULT: "#1f5fbf", strong: "#194e9e", soft: "#eaf1fb", line: "#c9dbf3" },
       },
     },
   },

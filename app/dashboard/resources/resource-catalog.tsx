@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 
 type Resource = { id: string; name: string; type: string; active: boolean; organizationId: string; tenantId: string };
 const base = "/api/canonical/resource-governance/resources";
-const categories = [["", "Toutes"], ["APPLICATION", "Applications"], ["API", "APIs"], ["SERVICE", "Services"], ["DEVICE", "Devices"], ["WORKLOAD", "Workloads"], ["AI_AGENT", "AI Agents"]] as const;
+const categories = [["", "Toutes"], ["APPLICATION", "Applications"], ["API", "API"], ["SERVICE", "Services"], ["DEVICE", "Appareils"], ["WORKLOAD", "Charges de travail"], ["AI_AGENT", "Agents IA"]] as const;
 
 export default function ResourceCatalog() {
   const [resources, setResources] = useState<Resource[]>([]);
@@ -53,20 +53,20 @@ export default function ResourceCatalog() {
     finally { setBusy(false); }
   }
   return <section className="space-y-6 p-6">
-    <h1 className="text-2xl font-bold">Resources</h1>
-    {canManage && <a href="/dashboard/resources/onboarding" className="inline-block rounded border px-3 py-2">Préparer le premier accès LUXIA</a>}
-    <p>Catalogue du tenant actif. Une ressource enregistrée n’est pas automatiquement protégée : son service doit appeler le moteur d’autorisation côté serveur.</p>
+    <h1 className="text-2xl font-semibold text-slate-900">Ressources</h1>
+    {canManage && <a href="/dashboard/resources/onboarding" className="inline-block rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">Attribuer un premier accès</a>}
+    <p className="text-base text-slate-600">Applications, API et services enregistrés. Une ressource n’est protégée que si son service interroge LUXIA avant d’autoriser une action.</p>
     <nav aria-label="Types de ressources" className="flex flex-wrap gap-3">{categories.map(([value, label]) => <button key={value} type="button" aria-pressed={category === value} onClick={() => setCategory(value)} className="rounded border px-3 py-2">{label}</button>)}</nav>
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {canManage && <form onSubmit={create} className="flex flex-wrap gap-3">
       <label>Nom <input required maxLength={200} value={name} onChange={event => setName(event.target.value)} className="rounded border p-2" /></label>
       <label>Type <select value={type} onChange={event => setType(event.target.value)} className="rounded border p-2">{categories.slice(1).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <button disabled={busy} className="rounded bg-blue-700 px-4 py-2 text-white">Créer une ressource</button>
+      <button disabled={busy} className="rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-strong">Créer une ressource</button>
     </form>}
-    {busy && <p role="status">Chargement…</p>}
-    <table className="w-full text-left"><thead><tr><th>Nom</th><th>Type</th><th>État</th><th>Détail</th></tr></thead><tbody>{resources.filter(row => !category || row.type === category).map(row => <tr key={row.id}><td>{row.name}</td><td>{row.type}</td><td>{row.active ? "Active" : "Désactivée"}</td><td><button disabled={busy} onClick={() => detail(row.id)}>Lire</button></td></tr>)}</tbody></table>
-    {!busy && !resources.length && !error && <p>Aucune ressource enregistrée dans ce tenant.</p>}
-    {hasNext && <button disabled={busy} onClick={() => load(resources.at(-1)?.id)}>Charger la suite</button>}
-    {selected && <article className="rounded border p-4"><h2 className="font-bold">{selected.name}</h2><p>{selected.type} · {selected.active ? "Active" : "Désactivée"}</p><p>Resource ID : {selected.id}</p><p>Organization : {selected.organizationId} · Tenant : {selected.tenantId}</p></article>}
+    {busy && <p role="status">Chargement...</p>}
+    <table className="w-full text-left"><thead><tr><th>Nom</th><th>Type</th><th>État</th><th>Détail</th></tr></thead><tbody>{resources.filter(row => !category || row.type === category).map(row => <tr key={row.id}><td>{row.name}</td><td>{categories.find(([value]) => value === row.type)?.[1] ?? row.type}</td><td>{row.active ? "Active" : "Désactivée"}</td><td><button disabled={busy} onClick={() => detail(row.id)} className="text-accent hover:underline">Voir</button></td></tr>)}</tbody></table>
+    {!busy && !resources.length && !error && <p>Aucune ressource enregistrée.</p>}
+    {hasNext && <button disabled={busy} onClick={() => load(resources.at(-1)?.id)}>Afficher plus</button>}
+    {selected && <article className="rounded border p-4"><h2 className="font-bold">{selected.name}</h2><p>{selected.type}, {selected.active ? "active" : "désactivée"}</p><p>Identifiant : {selected.id}</p><p>Organisation : {selected.organizationId}</p><p>Environnement : {selected.tenantId}</p></article>}
   </section>;
 }

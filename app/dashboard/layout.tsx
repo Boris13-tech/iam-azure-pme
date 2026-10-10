@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Bot, Building2, Fingerprint, Gauge, KeyRound, ShieldCheck, Users, Boxes } from "lucide-react";
+import { Boxes, Building2, ClipboardCheck, Fingerprint, Gauge, KeyRound, Scale, ShieldCheck, Users } from "lucide-react";
 import { getAuthContext } from "@/lib/auth/auth-context";
 import { loadPlatformContext } from "@/lib/platform/context";
 
@@ -10,11 +10,13 @@ const navigation = [
   { href: "/dashboard/users", label: "Identités", icon: Users, entitlement: "subjects.read" },
   { href: "/dashboard/settings", label: "Authentification", icon: ShieldCheck, entitlement: "providers.read" },
   { href: "/dashboard/roles", label: "Accès", icon: KeyRound, entitlement: "assignments.read" },
-  { href: "/dashboard/resources", label: "Resources", icon: Boxes, entitlement: "resources.read" },
-  { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: Boxes, entitlement: "sod.read" },
-  { href: "/dashboard/governance/access-reviews", label: "Revues d’accès", icon: ShieldCheck, entitlement: "access_reviews.read" },
-  { href: "/dashboard/audit", label: "Sécurité", icon: Fingerprint, entitlement: "audit.read" },
+  { href: "/dashboard/resources", label: "Ressources", icon: Boxes, entitlement: "resources.read" },
+  { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: Scale, entitlement: "sod.read" },
+  { href: "/dashboard/governance/access-reviews", label: "Revues d’accès", icon: ClipboardCheck, entitlement: "access_reviews.read" },
+  { href: "/dashboard/audit", label: "Journal d’audit", icon: Fingerprint, entitlement: "audit.read" },
 ];
+
+const PROVIDER_LABELS: Record<string, string> = { MICROSOFT_ENTRA: "Microsoft Entra ID", LUXIA_LOCAL: "Compte local LUXIA" };
 
 function LuxiaMark() {
   return <div className="luxia-brand-mark" aria-hidden="true"><span className="luxia-mark-left" /><span className="luxia-mark-right" /></div>;
@@ -32,24 +34,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <nav className="luxia-nav" aria-label="Navigation principale">
           {allowedNavigation.map(({ href, label, icon: Icon }) => (
             <Link key={label} href={href} className="luxia-nav-link">
-              <Icon size={19} strokeWidth={1.9} /><span>{label}</span>{label === "Identités" && <span className="luxia-nav-arrow">›</span>}
+              <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
             </Link>
           ))}
         </nav>
         <div className="luxia-sidebar-footer">
-          <div className="luxia-sidebar-caption"><Bot size={18} /><span><b>LUXIA Identity</b>Des identités de confiance pour un monde sans frontières</span></div>
-          <div className="luxia-version-row"><small>v2.4.0</small><form method="POST" action="/auth/logout"><button type="submit">Déconnexion</button></form></div>
+          <form method="POST" action="/auth/logout"><button type="submit">Se déconnecter</button></form>
         </div>
       </aside>
       <section className="luxia-workspace">
         <header className="luxia-topbar">
           <div className="luxia-contexts">
-            <button disabled aria-label="Organisation active — contexte en lecture seule"><Building2 size={16} /><span>Entreprise</span><b>{platform.organization.name}</b></button>
-            <button disabled aria-label="Tenant actif — contexte en lecture seule"><span className="luxia-live-dot" /><span>Tenant</span><b>{platform.tenant.name}</b></button>
+            <div><Building2 size={16} aria-hidden /><span>Organisation</span><b>{platform.organization.name}</b></div>
+            <div><span className="luxia-live-dot" aria-hidden /><span>Environnement</span><b>{platform.tenant.name}</b></div>
           </div>
           <div className="luxia-top-actions">
-            <b className="luxia-language">FR</b>
-            <div className="luxia-profile"><span>{platform.subject.name.split(" ").map(part => part[0]).join("").slice(0,2).toUpperCase()}</span><div><b>{platform.subject.name}</b><small>{platform.identity.providerType.replaceAll("_", " ")}</small></div></div>
+            <div className="luxia-profile"><span>{platform.subject.name.split(" ").map(part => part[0]).join("").slice(0,2).toUpperCase()}</span><div><b>{platform.subject.name}</b><small>{PROVIDER_LABELS[platform.identity.providerType] ?? platform.identity.providerType}</small></div></div>
           </div>
         </header>
         <main className="luxia-main">{children}</main>

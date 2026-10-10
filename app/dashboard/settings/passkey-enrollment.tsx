@@ -53,20 +53,20 @@ export function PasskeyEnrollment() {
       }
     }
   }
-  return <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
+  return <section className="rounded-lg border border-slate-200 bg-white p-5">
     <div className="flex items-start gap-4">
-      <div className="rounded-xl bg-emerald-100 p-3 text-emerald-700"><Fingerprint className="h-7 w-7" /></div>
+      <div className="rounded-md bg-accent-soft p-2.5 text-accent"><Fingerprint className="h-6 w-6" aria-hidden /></div>
       <div className="flex-1">
-        <h3 className="font-bold text-slate-900">LUXIA_LOCAL — Passkey biométrique</h3>
-        <p className="mt-1 text-sm text-slate-600">Ajoutez Windows Hello, Touch ID ou le verrouillage biométrique de votre appareil. La biométrie reste dans l’appareil ; LUXIA conserve uniquement la clé publique.</p>
+        <h2 className="text-base font-semibold text-slate-900">Clé d’accès</h2>
+        <p className="mt-1 text-sm text-slate-600">Utilisez Windows Hello, Touch ID ou le déverrouillage de votre appareil pour vous connecter. Vos données biométriques restent sur l’appareil.</p>
         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <input value={principalName} onChange={e => setPrincipalName(e.target.value)} className="flex-1 rounded-xl border border-emerald-200 bg-white px-4 py-3" placeholder="Identifiant local (ex. contact@entreprise.com)" />
-          <button onClick={enroll} disabled={!principalName || status === "busy"} className="rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white disabled:opacity-50">{status === "busy" ? "Enrôlement…" : "Ajouter une passkey"}</button>
+          <input value={principalName} onChange={e => setPrincipalName(e.target.value)} className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2.5 text-base" placeholder="Votre identifiant, par exemple prenom.nom@entreprise.com" />
+          <button onClick={enroll} disabled={!principalName || status === "busy"} className="rounded-md bg-accent px-4 py-2.5 font-medium text-white hover:bg-accent-strong disabled:opacity-50">{status === "busy" ? "Enregistrement..." : "Ajouter une clé d’accès"}</button>
         </div>
-        {status === "done" && <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Passkey activée.</p>}
-        {status === "unsupported" && <p className="mt-3 text-sm font-semibold text-amber-800">Ce navigateur ne permet pas Windows Hello/WebAuthn. Ouvrez LUXIA dans Microsoft Edge ou Google Chrome sur cet appareil.</p>}
-        {status === "cancelled" && <p className="mt-3 text-sm font-semibold text-amber-800">La confirmation Windows Hello a été annulée ou a expiré. Vous pouvez relancer l’enrôlement.</p>}
-        {status.startsWith("error:") && <p className="mt-3 text-sm font-semibold text-red-700">L’enrôlement a échoué sans modifier vos accès existants. Code sûr : <span className="font-mono">{status.slice(6)}</span></p>}
+        {status === "done" && <p className="mt-3 flex items-center gap-2 text-sm font-medium text-green-700"><CheckCircle2 className="h-4 w-4" aria-hidden /> Clé d’accès enregistrée.</p>}
+        {status === "unsupported" && <p className="mt-3 text-sm font-semibold text-amber-800">Ce navigateur ne prend pas en charge les clés d’accès. Utilisez Microsoft Edge ou Google Chrome.</p>}
+        {status === "cancelled" && <p className="mt-3 text-sm font-semibold text-amber-800">La confirmation a été annulée ou a expiré. Vous pouvez réessayer.</p>}
+        {status.startsWith("error:") && <p className="mt-3 text-sm font-semibold text-red-700">L’enregistrement a échoué. Vos accès n’ont pas été modifiés. Code : <span className="font-mono">{status.slice(6)}</span></p>}
       </div>
     </div>
   </section>;

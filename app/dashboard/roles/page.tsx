@@ -51,17 +51,17 @@ export default function RolesPage() {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300">
+    <div className="space-y-8">
       <div className="flex justify-between items-center pb-4 border-b border-gray-200">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Rôles et Permissions (RBAC)</h2>
-          <p className="text-sm text-slate-500 mt-1 font-medium">Créez et assignez des permissions granulaires aux groupes.</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Rôles (ancien modèle)</h1>
+          <p className="mt-1 text-base text-slate-600">Rôles hérités de la première version de LUXIA.</p>
         </div>
         <button 
           onClick={() => { setEditingRole(null); setIsFormOpen(true); }}
-          className="bg-white border-2 border-indigo-600 text-indigo-700 hover:bg-indigo-50 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
+          className="bg-white border-2 border-accent text-accent-strong hover:bg-accent-soft px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
         >
-          + Nouveau Rôle
+          Nouveau rôle
         </button>
       </div>
 
