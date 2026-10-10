@@ -111,7 +111,7 @@ async function seed(tx: Prisma.TransactionClient, now: number) {
   await audit("SESSION.REVOKE", "SUCCESS", now - 2 * DAY, ids.L);
   await audit("SUBJECT.READ", "SUCCESS", now - 30 * 60_000);
   await audit("AUTHORIZATION.DENIED", "DENIED", now - 2 * HOUR);
-  await audit("ASSIGNMENT.DENIED.SOD", "DENIED", now - 2 * DAY);
+  await audit("ASSIGNMENT.DENIED.SOD", "DENIED", now - 2 * DAY - HOUR);
   await audit("RESOURCE.CATALOG.UPDATE", "FAILURE", now - 3 * DAY);
   await audit("ASSIGNMENT.DENIED.SOD", "DENIED", now - 40 * DAY);
 }

@@ -181,7 +181,7 @@ export const POSTURE_QUERIES: PostureQueries = {
 
   // ── Recent Security Activity ──────────────────────────────────────────────
   "activity.recentChangesAndDenials": async q => Object.freeze((await q.tx.canonicalAdminAuditEvent.findMany({
-    where: { ...q.scope, NOT: { operation: { endsWith: ".READ" } } }, orderBy: { occurredAt: "desc" }, take: 20,
+    where: { ...q.scope, NOT: { operation: { endsWith: ".READ" } } }, orderBy: [{ occurredAt: "desc" }, { id: "desc" }], take: 20,
     select: { id: true, operation: true, result: true, occurredAt: true, actor: { select: { name: true } }, target: { select: { name: true } } },
   })).map(e => Object.freeze({ id: e.id, operation: e.operation, result: e.result, occurredAt: e.occurredAt.toISOString(),
     actorName: e.actor?.name ?? null, targetName: e.target?.name ?? null }))),
