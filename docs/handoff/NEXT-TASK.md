@@ -4,35 +4,32 @@ Read `docs/handoff/CURRENT-STATE.md` first.
 
 ## Completed (2026-10-10)
 
-- RESOURCE ACCESS ONBOARDING V1 — PRODUCTION END-TO-END CERTIFICATION: PASS.
-- DASHBOARD V1 — PRODUCTION CERTIFICATION: PASS (Production `dpl_48xvYWVVJUiZg1k9A53tyD7yf7tu` @ `5c71df8`).
+- Resource Access Onboarding v1: Production E2E PASS.
+- Dashboard v1: Production certification PASS.
+- Security Journal v1: Production certification PASS (`dpl_EDZXLTXRrHDbBbVGqcEhCTF3SnpW` @ `2d7ec62`).
 
-## Next objective (operator roadmap, Phase 3: Customer Self-Onboarding)
+## Next objective (operator roadmap: Customer Self-Onboarding)
 
-Write a **scope proposal**, docs only, for customer self-onboarding:
+Write a **scope proposal**, docs only:
 
 > Create Organization → Create Tenant → Verify Domain → Establish First Admin → Configure Auth → Connect Provider → Invite Team → Register Resources → Define Entitlements → Assign Access → Configure Governance
 
-The goal is no manual SQL, no Neon access and no operator script for a normal onboarding. The proposal must cover the threat model for first-admin establishment (domain proof, invitation, optional approval) and must not weaken RLS, default deny, or the "no implicit first owner" invariant.
-
-Optional small follow-ups (separate PRs, each needs approval): the dashboard minor items listed in `docs/certification/DASHBOARD-V1-PRODUCTION-2026-10-10.md`.
+The goal is no manual SQL, no Neon access and no operator script for a normal onboarding. The proposal must include:
+- the first-admin threat model (domain proof, invitation, optional approval);
+- reuse of the Security Journal for every onboarding step;
+- no weakening of RLS, default deny or "no implicit first owner".
 
 ## Allowed
 
-- Review, documentation, non-mutating verification, scope proposals.
+Review, documentation, non-mutating verification, scope proposals.
 
 ## Forbidden
 
 - Implementation before the scope is approved.
-- Any Production grant, Assignment creation or business-data mutation.
-- Merging, deploying, or changing env vars/migrations without explicit human approval.
+- Production grants or business-data mutation.
+- Merge, deploy, env or migration changes without explicit human approval.
 - Any change to PR12.
-- Replaying any manifest. `e2db9550` is completed; `7d1d9a7d`, `2f110998` and `95e9b80d` are abandoned.
-
-## Success criteria
-
-The scope proposal is approved by the operator.
 
 ## Stop condition
 
-STOP after the proposal is written, and wait for approval before any code.
+STOP after the proposal, and wait for approval before any code.
