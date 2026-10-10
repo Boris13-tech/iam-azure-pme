@@ -1,5 +1,7 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-10 15:41Z — RESOURCE ACCESS ONBOARDING V1 — PRODUCTION END-TO-END CERTIFICATION: PASS.** See `docs/certification/RESOURCE-ACCESS-PRODUCTION-E2E-2026-10-10.md`. Sections 4–11 below are updated accordingly; the post-ceremony state supersedes the pre-ceremony preflight figures.
+
 Snapshot: 2026-10-10 ~11:30Z, written by Claude Code after the PR #16 merge, the Production deployment of the merge SHA, and the read-only Production preflight.
 The repository is the source of truth. No agent may rely on another agent's memory.
 
@@ -80,9 +82,19 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 
 `PRODUCTION_REGISTRATIONS` (runner registry) is empty. No Production first-owner grant has ever been executed (VERIFIED FROM PRIOR CERTIFICATION EVIDENCE: `PR15-MANIFEST-EXPIRY-2026-10-09.md`, `PR14-BOOTSTRAP-ABANDONED-2026-10-08.md`; consistent with the Assignment digest above).
 
+## 4b. Production state after the ceremony (read-only, 2026-10-10T15:42:51Z) — VERIFIED 2026-10-10
+
+- Target entitlement: exactly **one** Assignment `abea167e-16dd-4fdd-87a2-30ae0f8c1041`, status **REVOKED**, DIRECT, sourceRef `bootstrap:d10049e4-0f2a-4d89-ba7c-0b6dee7998f2`. **0 ACTIVE.**
+- Other Assignments: 21, digest `83e7540cab85667c96e63da4ba5f2183`, unchanged.
+- Protected capability: **DENY**.
+- Consequence for tooling: the preflight check `bootstrapAssignmentCountZero` counts all statuses, so it now reports `false` (1 REVOKED row). This is expected. Use "0 ACTIVE on the target entitlement" as the invariant from now on.
+- No first-owner grant is active. A future permanent owner requires a new, separately approved design/manifest. The runner refuses a second initial bootstrap on this entitlement (`INITIAL_BOOTSTRAP_COLLISION`).
+
 ## 5. Abandoned artifacts (never reuse, extend or re-timestamp)
 
 - Manifest binding `95e9b80de3e28890faf01eb41fb70002d6ef1efb6986815da8b8868799376232`, with assignment `d19ec5fa-…` and operation `6bb7d556-…`. These are hard-coded as forbidden in the runner.
+- Manifest binding `7d1d9a7d59455e2cf9a0506a412daca598078a01a33cc7ca400c746355707451`, with assignment `001b95ec-5183-4280-92a3-dfa19c999272` and operation `f802788d-2123-4a5f-8ac8-71c821f7f73a`. It expired unused at 2026-10-10T12:49Z. There was no grant, as proven by the preflight at 14:34:01Z.
+- Manifest binding `e2db955070cc09ee6b69fe10774ce62b78839f90dad9628f6794946ee339ee2b`: **completed** (certification PASS). It must never be replayed. Its receipt is REVOKED, and the runner returns DENIED with no recreation.
 - Manifest binding `2f11099801881d9109a8c5c8b313643a4762b93d8169f675307c24ac48041a89`, with assignment `f5faba6f-7b29-4704-94b4-608001827597` and operation `cd2ac2e0-a103-4ad1-8125-5f59957afbfb`. It expired 2026-10-09T12:18Z and its detached approval is void.
 
 ## 6. Completed certifications
@@ -98,11 +110,11 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 | PR16 merge-SHA CI + exact-SHA Production deployment | VERIFIED 2026-10-10 |
 | Production unauthenticated HTTP smoke on `8acea18`: `/login` 200; `/dashboard` 307 → `/login`; `/api/resources/protected-resource-demo` 401 `{"error":"Unauthorized"}` | VERIFIED 2026-10-10 |
 | Production read-only DB preflight (section 4) | VERIFIED 2026-10-10 |
+| **Resource Access Onboarding v1 Production end-to-end ceremony** (manifest `e2db9550…`): DENY → one bounded DIRECT grant → ALLOW → idempotent replay → modified replay refused → revoke → DENY → no recreation; no parasitic mutation | VERIFIED 2026-10-10 (`docs/certification/RESOURCE-ACCESS-PRODUCTION-E2E-2026-10-10.md`) |
 | Production authenticated smoke on `8acea18`: (1) Entra login reaches the dashboard; (2) `/dashboard/users`, `/dashboard/resources`, `/dashboard/governance/sod`, `/dashboard/governance/access-reviews` and `/dashboard/resources/onboarding` render; (3) the authenticated protected route returns 403 `RESOURCE_ACCESS_DENIED` with an `evidenceId`; (4) sign-out, then LUXIA_LOCAL passkey login reaches the dashboard. **All 4 OK.** | OPERATOR-REPORTED 2026-10-10 |
 
 ## 7. Pending certifications
 
-- **Resource Access Onboarding v1 Production end-to-end**: NOT EXECUTED. No Production grant has ever run.
 - PR12 live provider certification: Entra BLOCKED (dedicated credentials/consent missing), Google BLOCKED (same), OIDC BLOCKED (no approved issuer).
 
 ## 8. Security invariants (non-negotiable)
@@ -134,7 +146,7 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 
 ## 11. Blockers / next gates
 
-1. Operator authenticated browser smoke: DONE (OPERATOR-REPORTED 2026-10-10, all 4 steps OK).
-2. New manifest: requires explicit human approval to generate. Generate it only at the start of a ceremony session (validity window ≤ 1 h), with new assignmentId/operationId/validFrom, validUntil ≤ 1 h and a new binding, revalidated against section 4. Then **STOP for explicit human approval**.
-3. Production ceremony: only after explicit approval of that new manifest.
+1. Resource Access tranche: **CLOSED** (Production E2E PASS on 2026-10-10).
+2. Repo hygiene: rename/remove the tracked `" README.md"` (Windows checkout). Separate PR, approved in principle by the operator for after the ceremony.
+3. Next product phase (order set by the operator): Enterprise Identity Security Dashboard → customer self-onboarding → admin recovery/break-glass → observability → restore drill → hardening/pentest → docs → pricing/licensing/billing → GDPR/legal → support/SLA → private beta. Each slice needs an explicitly approved scope.
 4. PR12: live provider credentials/consent/issuer, and a rebase.
