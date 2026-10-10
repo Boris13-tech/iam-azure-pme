@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Raw local certification test reports (written by scripts/certification/run-resources-diagnostic.ps1).
+# Never commit them; publish only reviewed non-secret summaries.
+docs/certification/operator-*-results.json

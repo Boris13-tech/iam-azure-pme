@@ -23,7 +23,7 @@ Full-suite attempt completed: 68 files passed, 2 suite setup failures, 1 gated f
 
 The first targeted rerun inadvertently omitted the existing harness's 120-second test/hook options and therefore failed against Vitest's 5-second/10-second defaults. Its report is preserved separately, not overwritten. A corrected rerun uses the pre-existing 120-second settings, with no global timeout increase. Do not infer PASS until its actual assertions and SQL cleanup pass.
 
-Final SQL cleanup and GitHub CI remain PENDING. No Production end-to-end PASS is claimed.
+Final SQL cleanup and GitHub CI remain PENDING. No Production end-to-end PASS is claimed. (Historical at the time of writing; both are resolved below.)
 
 The corrected targeted rerun completed with SoD fully passing and 18/19 tests passing overall. The remaining Access Review case failed with Prisma P1017 (server closed the connection). Windows System events record Modern Standby entry at local 20:36:16 and exit at 20:36:58 (UTC 17:36:16–17:36:58), overlapping the failed 44.746-second case. That standalone rerun did not use the existing thread-scoped anti-standby harness. Do not change business code or silently retry mutations to hide this environmental interruption.
 
@@ -37,8 +37,12 @@ Local machine-readable report SHA-256: e4ee2bb6c9963d74d78d17cd9bb68f40897295299
 
 Read-only cleanup at 2026-10-09T17:55:59.403Z passed: no advisory locks, blocked backends or open transactions; all inspected database deadlock counters were zero. Two idle app_user pool backends are expected server-pool reuse, not leaked transactions. app_user is NOSUPERUSER/NOBYPASSRLS and owns no public relations.
 
-TypeScript and the 14 Identity v1 operational gates passed. The final build repeat completed with exit 0 after final fixture guard changes. GitHub CI on the operator commit remains pending until observed; the Production ceremony remains unexecuted.
+TypeScript and the 14 Identity v1 operational gates passed. The final build repeat completed with exit 0 after final fixture guard changes. GitHub CI on the operator commit: see "GitHub CI" below. The Production ceremony remains unexecuted.
 
 ## Security boundary
 
 Stdin carries only a bounded probe/status/evidence response. Detached human approval remains independently registered and digest-bound. Fresh exact tenant/actor/resource/action and approved Assignment evidence are required from the canonical database; claimed HTTP status alone cannot pass. No cookie export, new authenticated Session, browser approval API, admin bypass or business authorization change is introduced.
+
+## GitHub CI
+
+Observed 2026-10-10: GitHub CI `test-and-build` PASS on operator commit f22d8563e8cb7c5bc0bcf5dda7cda374e17fa76c (run https://github.com/Boris13-tech/iam-azure-pme/actions/runs/37969954967); Vercel Preview PASS. The Production activation/identity jobs were skipped as designed for pull requests. This is CI evidence only, not Production certification. CI on later commits of this branch is recorded on the pull request.
