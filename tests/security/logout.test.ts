@@ -86,6 +86,11 @@ describe("Logout Security", () => {
 
     const session = await SessionStore.getSession(rawToken);
     expect(session).toBeNull();
+
+    // Security Journal v1 (W4): exactly one sign-out event, actor = target = the person.
+    const events = await adminPrisma.canonicalAdminAuditEvent.findMany({ where: { organizationId: orgId, operation: "SESSION.SIGN_OUT" } });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorSubjectId: subjectId, targetSubjectId: subjectId, result: "SUCCESS" });
   });
 
   it("should succeed and clear cookie even if token is fake (idempotent)", async () => {
