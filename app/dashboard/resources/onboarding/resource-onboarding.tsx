@@ -43,34 +43,34 @@ export default function Onboarding() {
     try {
       const response = await fetch("/api/resources/protected-resource-demo", { cache: "no-store" });
       setEvidence({ httpStatus: response.status, ...(await response.json()) });
-    } catch { setError("Vérification serveur indisponible."); }
+    } catch { setError("La vérification n’a pas pu être effectuée."); }
     finally { setBusy(false); }
   }
   return <section className="space-y-4 p-6">
-    <h1 className="text-2xl font-bold">Premier accès à une ressource LUXIA</h1>
-    <p>Cette tranche protège une route interne dédiée, pas le dashboard. Configurer ne donne aucun accès.</p>
+    <h1 className="text-2xl font-semibold text-slate-900">Premier accès à une ressource</h1>
+    <p className="text-base text-slate-600">Préparez le premier accès à la ressource interne de test. La configuration seule ne donne aucun accès.</p>
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {configuration && <>
       <h2>{configuration.capability.name}</h2>
       <p>Route : GET {configuration.capability.route}. Action : {configuration.capability.action}. Périmètre : ressource unique.</p>
-      <p>Binding canonique : {configuration.configured ? "confirmé par le serveur" : "non configuré"}.</p>
+      <p>Configuration : {configuration.configured ? "confirmée" : "non configurée"}.</p>
       <p>Délégation : {configuration.delegation}. Le premier propriétaire doit être approuvé par un opérateur.</p>
-      <label className="block">Subject existant <select value={target} onChange={event => { setTarget(event.target.value); setPlan(null); }} className="border p-2">
-        <option value="">Sélectionner une identité réelle</option>
+      <label className="block">Identité <select value={target} onChange={event => { setTarget(event.target.value); setPlan(null); }} className="border p-2">
+        <option value="">Choisir une identité</option>
         {configuration.subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name ?? subject.id} ({subject.type})</option>)}
       </select></label>
       <label className="block">Durée de validité en minutes (de 1 à 60) <input type="number" min={1} max={60} value={minutes}
         onChange={event => { setMinutes(Number(event.target.value)); setPlan(null); }} className="border p-2" /></label>
-      <button disabled={busy || !target || minutes < 1 || minutes > 60} onClick={() => run("plan")} className="rounded border p-2">Préparer le plan sans grant</button>
+      <button disabled={busy || !target || minutes < 1 || minutes > 60} onClick={() => run("plan")} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">Préparer, sans accorder d’accès</button>
     </>}
     {plan && <article className="space-y-2 rounded border p-4">
       <h2>Aperçu</h2><p>Identité : {plan.plan.targetSubjectId}. Expiration proposée : {plan.plan.validUntil}.</p>
-      <p>1 Resource API, 1 scope RESOURCE, 1 Entitlement resource.read. Assignments créés : 0.</p>
+      <p>Une ressource API, un périmètre, un droit de lecture. Aucun accès n’est accordé à cette étape.</p>
       <p>Ressource : {configuration?.capability.resourceId}. Périmètre : {configuration?.capability.scopeId}.</p>
       <p>Identifiant d’opération : {plan.operationId}. Valable jusqu’au {plan.plan.expiresAt}.</p>
-      <button disabled={busy} onClick={() => run("configure")} className="rounded border p-2">Confirmer uniquement la configuration</button>
+      <button disabled={busy} onClick={() => run("configure")} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">Confirmer la configuration</button>
     </article>}
-    <button disabled={busy} onClick={exercise} className="rounded border p-2">Vérifier l’accès à la route serveur</button>
+    <button disabled={busy} onClick={exercise} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">Tester l’accès</button>
     {evidence !== null && <pre className="overflow-x-auto rounded border p-4">{JSON.stringify(evidence, null, 2)}</pre>}
   </section>;
 }

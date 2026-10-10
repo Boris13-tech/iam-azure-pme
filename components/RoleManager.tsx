@@ -32,7 +32,7 @@ export default function RoleManager({ roles, onEdit, onDelete }: RoleManagerProp
               </span>
             </div>
             <div className="mt-6 border-t border-gray-100 pt-4">
-              <h4 className="text-sm font-semibold text-slate-700">Permissions Associées</h4>
+              <h4 className="text-sm font-semibold text-slate-700">Permissions associées</h4>
               <ul className="mt-3 space-y-2">
                 {role.permissions?.slice(0, 3).map((p: any) => (
                   <li key={p.permission.id} className="text-xs text-slate-500 bg-slate-50 rounded px-2 py-1">

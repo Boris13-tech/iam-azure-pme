@@ -49,7 +49,7 @@ export default function RoleForm({ initialData, onSubmit, onCancel }: RoleFormPr
             type="text" 
             required
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-accent focus:border-accent transition-all outline-none"
-            placeholder="Ex: Superviseur"
+            placeholder="Par exemple : Superviseur"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -59,7 +59,7 @@ export default function RoleForm({ initialData, onSubmit, onCancel }: RoleFormPr
           <label className="block text-sm font-semibold text-slate-700 mb-2">Description</label>
           <textarea 
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-accent focus:border-accent transition-all outline-none"
-            placeholder="Description des accès..."
+            placeholder="Description"
             value={description}
             rows={3}
             onChange={(e) => setDescription(e.target.value)}
