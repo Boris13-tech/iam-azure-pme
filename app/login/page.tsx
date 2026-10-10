@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'next/link';
 import { ShieldCheck, AlertCircle } from 'lucide-react';
 import { OrganizationLogin } from './organization-login';
 
@@ -39,6 +40,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         )}
 
         <OrganizationLogin initialOrganization={typeof sp?.org === 'string' ? sp.org : ''} />
+        <p className="mt-6 text-center text-sm text-slate-600">Vous avez un code d’accès bêta ? <Link href="/signup" className="font-medium text-[#1f5fbf] hover:underline">Créer une organisation</Link></p>
       </div>
     </div>
   );

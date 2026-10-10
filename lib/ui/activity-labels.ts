@@ -20,6 +20,7 @@ export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze(
   "ACCESS_REVIEW.CAMPAIGN.CREATE": "Campagne de revue créée", "ACCESS_REVIEW.CAMPAIGN.COMPLETE": "Campagne de revue clôturée",
   "ACCESS_REVIEW.ITEM.KEEP": "Accès conservé après revue", "ACCESS_REVIEW.ITEM.REVOKE": "Accès retiré après revue",
   "SESSION.SIGN_OUT": "Déconnexion", "LOCAL_AUTHENTICATOR.ENROLL": "Clé d’accès ajoutée",
+  "ORGANIZATION.CREATE": "Organisation créée",
   "RESOURCE.AUTHORIZATION.CHECK": "Autorisation vérifiée", "RESOURCE.CAPABILITY.READ": "Accès à la ressource de test vérifié",
   // Consultations (read events)
   "AUDIT.READ": "Journal d’audit consulté", "DASHBOARD.POSTURE.READ": "Vue d’ensemble consultée", "SUBJECT.READ": "Identités consultées",
