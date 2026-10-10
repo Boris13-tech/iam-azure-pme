@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { Activity, AlertTriangle, Boxes, KeyRound, Scale, ShieldCheck, Users } from "lucide-react";
-import type { ActivityEntry, Breakdown, PostureResponse, SectionId, Widget, WidgetId } from "../../lib/dashboard/posture-contract";
+import { breakdownTotal, type ActivityEntry, type Breakdown, type PostureResponse, type SectionId, type Widget, type WidgetId } from "../../lib/dashboard/posture-contract";
 
 // Identity Security Posture — real canonical data only. No score, no estimate.
 // 0 = real zero · Indisponible = unavailable · Non disponible = not implemented · masqué = restricted.
@@ -89,11 +89,12 @@ const REASONS: Record<string, string> = {
 
 const fr = (n: number) => n.toLocaleString("fr-FR");
 
-function BreakdownView({ value }: { value: Breakdown }) {
+function BreakdownView({ id, value }: { id: WidgetId; value: Breakdown }) {
   const entries = Object.entries(value);
   const nonZero = entries.filter(([, n]) => n > 0);
-  const total = entries.reduce((sum, [, n]) => sum + n, 0);
-  return <div className="posture-breakdown"><strong>{fr(total)}</strong>
+  // Overlapping categories (subset, or one holder per right) are never summed.
+  const total = breakdownTotal(id, value);
+  return <div className="posture-breakdown">{total === null ? <small>Catégories non cumulables</small> : <strong>{fr(total)}</strong>}
     {nonZero.length > 0 && <ul>{nonZero.map(([k, n]) => <li key={k}><span>{k.replaceAll("_", " ").replaceAll(".", " · ")}</span><b>{fr(n)}</b></li>)}</ul>}
     {nonZero.length < entries.length && <small>{nonZero.length ? "Autres catégories : 0" : "Toutes les catégories : 0"}</small>}
   </div>;
@@ -112,7 +113,7 @@ function WidgetCard({ widget, attention }: { widget: Exclude<Widget, { state: "r
   const body = widget.state === "ok"
     ? typeof widget.value === "number" ? <strong className="posture-number">{fr(widget.value)}</strong>
       : Array.isArray(widget.value) ? <ActivityView value={widget.value as readonly ActivityEntry[]} />
-      : <BreakdownView value={widget.value as Breakdown} />
+      : <BreakdownView id={widget.id} value={widget.value as Breakdown} />
     : widget.state === "unavailable" ? <p className="posture-state unavailable"><b>Indisponible</b><small>{REASONS[widget.reason] ?? widget.reason}</small></p>
     : <p className="posture-state not-implemented"><b>Non disponible dans cette version</b><small>{REASONS[widget.reason] ?? widget.reason}</small></p>;
   const flagged = attention && widget.state === "ok" && typeof widget.value === "number" && widget.value > 0;

@@ -30,7 +30,9 @@ export type PostureResponse = Readonly<{
   attention: readonly Readonly<{ id: WidgetId; count: number; section: SectionId }>[];
 }>;
 
-type Definition = Readonly<{ section: SectionId; permissions: readonly string[]; attention?: true;
+// "overlapping": categories are not mutually exclusive (a subset, or one holder per key), so they
+// must never be summed into a total.
+type Definition = Readonly<{ section: SectionId; permissions: readonly string[]; attention?: true; breakdown?: "overlapping";
   kind: "query" | "unavailable" | "not_implemented"; reason?: string }>;
 
 /** Single source of truth: section, required native entitlements (ALL required), attention flag. */
@@ -52,7 +54,7 @@ export const WIDGETS = {
   "auth.compromisedLocalAuthenticators": { section: "sessions", permissions: ["identity_accounts.read"], attention: true, kind: "query" },
   "auth.lockedLocalIdentities": { section: "sessions", permissions: ["identity_accounts.read"], attention: true, kind: "query" },
   "auth.pendingCredentialReenrollments": { section: "sessions", permissions: ["identity_accounts.read"], attention: true, kind: "query" },
-  "auth.localSignInEvidence7d": { section: "sessions", permissions: ["audit.read"], kind: "query" },
+  "auth.localSignInEvidence7d": { section: "sessions", permissions: ["audit.read"], kind: "query", breakdown: "overlapping" },
   "auth.entraSignInEvidence": { section: "sessions", permissions: ["audit.read"], kind: "unavailable", reason: "ENTRA_EVIDENCE_NOT_RECORDED" },
   "auth.entraMfaConditionalAccess": { section: "sessions", permissions: ["identity_accounts.read"], kind: "not_implemented", reason: "REQUIRES_PROVIDER_GRAPH_INTEGRATION" },
 
@@ -60,7 +62,7 @@ export const WIDGETS = {
   "access.effectiveHolders": { section: "access", permissions: ["assignments.read"], kind: "query" },
   "access.effectiveBySource": { section: "access", permissions: ["assignments.read"], kind: "query" },
   "access.timeBoundVsPermanent": { section: "access", permissions: ["assignments.read"], kind: "query" },
-  "access.administrativeEntitlementHolders": { section: "access", permissions: ["assignments.read"], kind: "query" },
+  "access.administrativeEntitlementHolders": { section: "access", permissions: ["assignments.read"], kind: "query", breakdown: "overlapping" },
   "access.nonActiveSubjectsWithEffectiveAccess": { section: "access", permissions: ["assignments.read", "subjects.read"], attention: true, kind: "query" },
   "access.expiringWithin7d": { section: "access", permissions: ["assignments.read"], attention: true, kind: "query" },
   "access.activeRowsPastValidity": { section: "access", permissions: ["assignments.read"], attention: true, kind: "query" },
@@ -99,4 +101,10 @@ export const isPermitted = (id: WidgetId, held: ReadonlySet<string>) =>
 export function attentionCount(widget: Widget): number | null {
   if (widget.state !== "ok" || !(WIDGETS[widget.id] as Definition).attention) return null;
   return typeof widget.value === "number" ? widget.value : null;
+}
+
+/** Sum of a breakdown, or null when its categories overlap (summing them would invent a number). */
+export function breakdownTotal(id: WidgetId, value: Readonly<Record<string, number>>): number | null {
+  if ((WIDGETS[id] as Definition).breakdown === "overlapping") return null;
+  return Object.values(value).reduce((sum, n) => sum + n, 0);
 }
