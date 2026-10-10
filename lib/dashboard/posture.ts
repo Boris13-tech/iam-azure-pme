@@ -12,7 +12,7 @@ import {
   SECTION_ORDER, WIDGETS, WIDGET_IDS, attentionCount, isPermitted,
   type PostureResponse, type SectionId, type Widget, type WidgetId,
 } from "./posture-contract";
-import { POSTURE_QUERIES, type PostureQueries } from "./posture-queries";
+import { POSTURE_QUERIES, Since, Unavailable, type PostureQueries } from "./posture-queries";
 
 export const POSTURE_AUDIT_OPERATION = "DASHBOARD.POSTURE.READ";
 const STATEMENT_TIMEOUT_MS = 5_000;
@@ -66,12 +66,13 @@ export async function loadIdentitySecurityPosture(auth: AuthContext, options: Po
       const def = WIDGETS[id] as (typeof WIDGETS)[WidgetId] & { reason?: string };
       if (!isPermitted(id, held)) { out.push({ id, state: "restricted" }); continue; }
       if (def.kind === "not_implemented") { out.push({ id, state: "not_implemented", reason: def.reason! }); continue; }
-      if (def.kind === "unavailable") { out.push({ id, state: "unavailable", reason: "ENTRA_EVIDENCE_NOT_RECORDED" }); continue; }
       await tx.$executeRawUnsafe("SAVEPOINT posture_widget");
       try {
         const value = await queries[id as keyof PostureQueries]({ tx, scope, viewerSubjectId: auth.subjectId, now });
         await tx.$executeRawUnsafe("RELEASE SAVEPOINT posture_widget");
-        out.push({ id, state: "ok", value });
+        if (value instanceof Unavailable) out.push({ id, state: "unavailable", reason: value.reason });
+        else if (value instanceof Since) out.push({ id, state: "ok", value: value.value, since: value.since });
+        else out.push({ id, state: "ok", value });
       } catch {
         // No raw diagnostics: the error never reaches the response or logs.
         await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT posture_widget");

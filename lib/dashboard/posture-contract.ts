@@ -10,7 +10,8 @@ export type ActivityEntry = Readonly<{ id: string; operation: string; result: st
 export type WidgetValue = number | Breakdown | readonly ActivityEntry[];
 
 export type Widget =
-  | Readonly<{ id: WidgetId; state: "ok"; value: WidgetValue }>
+  // `since`: the value only covers data recorded from this date (e.g. Entra sign-ins, Security Journal v1).
+  | Readonly<{ id: WidgetId; state: "ok"; value: WidgetValue; since?: string }>
   | Readonly<{ id: WidgetId; state: "unavailable"; reason: UnavailableReason }>
   | Readonly<{ id: WidgetId; state: "not_implemented"; reason: string }>
   // Restricted widgets carry no value, reason or count derived from data.
@@ -55,7 +56,9 @@ export const WIDGETS = {
   "auth.lockedLocalIdentities": { section: "sessions", permissions: ["identity_accounts.read"], attention: true, kind: "query" },
   "auth.pendingCredentialReenrollments": { section: "sessions", permissions: ["identity_accounts.read"], attention: true, kind: "query" },
   "auth.localSignInEvidence7d": { section: "sessions", permissions: ["audit.read"], kind: "query", breakdown: "overlapping" },
-  "auth.entraSignInEvidence": { section: "sessions", permissions: ["audit.read"], kind: "unavailable", reason: "ENTRA_EVIDENCE_NOT_RECORDED" },
+  "auth.entraSignInEvidence": { section: "sessions", permissions: ["audit.read"], kind: "query" },
+  "auth.signIns24hByMethod": { section: "sessions", permissions: ["audit.read"], kind: "query" },
+  "auth.rejectedSignIns24h": { section: "sessions", permissions: ["audit.read"], kind: "query" },
   "auth.entraMfaConditionalAccess": { section: "sessions", permissions: ["identity_accounts.read"], kind: "not_implemented", reason: "REQUIRES_PROVIDER_GRAPH_INTEGRATION" },
 
   "access.effectiveAssignments": { section: "access", permissions: ["assignments.read"], kind: "query" },

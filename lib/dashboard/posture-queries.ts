@@ -5,7 +5,7 @@ import {
   Prisma, ProviderType, ResourceScopeKind, ResourceType, SoDPolicyStatus, SubjectLifecycleState, SubjectType,
 } from "@prisma/client";
 import { ENTITLEMENT_CATALOG_V1 } from "../auth/entitlements-catalog";
-import type { Breakdown, WidgetId, WidgetValue } from "./posture-contract";
+import type { Breakdown, UnavailableReason, WidgetId, WidgetValue } from "./posture-contract";
 import { WIDGETS } from "./posture-contract";
 
 export type QueryContext = Readonly<{
@@ -15,7 +15,11 @@ export type QueryContext = Readonly<{
   now: Date;
 }>;
 type QueryWidgetId = { [K in WidgetId]: (typeof WIDGETS)[K]["kind"] extends "query" ? K : never }[WidgetId];
-export type PostureQueries = Record<QueryWidgetId, (q: QueryContext) => Promise<WidgetValue>>;
+/** A query may report that its source has no data yet (never coerced to 0). */
+export class Unavailable { constructor(public readonly reason: UnavailableReason) {} }
+/** A value that only covers data recorded from `since`. */
+export class Since { constructor(public readonly value: WidgetValue, public readonly since: string) {} }
+export type PostureQueries = Record<QueryWidgetId, (q: QueryContext) => Promise<WidgetValue | Unavailable | Since>>;
 
 const DAY = 86_400_000;
 const since = (now: Date, days: number) => new Date(now.getTime() - days * DAY);
@@ -103,6 +107,23 @@ export const POSTURE_QUERIES: PostureQueries = {
     ]);
     return Object.freeze({ VERIFIED: verified, REJECTED: rejected, VERIFIED_PHISHING_RESISTANT: phishingResistant });
   },
+  // Entra sign-ins are recorded from Security Journal v1 onward: before the first record the
+  // widget stays unavailable, after it the value is labelled with its start date. No backfill.
+  "auth.entraSignInEvidence": async q => {
+    const entra: Prisma.AuthenticationEvidenceWhereInput = { ...q.scope, method: "FEDERATED_OIDC", source: "EXTERNAL_PROVIDER" };
+    const first = await q.tx.authenticationEvidence.findFirst({ where: entra, orderBy: { occurredAt: "asc" }, select: { occurredAt: true } });
+    if (!first) return new Unavailable("ENTRA_EVIDENCE_NOT_RECORDED");
+    const window: Prisma.AuthenticationEvidenceWhereInput = { ...entra, occurredAt: { gte: since(q.now, 7) } };
+    const [verified, rejected] = await Promise.all([
+      q.tx.authenticationEvidence.count({ where: { ...window, outcome: "VERIFIED" } }),
+      q.tx.authenticationEvidence.count({ where: { ...window, outcome: "REJECTED" } }),
+    ]);
+    return new Since(Object.freeze({ VERIFIED: verified, REJECTED: rejected }), first.occurredAt.toISOString());
+  },
+  "auth.signIns24hByMethod": async q => buckets(["FEDERATED_OIDC", "PASSKEY", "SECURITY_KEY", "TOTP"],
+    (await q.tx.authenticationEvidence.groupBy({ by: ["method"], where: { ...q.scope, outcome: "VERIFIED", occurredAt: { gte: since(q.now, 1) } }, _count: { _all: true } }))
+      .map(r => ({ key: r.method, count: r._count._all }))),
+  "auth.rejectedSignIns24h": q => q.tx.authenticationEvidence.count({ where: { ...q.scope, outcome: "REJECTED", occurredAt: { gte: since(q.now, 1) } } }),
 
   // ── Access ────────────────────────────────────────────────────────────────
   "access.effectiveAssignments": q => q.tx.assignment.count({ where: effectiveAnd(q) }),

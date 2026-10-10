@@ -6,6 +6,7 @@ import { AuthTransactionStore } from "../../../lib/auth/auth-transaction-store";
 import { rawPrisma } from "../../../lib/db/raw-prisma";
 import { withTenantDb } from "../../../lib/db/scoped-client";
 import { SessionCreationDeniedError, SessionStore } from "../../../lib/auth/session-store";
+import { entraSignInEvidence, recordRejectedSignIn } from "../../../lib/auth/sign-in-evidence";
 
 export const runtime = "nodejs";
 
@@ -97,16 +98,27 @@ export async function GET(request: Request) {
     const ip = request.headers.get("x-forwarded-for") || "unknown";
     const userAgent = request.headers.get("user-agent") || "unknown";
 
+    // Security Journal v1: the identity is resolved here, so the outcome is attributable.
+    const signInIdentity = {
+      organizationId: transaction.expectedOrganizationId,
+      tenantId: transaction.expectedTenantId,
+      subjectId: subject.id,
+      identityAccountId: identityAccount.id,
+      providerConnectionId: provider.id,
+    };
     let createdSession;
     try {
+      // W1: VERIFIED evidence is written in the session transaction; no evidence means no session.
       createdSession = await SessionStore.createSession({
         organizationId: transaction.expectedOrganizationId,
         tenantId: transaction.expectedTenantId,
         subjectId: subject.id,
         identityAccountId: identityAccount.id
-      }, ip, userAgent);
+      }, ip, userAgent, { evidence: entraSignInEvidence(signInIdentity, "VERIFIED", "ENTRA_OIDC_VERIFIED") });
     } catch (error) {
       if (error instanceof SessionCreationDeniedError) {
+        // W2: refusal for a known identity is recorded; the refusal stands whatever happens.
+        await recordRejectedSignIn(entraSignInEvidence(signInIdentity, "REJECTED", error.reason));
         return NextResponse.json({ error: error.reason }, { status: 403 });
       }
       throw error;

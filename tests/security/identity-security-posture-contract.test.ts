@@ -27,7 +27,7 @@ describe("Identity Security Posture v1 contract", () => {
   it("has exactly one query per query-kind widget and none for static widgets", () => {
     const queryIds = WIDGET_IDS.filter(id => WIDGETS[id].kind === "query").sort();
     expect(Object.keys(POSTURE_QUERIES).sort()).toEqual(queryIds);
-    expect(WIDGETS["auth.entraSignInEvidence"].kind).toBe("unavailable");
+    expect(WIDGETS["auth.entraSignInEvidence"].kind).toBe("query"); // real once recorded (Security Journal v1)
     expect(WIDGETS["governance.sodExistingViolations"].kind).toBe("not_implemented");
   });
 

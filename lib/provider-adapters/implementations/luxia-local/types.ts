@@ -70,7 +70,8 @@ export interface LocalIdentityStore {
   listIdentities(context: ProviderOperationContext): Promise<ReadonlyArray<LocalIdentityRecord>>;
   disableIdentity(context: ProviderOperationContext, externalObjectId: string): Promise<LocalIdentityRecord>;
   listAuthenticators(context: ProviderOperationContext, identityAccountId: string): Promise<ReadonlyArray<LocalAuthenticatorRecord>>;
-  saveAuthenticator(context: ProviderOperationContext, authenticator: LocalAuthenticatorRecord): Promise<void>;
+  /** enrollmentAudit: when set, a LOCAL_AUTHENTICATOR.ENROLL canonical audit event is written atomically. */
+  saveAuthenticator(context: ProviderOperationContext, authenticator: LocalAuthenticatorRecord, options?: { enrollmentAudit?: { actorSubjectId: string } }): Promise<void>;
   revokeAuthenticator(context: ProviderOperationContext, authenticatorId: string): Promise<void>;
   saveChallenge(context: ProviderOperationContext, challenge: LocalChallengeRecord): Promise<void>;
   getChallenge(context: ProviderOperationContext, challengeId: string): Promise<LocalChallengeRecord | null>;
