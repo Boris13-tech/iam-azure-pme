@@ -26,11 +26,11 @@ foreach ($name in @('DATABASE_URL','DATABASE_MIGRATION_URL','LUXIA_RESOURCE_RLS'
   $saved[$name]=[Environment]::GetEnvironmentVariable($name,'Process')
 }
 try {
-  $runtime=(@(npx --offline neon connection-string br-crimson-credit-ahqddpia --project-id hidden-leaf-91460552 --database-name $Database --role-name app_user --pooled)[-1]).Trim()
-  $owner=(@(npx --offline neon connection-string br-crimson-credit-ahqddpia --project-id hidden-leaf-91460552 --database-name $Database --role-name neondb_owner)[-1]).Trim()
+  $runtime=(@(npx --offline neon connection-string br-misty-sun-ahs4b46j --project-id hidden-leaf-91460552 --database-name $Database --role-name app_user --pooled)[-1]).Trim()
+  $owner=(@(npx --offline neon connection-string br-misty-sun-ahs4b46j --project-id hidden-leaf-91460552 --database-name $Database --role-name neondb_owner)[-1]).Trim()
   try { $runtimeUri=[uri]$runtime; $ownerUri=[uri]$owner } catch { throw 'CERTIFICATION_ENDPOINT_INVALID' }
-  if ($runtimeUri.Host -ne 'ep-still-morning-ah7s0usw-pooler.c-3.us-east-1.aws.neon.tech' -or
-      $ownerUri.Host -ne 'ep-still-morning-ah7s0usw.c-3.us-east-1.aws.neon.tech' -or
+  if ($runtimeUri.Host -ne 'ep-weathered-grass-ah5vrehj-pooler.c-3.us-east-1.aws.neon.tech' -or
+      $ownerUri.Host -ne 'ep-weathered-grass-ah5vrehj.c-3.us-east-1.aws.neon.tech' -or
       $runtimeUri.AbsolutePath -ne "/$Database" -or $ownerUri.AbsolutePath -ne "/$Database") { throw 'CERTIFICATION_ENDPOINT_DENIED' }
   $env:DATABASE_URL=$runtime; $env:DATABASE_MIGRATION_URL=$owner
   $env:LUXIA_RESOURCE_RLS='true'; $env:LUXIA_RESOURCE_DIAGNOSTICS='true'; $env:LUXIA_RESOURCE_DIAGNOSTIC_SEED=$Seed
@@ -42,7 +42,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'DIAGNOSTIC_FRESH_FIXTURE_GATE_FAILED' }
   }
   Write-Output ('CERTIFICATION_EXECUTION '+(ConvertTo-Json -Compress @{utc=[DateTime]::UtcNow.ToString('o');suite=$Suite;workers=$Workers;database=$Database;standbyGuard='ACTIVE';production='FORBIDDEN'}))
-  $arguments=@('--offline','vitest','run','--maxWorkers',"$Workers",'--reporter=verbose','--testTimeout=120000','--hookTimeout=120000')
+  $arguments=@('--offline','vitest','run','--maxWorkers',"$Workers",'--reporter=verbose','--reporter=json',"--outputFile.json=docs/certification/operator-$Suite-$Database-results.json",'--testTimeout=120000','--hookTimeout=120000')
   if ($Workers -eq 1) { $arguments+='--no-file-parallelism' }
   switch($Suite) {
     'exact' { $arguments+=@('tests/resources/postgres-rls.test.ts','-t','real create/update/bind/grant/revoke mutations are atomically audited') }

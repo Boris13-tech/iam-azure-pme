@@ -2,6 +2,9 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { newBrowserProbe, browserEvidenceId, verifyBrowserEvidence, requestBrowserProof } from "./browser-evidence";
+import { rawPrisma } from "../../lib/db/raw-prisma";
 import { FIXED, PROFILES, VERCEL_PROJECT_ID, registeredRelease, validate, ceremony, hash, type Approval, type Execution } from "./resource-owner-bootstrap";
 import { PRODUCTION_REGISTRATIONS } from "./production-bootstrap-registry";
 import { withTenantDb } from "../../lib/db/scoped-client";
@@ -20,7 +23,8 @@ function controlPlaneDeployment(expected: { deployedSha: string; deploymentId: s
 async function main() {
   // Separate Production command. Certification is performed through the same engine
   // with its independent literal clone profile, never by relabeling this command.
-  const [manifestPath, approvalPath] = process.argv.slice(2);
+  const [manifestPath, approvalPath, transport] = process.argv.slice(2);
+  if (transport && transport !== '--browser-evidence') throw new Error('OPERATOR_TRANSPORT_DENIED');
   if (!manifestPath || !approvalPath) throw new Error('DETACHED_ARTIFACTS_REQUIRED');
   const bytes = readFileSync(manifestPath,'utf8'), approval = JSON.parse(readFileSync(approvalPath,'utf8')) as Approval;
   const url = process.env.DATABASE_URL ?? '';
@@ -43,9 +47,28 @@ async function main() {
   // Credential must be sourced directly by the operator from the pinned trusted Neon
   // branch. The exact endpoint + SQL database/role/RLS posture are independently enforced.
   const session = process.env.LUXIA_OPERATOR_SESSION_TOKEN;
-  if (!session) throw new Error('ESTABLISHED_OPERATOR_SESSION_REQUIRED');
+  if (!session && transport !== '--browser-evidence') throw new Error('ESTABLISHED_OPERATOR_SESSION_REQUIRED');
+  // An independent operator reads the fixed GET route in an already-authenticated
+  // browser. Stdin supplies only non-secret evidence IDs/status, NEVER approval.
+  // A fabricated status cannot pass without fresh exact canonical server evidence.
+  const browserInput=transport==='--browser-evidence'?createInterface({input:process.stdin,terminal:false}):undefined;
+  let interrupted=false,browserClosed=false;
+  browserInput?.once('close',()=>{browserClosed=true;});
+  const stop=()=>{interrupted=true;browserInput?.close();};
+  process.on('SIGINT',stop);process.on('SIGTERM',stop);
+  const consumed=new Set<string>();
   const route = `${execution.origin}/api/resources/protected-resource-demo`;
   const exercise = async (expected:number) => {
+    if (interrupted || browserClosed) throw new Error('OPERATOR_TRANSPORT_INTERRUPTED');
+    if (browserInput) {
+      if (expected!==200 && expected!==403) throw new Error('OPERATOR_TRANSPORT_DENIED');
+      const probe=newBrowserProbe(expected);
+      const line=await requestBrowserProof(browserInput,probe,route,prompt=>console.log(prompt));
+      const id=browserEvidenceId(line);
+      const evidence=await withTenantDb(FIXED,tx=>tx.canonicalAdminAuditEvent.findFirst({where:{id}}));
+      const verified=verifyBrowserEvidence(probe,line,evidence,manifest.assignmentId,consumed);
+      consumed.add(verified);return verified;
+    }
     const response = await fetch(route,{headers:{cookie:`luxia_session=${session}`},redirect:'error',signal:AbortSignal.timeout(20_000)});
     if (response.status !== expected) throw new Error('PROTECTED_HTTP_GATE_FAILED');
     const body=await response.json();if(typeof body.evidenceId!=='string')throw new Error('HTTP_EVIDENCE_MISSING');
@@ -55,9 +78,10 @@ async function main() {
       (evidence.assignmentIds.length!==1 || evidence.assignmentIds[0]!==manifest.assignmentId)))throw new Error('HTTP_CANONICAL_EVIDENCE_INVALID');
     return body.evidenceId as string;
   };
-  const before=await exercise(403);
   let grantAttempted=false;
   try {
+    const before=await exercise(403);
+    if (interrupted || browserClosed) throw new Error('OPERATOR_TRANSPORT_INTERRUPTED');
     grantAttempted=true; const grant=await ceremony(bytes,approval,execution);
     if(grant.outcome!=='CREATED')throw new Error('EXACT_INITIAL_GRANT_REQUIRED');
     const allowed=await exercise(200);
@@ -74,7 +98,9 @@ async function main() {
     console.log(JSON.stringify({manifestBinding:hash(bytes),before,allowed,denied,grant:'REVOKED',result:'PASS'}));
   } finally {
     // Cleanup remains available after expiry, but only for the exact approved receipt.
-    if(grantAttempted){const cleanup=await ceremony(bytes,approval,execution,true);if(cleanup.outcome!=='REVOKED')throw new Error('OPERATOR_CLEANUP_REQUIRED');}
+    try { if(grantAttempted){const cleanup=await ceremony(bytes,approval,execution,true);if(cleanup.outcome!=='REVOKED')throw new Error('OPERATOR_CLEANUP_REQUIRED');} }
+    finally { browserInput?.close();process.off('SIGINT',stop);process.off('SIGTERM',stop); }
   }
 }
-main().catch(()=>{console.error('PRODUCTION_BOOTSTRAP_STOP — no raw diagnostics');process.exitCode=1;});
+main().catch(()=>{console.error('PRODUCTION_BOOTSTRAP_STOP — no raw diagnostics');process.exitCode=1;})
+  .finally(()=>rawPrisma.$disconnect());

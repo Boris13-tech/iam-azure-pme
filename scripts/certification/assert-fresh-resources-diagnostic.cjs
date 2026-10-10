@@ -5,9 +5,9 @@ const assert=require('node:assert/strict');
 let url;
 try {
 url=new URL(process.env.DATABASE_MIGRATION_URL);
-assert.equal(url.hostname,'ep-still-morning-ah7s0usw.c-3.us-east-1.aws.neon.tech');
+assert.equal(url.hostname,'ep-weathered-grass-ah5vrehj.c-3.us-east-1.aws.neon.tech');
 assert.equal(url.username,'neondb_owner');
-assert.ok(['/luxia_reviews_cert','/luxia_resources_diag_awake01','/luxia_resources_diag_concurrency02','/luxia_resources_diag_global01','/luxia_resources_diag_ci02','/luxia_resources_diag_ci03'].includes(url.pathname));
+assert.ok(['/luxia_reviews_cert','/luxia_resources_diag_awake01','/luxia_resources_diag_concurrency02','/luxia_resources_diag_global01','/luxia_resources_diag_ci02','/luxia_resources_diag_ci03','/luxia_resources_diag_ci04','/luxia_resources_diag_ci05'].includes(url.pathname));
 } catch { console.error('DIAGNOSTIC_ENDPOINT_DENIED');process.exit(1); }
 const db=new PrismaClient({datasources:{db:{url:url.toString()}}});
 db.$transaction(async tx=>{

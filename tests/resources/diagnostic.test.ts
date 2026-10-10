@@ -22,9 +22,9 @@ describe('test-only timeout instrumentation', () => {
     expect(logs).not.toMatch(/not-for-output|private-error-content|privateInput/);
   });
   it('rejects Production, unknown endpoints, owner/runtime mismatch and copied business database before connecting', () => {
-    const runtime='postgresql://app_user@ep-still-morning-ah7s0usw-pooler.c-3.us-east-1.aws.neon.tech/luxia_resources_diag_global01?sslmode=require';
+    const runtime='postgresql://app_user@ep-weathered-grass-ah5vrehj-pooler.c-3.us-east-1.aws.neon.tech/luxia_resources_diag_global01?sslmode=require';
     const owner=runtime.replace('app_user','neondb_owner').replace('-pooler.','.');
-    for(const bad of [runtime.replace('ep-still-morning-ah7s0usw','ep-restless-thunder-ah18c37v'),runtime.replace('ep-still-morning-ah7s0usw','unknown'),runtime.replace('/luxia_resources_diag_global01','/neondb'),runtime.replace('app_user','neondb_owner')])
+    for(const bad of [runtime.replace('ep-weathered-grass-ah5vrehj','ep-restless-thunder-ah18c37v'),runtime.replace('ep-weathered-grass-ah5vrehj','unknown'),runtime.replace('/luxia_resources_diag_global01','/neondb'),runtime.replace('app_user','neondb_owner')])
       expect(()=>createDiagnosticObserver(owner,bad)).toThrow('DIAGNOSTIC_CLONE_ONLY');
     expect(()=>createDiagnosticObserver(owner.replace('/luxia_resources_diag_global01','/other'),runtime)).toThrow('DIAGNOSTIC_CLONE_ONLY');
   });

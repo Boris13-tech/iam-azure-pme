@@ -13,7 +13,7 @@ export const FIXED = Object.freeze({ projectId: "hidden-leaf-91460552", database
   entitlementKey: "resource-scope:3952f920-c064-46a2-9d22-d31d338c8a54:resource.read" });
 export const PROFILES = Object.freeze({
   PRODUCTION: { branch: "br-billowing-frog-ahtirmax", host: "ep-restless-thunder-ah18c37v-pooler.c-3.us-east-1.aws.neon.tech", origin: "https://iam-azure-pme.vercel.app" },
-  CERTIFICATION_ONLY: { branch: "br-crimson-credit-ahqddpia", host: "ep-still-morning-ah7s0usw-pooler.c-3.us-east-1.aws.neon.tech", origin: "http://localhost:3196" },
+  CERTIFICATION_ONLY: { branch: "br-misty-sun-ahs4b46j", host: "ep-weathered-grass-ah5vrehj-pooler.c-3.us-east-1.aws.neon.tech", origin: "http://localhost:3196" },
 });
 export const ABANDONED = "95e9b80de3e28890faf01eb41fb70002d6ef1efb6986815da8b8868799376232";
 export const hash = (bytes: string) => createHash("sha256").update(bytes, "utf8").digest("hex");

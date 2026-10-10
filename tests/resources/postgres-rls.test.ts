@@ -60,7 +60,7 @@ describe.runIf(enabled)("real app_user PostgreSQL/RLS resource certification", (
     if (!process.env.DATABASE_MIGRATION_URL || !process.env.DATABASE_URL) throw new Error("ISOLATED_DB_REQUIRED");
     const endpoint = new URL(process.env.DATABASE_URL);
     if (!(["localhost", "127.0.0.1"].includes(endpoint.hostname) ||
-      (endpoint.hostname === "ep-still-morning-ah7s0usw-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_reviews_cert","/luxia_resources_diag_awake01","/luxia_resources_diag_concurrency02","/luxia_resources_diag_global01","/luxia_resources_diag_ci02","/luxia_resources_diag_ci03"].includes(endpoint.pathname)) ||
+      (endpoint.hostname === "ep-weathered-grass-ah5vrehj-pooler.c-3.us-east-1.aws.neon.tech" && ["/luxia_reviews_cert","/luxia_resources_diag_awake01","/luxia_resources_diag_concurrency02","/luxia_resources_diag_global01","/luxia_resources_diag_ci02","/luxia_resources_diag_ci03","/luxia_resources_diag_ci04","/luxia_resources_diag_ci05"].includes(endpoint.pathname)) ||
       (["ep-dark-king-ah402c68-pooler.c-3.us-east-1.aws.neon.tech", "ep-holy-forest-ah3ser8s-pooler.c-3.us-east-1.aws.neon.tech", "ep-ancient-base-ahfygu4z-pooler.c-3.us-east-1.aws.neon.tech", "ep-delicate-boat-ahnvfj7w-pooler.c-3.us-east-1.aws.neon.tech"].includes(endpoint.hostname) && ["/luxia_resources_cert", "/luxia_sod_cert", "/luxia_reviews_cert"].includes(endpoint.pathname)))) throw new Error("ISOLATED_DB_REQUIRED");
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
     const ownerEndpoint = new URL(process.env.DATABASE_MIGRATION_URL);

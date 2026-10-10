@@ -4,8 +4,8 @@ import { pendingDiagnosticSteps } from './diagnostic-step';
 // Test-only, independent direct connection, read-only sampling, no SQL/parameters output.
 export function createDiagnosticObserver(ownerUrl: string, runtimeUrl: string) {
   const owner = new URL(ownerUrl), runtime = new URL(runtimeUrl);
-  if (runtime.hostname !== 'ep-still-morning-ah7s0usw-pooler.c-3.us-east-1.aws.neon.tech' ||
-      !['/luxia_reviews_cert','/luxia_resources_diag_awake01','/luxia_resources_diag_concurrency02','/luxia_resources_diag_global01','/luxia_resources_diag_ci02','/luxia_resources_diag_ci03'].includes(runtime.pathname) ||
+  if (runtime.hostname !== 'ep-weathered-grass-ah5vrehj-pooler.c-3.us-east-1.aws.neon.tech' ||
+      !['/luxia_reviews_cert','/luxia_resources_diag_awake01','/luxia_resources_diag_concurrency02','/luxia_resources_diag_global01','/luxia_resources_diag_ci02','/luxia_resources_diag_ci03','/luxia_resources_diag_ci04','/luxia_resources_diag_ci05'].includes(runtime.pathname) ||
       runtime.username !== 'app_user' || owner.hostname !== runtime.hostname.replace('-pooler.', '.') ||
       owner.pathname !== runtime.pathname || owner.username !== 'neondb_owner') throw new Error('DIAGNOSTIC_CLONE_ONLY');
   owner.searchParams.set('connection_limit','1');
