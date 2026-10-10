@@ -1,5 +1,7 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-10 17:2xZ — DASHBOARD V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/DASHBOARD-V1-PRODUCTION-2026-10-10.md`). Production = `dpl_48xvYWVVJUiZg1k9A53tyD7yf7tu` @ `5c71df8`. This header supersedes the deployment rows in section 1.
+
 > **2026-10-10 15:41Z — RESOURCE ACCESS ONBOARDING V1 — PRODUCTION END-TO-END CERTIFICATION: PASS.** See `docs/certification/RESOURCE-ACCESS-PRODUCTION-E2E-2026-10-10.md`. Sections 4–11 below are updated accordingly; the post-ceremony state supersedes the pre-ceremony preflight figures.
 
 Snapshot: 2026-10-10 ~11:30Z, written by Claude Code after the PR #16 merge, the Production deployment of the merge SHA, and the read-only Production preflight.
@@ -16,11 +18,11 @@ Evidence labels:
 
 | Item | Value | Evidence |
 |---|---|---|
-| `main` | `8acea18fae902aad1d444db3b21eef721b4e0760` (merge of PR #16, 2026-10-10T10:39:37Z) | VERIFIED 2026-10-10 |
+| `main` | `5c71df83ac205c774f6ee2965e2ee3a777c7e5ec` (merge of PR #23, 2026-10-10T17:12:15Z) | VERIFIED 2026-10-10 |
 | CI on `main` @ 8acea18 | `test-and-build` PASS: https://github.com/Boris13-tech/iam-azure-pme/actions/runs/38045671666 | VERIFIED 2026-10-10 |
-| Production deployment | `dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U`, target production, **READY**, `githubCommitSha` = `8acea18fae902aad1d444db3b21eef721b4e0760`. It is the current Production target of Vercel project `prj_dZ6YOYRdONsicgWdlmofh7NwtoSP`, aliased to https://iam-azure-pme.vercel.app. | VERIFIED 2026-10-10 (Vercel API) |
+| Production deployment | `dpl_48xvYWVVJUiZg1k9A53tyD7yf7tu`, target production, **READY**, `githubCommitSha` = `5c71df83ac205c774f6ee2965e2ee3a777c7e5ec` (Dashboard v1 certified). Previous: `dpl_3sAwruEpuGCbdhCQiTFQ5FRkCvQ3` (`082f199`), then `dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U` (`8acea18`). | VERIFIED 2026-10-10 (Vercel API) |
 | How it was deployed | Vercel API `POST /v13/deployments` with `gitSource` = GitHub repo 1270644438, ref `main`, exact sha. Built by Vercel from GitHub; no local upload, no env change, no migration (build = `tsc`, lint, `prisma generate`, `next build`). | VERIFIED 2026-10-10 |
-| Rollback deployment | `dpl_DUEzcvKxUvN1wxox67sxnQdSvfpW` (`e4038f8`, READY) | VERIFIED 2026-10-10 |
+| Rollback deployment | `dpl_3sAwruEpuGCbdhCQiTFQ5FRkCvQ3` (`082f199`, READY); then `dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U` (`8acea18`, READY) | VERIFIED 2026-10-10 |
 | Auto-deploy from `main` | **Disabled by design** (`vercel.json`: `git.deploymentEnabled.main = false`). Production deploys are manual operator actions. | VERIFIED 2026-10-10 |
 | Application code `e4038f8` → `8acea18` | Identical. PR16 changed only `scripts/`, `tests/`, `docs/` and `.gitignore`. | VERIFIED 2026-10-10 (git diff) |
 
@@ -113,6 +115,8 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 | **Resource Access Onboarding v1 Production end-to-end ceremony** (manifest `e2db9550…`): DENY → one bounded DIRECT grant → ALLOW → idempotent replay → modified replay refused → revoke → DENY → no recreation; no parasitic mutation | VERIFIED 2026-10-10 (`docs/certification/RESOURCE-ACCESS-PRODUCTION-E2E-2026-10-10.md`) |
 | Production authenticated smoke on `8acea18`: (1) Entra login reaches the dashboard; (2) `/dashboard/users`, `/dashboard/resources`, `/dashboard/governance/sod`, `/dashboard/governance/access-reviews` and `/dashboard/resources/onboarding` render; (3) the authenticated protected route returns 403 `RESOURCE_ACCESS_DENIED` with an `evidenceId`; (4) sign-out, then LUXIA_LOCAL passkey login reaches the dashboard. **All 4 OK.** | OPERATOR-REPORTED 2026-10-10 |
 
+| **Enterprise Identity Security Dashboard v1 Production certification** (PR #21 + #22 sessions projection + #23 overlapping-breakdown fix) | VERIFIED 2026-10-10 (`docs/certification/DASHBOARD-V1-PRODUCTION-2026-10-10.md`) |
+
 ## 7. Pending certifications
 
 - PR12 live provider certification: Entra BLOCKED (dedicated credentials/consent missing), Google BLOCKED (same), OIDC BLOCKED (no approved issuer).
@@ -146,7 +150,7 @@ Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTI
 
 ## 11. Blockers / next gates
 
-1. Resource Access tranche: **CLOSED** (Production E2E PASS on 2026-10-10).
-2. Repo hygiene: rename/remove the tracked `" README.md"` (Windows checkout). Separate PR, approved in principle by the operator for after the ceremony.
-3. Next product phase (order set by the operator): Enterprise Identity Security Dashboard → customer self-onboarding → admin recovery/break-glass → observability → restore drill → hardening/pentest → docs → pricing/licensing/billing → GDPR/legal → support/SLA → private beta. Each slice needs an explicitly approved scope.
+1. Resource Access tranche: CLOSED (Production E2E PASS).
+2. Phase 0, Dashboard v1: CLOSED (Production certification PASS). Minor follow-ups are listed in the certification doc.
+3. Next, per the operator roadmap: **Customer Self-Onboarding**, starting with a scope proposal that must be approved before any code. Then First Admin / Break-glass → Access Requests → Observability → Backup/Restore → Provider certification (PR12) → Docs/API → Billing/Legal → Private Beta → GA.
 4. PR12: live provider credentials/consent/issuer, and a rebase.
