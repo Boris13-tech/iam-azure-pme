@@ -54,10 +54,10 @@ export default function Onboarding() {
       <h2>{configuration.capability.name}</h2>
       <p>Route : GET {configuration.capability.route}. Action : {configuration.capability.action}. Périmètre : ressource unique.</p>
       <p>Configuration : {configuration.configured ? "confirmée" : "non configurée"}.</p>
-      <p>Délégation : {configuration.delegation}. Le premier propriétaire doit être approuvé par un opérateur.</p>
+      <p>Délégation : {configuration.delegation === "BLOCKED" ? "bloquée" : configuration.delegation}. Le premier propriétaire doit être approuvé par un opérateur.</p>
       <label className="block">Identité <select value={target} onChange={event => { setTarget(event.target.value); setPlan(null); }} className="border p-2">
         <option value="">Choisir une identité</option>
-        {configuration.subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name ?? subject.id} ({subject.type})</option>)}
+        {configuration.subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name ?? subject.id}{subject.type === "HUMAN" ? "" : ` (${subject.type === "SERVICE" ? "service" : subject.type === "WORKLOAD" ? "charge de travail" : subject.type === "DEVICE" ? "appareil" : subject.type === "AI_AGENT" ? "agent IA" : subject.type})`}</option>)}
       </select></label>
       <label className="block">Durée de validité en minutes (de 1 à 60) <input type="number" min={1} max={60} value={minutes}
         onChange={event => { setMinutes(Number(event.target.value)); setPlan(null); }} className="border p-2" /></label>
@@ -71,6 +71,9 @@ export default function Onboarding() {
       <button disabled={busy} onClick={() => run("configure")} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">Confirmer la configuration</button>
     </article>}
     <button disabled={busy} onClick={exercise} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">Tester l’accès</button>
-    {evidence !== null && <pre className="overflow-x-auto rounded border p-4">{JSON.stringify(evidence, null, 2)}</pre>}
+    {evidence !== null && (() => { const result = evidence as { httpStatus?: number; evidenceId?: string };
+      return <p className="rounded-md border border-slate-200 bg-white p-4">
+        {result.httpStatus === 200 ? "Accès autorisé." : result.httpStatus === 403 ? "Accès refusé." : result.httpStatus === 401 ? "Vous n’êtes pas connecté." : `Réponse inattendue (code ${result.httpStatus}).`}
+        {result.evidenceId && <span className="block text-sm text-slate-600">Référence dans le journal : {result.evidenceId}</span>}</p>; })()}
   </section>;
 }
