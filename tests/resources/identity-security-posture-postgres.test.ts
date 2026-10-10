@@ -91,7 +91,8 @@ async function seed(tx: Prisma.TransactionClient, now: number) {
 
   // Governance.
   const p1 = await tx.soDPolicy.create({ data: { ...A, key: `p1-${randomUUID()}`, scopeId: S1, status: "ACTIVE" } });
-  await tx.soDRule.create({ data: { ...A, policyId: p1.id, entitlementAId: E1, entitlementBId: E1w } });
+  const [ruleA, ruleB] = [E1, E1w].sort(); // SoDRule_check: entitlementAId < entitlementBId
+  await tx.soDRule.create({ data: { ...A, policyId: p1.id, entitlementAId: ruleA, entitlementBId: ruleB } });
   await tx.soDPolicy.create({ data: { ...A, key: `p2-${randomUUID()}`, scopeId: S2, status: "DISABLED" } });
   const c1 = await tx.accessReviewCampaign.create({ data: { ...A, name: "Overdue", scopeId: S1, scopeType: "RESOURCE", resourceId: R1,
     reviewerSubjectId: ids.V, createdBySubjectId: ids.V, startsAt: new Date(now - 5 * DAY), dueAt: new Date(now - DAY) } });
@@ -101,7 +102,7 @@ async function seed(tx: Prisma.TransactionClient, now: number) {
     tx.accessReviewItem.create({ data: { ...A, campaignId, subjectId: a.subjectId, assignmentId: a.id, entitlementId: E1, resourceId: R1, scopeId: S1,
       resourceIds: [R1], assignmentVersion: new Date(now), entitlementVersion: new Date(now), reviewerSubjectId: ids.V, ...extra } });
   await item(c1.id, s1Grant);
-  await item(c2.id, s2Grant, { decision: "REVOKE", reviewState: "REQUIRES_REMEDIATION", decidedAt: new Date(now - 6 * DAY) });
+  await item(c2.id, s2Grant, { reviewState: "REQUIRES_REMEDIATION" }); // decision stays PENDING (DB check)
 
   // Audit trail.
   const audit = (operation: string, result: "SUCCESS" | "DENIED" | "FAILURE", at: number, targetSubjectId?: string) =>
