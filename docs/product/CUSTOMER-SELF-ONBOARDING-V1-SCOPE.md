@@ -100,3 +100,57 @@ No existing table is altered except `Organization` (one nullable-then-backfilled
 5. Every step appears in the Security Journal of the right organization, and nowhere else.
 6. No SQL, Neon access or operator script is needed after the beta code is issued.
 7. CI PASS on exact SHAs. Production certification uses a real new organization and an independent read-only database cross-check.
+
+---
+
+## 9. Mandatory security requirements (operator, 2026-10-10)
+
+Validated with O1–O5 as recommended. These requirements are binding for the implementation:
+
+1. Beta code: **hashed** in the database, single use, expiry, status and audit. **Never stored in clear.**
+2. Organization discovery is **anti-enumeration**: the same response structure and comparable behaviour for a valid or unknown identifier.
+3. **Rate limiting** on organization discovery, beta-code consumption, invitations and DNS verification.
+4. Organization `slug`: unique, normalized, **immutable** (or changed only through an explicit procedure).
+5. Organization + Tenant + founder Subject + IdentityAccount + passkey + admin entitlements: **atomic**, or compensable with no exploitable partial state.
+6. No organization may exist in a usable state without a valid first administrator.
+7. No admin authority may be granted implicitly from browser-supplied data.
+8. Invitations: **opaque hashed tokens**, single use, 7-day expiry, revocable, tenant-scoped, audited.
+9. Accepting an invitation can never select another tenant, role or privilege level than the one the invitation defines.
+10. DNS verification uses a **random unique challenge with expiry and revalidation**. A typed domain is never considered verified.
+11. **Global uniqueness** of a verified domain across organizations.
+12. Legrand Tech → `legrand-tech` migration: explicit and tested, without modifying existing business data.
+13. All four migrations: **forced RLS**, cross-tenant tests, documented rollback / forward-fix path.
+14. No Microsoft provider chosen globally or by "first result" after this slice.
+15. No data of an organization is observable before authentication just because its slug is known.
+16. No fake email and no fake "invitation sent" state: v1 shows only **"Copier le lien d'invitation"**.
+17. No Production deployment or Production migration without review, CI and explicit operator approval.
+
+Implementation order: (1) migrations, RLS and backfill → (2) organization-aware login and anti-enumeration → (3) beta-code bootstrap → (4) founder passkey and first-admin authority → (5) DNS verification → (6) invitations → (7) checklist → (8) PostgreSQL/RLS/adversarial tests → (9) certification on a real second organization.
+
+Production certification must prove:
+- Org A cannot see Org B, and Org B cannot see Org A;
+- an unknown slug reveals nothing;
+- a beta code cannot be replayed;
+- an invitation cannot be replayed and cannot escalate privileges;
+- a verified domain cannot be claimed twice;
+- founder creation cannot leave partial authority;
+- the second organization can sign in independently;
+- Legrand Tech continues to work unchanged.
+
+## 10. Implementation design (how each requirement is met)
+
+| Req. | Design |
+|---|---|
+| 1 | `SignupCode(id, codeHash = SHA-256(code), status ISSUED / RESERVED / CONSUMED / REVOKED / EXPIRED, expiresAt, issuedBy, consumedAt, organizationId)`. The code is shown once to the operator (operator CLI) and only its hash is stored. Consumption is a conditional update (`status` still usable and not expired) inside the founder transaction. Every state change is audited. |
+| 2, 15 | **No discovery endpoint returning organization data.** The login page always shows the same two methods. The slug travels with the sign-in request, and the server resolves organization, tenant and connection itself. Passkey sign-in: begin returns the **same JSON shape** for a known or unknown slug/identifier, with a decoy challenge for unknown ones, and completion fails with the same generic error. No organization name, user or method list is ever returned before authentication. This also fixes a **pre-existing identifier enumeration** in passkey sign-in (unknown identifier answered with an error, known one with a challenge). |
+| 2 (residual) | Microsoft sign-in: a known organization with an Entra connection redirects to Microsoft, while an unknown or non-Entra one returns the generic error. That redirect is inherent to federated sign-in (home-realm discovery). Mitigated by rate limiting, and no organization data is revealed. **Accepted residual risk, to be confirmed by the operator.** |
+| 3 | `RateLimitBucket(keyHash, windowStart, count)`. **5th table, needed by requirement 3** (there is no Redis/KV). `keyHash = SHA-256(pepper, scope, client key)`, with the pepper generated in the database and readable only by a `SECURITY DEFINER` function. No raw IP is stored, and buckets expire with their window. Scopes: `login-begin`, `signup`, `invitation-accept`, `invitation-create`, `dns-verify`. |
+| 4 | `Organization.slug` is unique and not null. Format: 3 to 40 characters, lower-case letters, digits and inner hyphens, trimmed and lower-cased, with a reserved list (`admin`, `api`, `login`, `luxia`, …). **Immutable in v1**: no update path, enforced by a database trigger. Any change needs a future, explicit operator procedure. |
+| 5, 6, 7 | The WebAuthn ceremony takes two requests. *Begin* (code + slug + names + identifier) validates and **reserves** the code and stores the pending challenge on the `SignupCode` row; **no organization is created**. *Complete* (attestation) runs **one database transaction**: it verifies the attestation, consumes the code, then creates Organization, Tenant, LUXIA_LOCAL connection and tenant scope, founder Subject (ACTIVE), IdentityAccount, LocalIdentity, the passkey, and the `LUXIA_ORG_ADMIN` v1 and governance assignments, plus audit. Any failure rolls back everything. The admin entitlement keys come only from the **server-side catalog**, never from the request. |
+| 8, 9 | `Invitation(id, tokenHash, organizationId, tenantId, subjectId, role MEMBER / ADMIN, invitedBy, expiresAt = +7 days, acceptedAt, revokedAt)` with forced RLS. The token is shown once, as a link to copy. Acceptance (begin/complete like the signup) resolves the invitation **only by token hash** through a `SECURITY DEFINER` lookup. Tenant, subject and role come from the invitation row, never from the request. Completion is one transaction: authenticator, identity, `PROVISIONING → ACTIVE`, the role's server-side entitlements and `acceptedAt`. Creating an ADMIN invitation requires `assignments.manage`. |
+| 10, 11 | `OrganizationDomain(id, organizationId, tenantId, domain (normalized), status PENDING / VERIFIED / EXPIRED / LOST, challengeHash, challengeExpiresAt = +7 days, verifiedAt, lastCheckedAt)` with forced RLS. The challenge is 32 random bytes and appears **once** as TXT `luxia-verification=<value>`; it can be regenerated. Verification resolves TXT (`node:dns`) and compares hashes. Revalidation runs on demand: a missing TXT turns VERIFIED into LOST and releases the domain. A **partial unique index** on the lower-cased domain where `status = 'VERIFIED'` applies across all organizations. |
+| 12 | The migration sets `slug = 'legrand-tech'` for organization `4841428a-80b4-4f07-bb3f-c94612dfd4a2` explicitly, before `NOT NULL`. Test: business-table digests are unchanged before and after. |
+| 13 | Forced RLS on `OrganizationDomain`, `Invitation`, `SignupCode` and `RateLimitBucket`. The last two have **no app_user policy at all**; they are reachable only through definer functions. Cross-tenant tests for each. Rollback / forward-fix notes go in the migration directory. |
+| 14 | All provider discovery without an organization filter is removed (`app/login/page.tsx`, and local begin accepting a client-supplied connection id). A test forbids reintroducing it. |
+| 16 | The UI only offers "Copier le lien d'invitation", and the status reads "Invitation créée, en attente d'acceptation". There is no email, and the UI never shows "envoyée". |
+| 17 | Production migration only through the existing gated path, after review, CI and explicit approval. |
