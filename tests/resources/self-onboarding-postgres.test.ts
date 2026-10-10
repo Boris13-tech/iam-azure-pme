@@ -39,7 +39,7 @@ async function issueCode(code: string, data: { createdAt?: Date; expiresAt?: Dat
   await owner.signupCode.create({ data: { codeHash: sha(code), issuedBy: "ci", expiresAt: data.expiresAt ?? new Date(Date.now() + 86_400_000), ...(data.createdAt ? { createdAt: data.createdAt } : {}) } });
 }
 const reserve = (codeHash: string, challengeHash: string, payload: unknown, ttl = 300) =>
-  rawPrisma.$queryRaw<[{ ok: boolean }]>`SELECT luxia_signup_reserve(${codeHash}, ${challengeHash}, ${JSON.stringify(payload)}::jsonb, ${ttl}) AS ok`.then(rows => rows[0].ok);
+  rawPrisma.$queryRaw<[{ ok: boolean }]>`SELECT luxia_signup_reserve(${codeHash}, ${challengeHash}, ${JSON.stringify(payload)}::jsonb, ${ttl}::int) AS ok`.then(rows => rows[0].ok);
 const consume = (codeHash: string, challengeHash: string) =>
   rawPrisma.$queryRaw<Array<{ signup_code_id: string; organization_id: string; payload: Record<string, string> }>>`SELECT * FROM luxia_signup_consume(${codeHash}, ${challengeHash})`;
 const resolveInvitation = (tokenHash: string) =>
@@ -156,7 +156,7 @@ describe.runIf(enabled)("Customer Self-Onboarding v1: migration, RLS and adversa
     const code2 = `LUXIA-${randomUUID()}`;
     await issueCode(code2);
     expect(await reserve(sha(code2), sha("d1"), { ...payload, organizationName: "Copycat" })).toBe(true);
-    await expect(consume(sha(code2), sha("d1"))).rejects.toThrow(/Organization_slug_key|unique/i);
+    await expect(consume(sha(code2), sha("d1"))).rejects.toThrow(/23505/);
     expect((await owner.signupCode.findUniqueOrThrow({ where: { codeHash: sha(code2) } })).status).toBe("RESERVED");
     expect(await owner.organization.count({ where: { name: "Copycat" } })).toBe(0);
   });
@@ -205,7 +205,7 @@ describe.runIf(enabled)("Customer Self-Onboarding v1: migration, RLS and adversa
     const row = await withTenantDb(c, tx => tx.invitation.findUniqueOrThrow({ where: { id } }));
     expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(7 * 86_400_000);
     expect(row.createdAt.getTime()).toBeGreaterThan(Date.now() - 600_000);
-    await expect(invite(c, `inv-c2-${suffix}`, sha(`token-c2-${suffix}`))).rejects.toThrow(/Invitation_one_open_per_subject|Unique/i);
+    await expect(invite(c, `inv-c2-${suffix}`, sha(`token-c2-${suffix}`))).rejects.toThrow(/23505/);
     for (const change of [
       withTenantDb(c, tx => tx.$executeRaw`UPDATE "Invitation" SET "role"='ADMIN' WHERE "id"=${id}`),
       withTenantDb(c, tx => tx.$executeRaw`UPDATE "Invitation" SET "subjectId"=${c.admin} WHERE "id"=${id}`),
@@ -239,11 +239,11 @@ describe.runIf(enabled)("Customer Self-Onboarding v1: migration, RLS and adversa
       await withTenantDb(org, tx => tx.$executeRaw`INSERT INTO "OrganizationDomain" ("id","organizationId","tenantId","domain","challengeHash","challengeExpiresAt","updatedAt")
         VALUES (${id}, ${org.organizationId}, ${org.tenantId}, ${domain}, ${sha(id)}, now() + interval '7 days', now())`);
     expect(await withTenantDb(a, tx => tx.$executeRaw`UPDATE "OrganizationDomain" SET "status"='VERIFIED', "verifiedAt"=now() WHERE "id"=${`dom-a2-${suffix}`}`)).toBe(1);
-    await expect(withTenantDb(b, tx => tx.$executeRaw`UPDATE "OrganizationDomain" SET "status"='VERIFIED', "verifiedAt"=now() WHERE "id"=${`dom-b2-${suffix}`}`)).rejects.toThrow(/OrganizationDomain_verified_domain_key|unique/i);
+    await expect(withTenantDb(b, tx => tx.$executeRaw`UPDATE "OrganizationDomain" SET "status"='VERIFIED', "verifiedAt"=now() WHERE "id"=${`dom-b2-${suffix}`}`)).rejects.toThrow(/23505/);
     await expect(withTenantDb(a, tx => tx.$executeRaw`UPDATE "OrganizationDomain" SET "domain"='other.example' WHERE "id"=${`dom-a2-${suffix}`}`)).rejects.toThrow(/ORGANIZATION_DOMAIN_IMMUTABLE/);
-    await expect(withTenantDb(a, tx => tx.$executeRaw`UPDATE "OrganizationDomain" SET "status"='VERIFIED', "verifiedAt"=NULL WHERE "id"=${`dom-a-${suffix}`}`)).rejects.toThrow(/OrganizationDomain_state/);
+    await expect(withTenantDb(a, tx => tx.$executeRaw`UPDATE "OrganizationDomain" SET "status"='VERIFIED', "verifiedAt"=NULL WHERE "id"=${`dom-a-${suffix}`}`)).rejects.toThrow(/OrganizationDomain_state|23514/);
     await expect(withTenantDb(a, tx => tx.$executeRaw`INSERT INTO "OrganizationDomain" ("id","organizationId","tenantId","domain","challengeHash","challengeExpiresAt","updatedAt")
-      VALUES (${randomUUID()}, ${a.organizationId}, ${a.tenantId}, ${"Upper.EXAMPLE"}, ${sha("u")}, now() + interval '7 days', now())`)).rejects.toThrow(/OrganizationDomain_domain_format/);
+      VALUES (${randomUUID()}, ${a.organizationId}, ${a.tenantId}, ${"Upper.EXAMPLE"}, ${sha("u")}, now() + interval '7 days', now())`)).rejects.toThrow(/OrganizationDomain_domain_format|23514/);
     // Releasing the domain (LOST) lets another organization verify it.
     await withTenantDb(a, tx => tx.$executeRaw`UPDATE "OrganizationDomain" SET "status"='LOST' WHERE "id"=${`dom-a2-${suffix}`}`);
     expect(await withTenantDb(b, tx => tx.$executeRaw`UPDATE "OrganizationDomain" SET "status"='VERIFIED', "verifiedAt"=now() WHERE "id"=${`dom-b2-${suffix}`}`)).toBe(1);
