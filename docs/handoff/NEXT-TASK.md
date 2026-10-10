@@ -2,38 +2,41 @@
 
 Read `docs/handoff/CURRENT-STATE.md` first.
 
+## Completed (2026-10-10)
+
+PR #16 was promoted and merged (`8acea18`). Merge-SHA CI PASS. Exact-SHA Production deployment `dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U` READY. Unauthenticated HTTP smoke PASS. Read-only Production DB preflight PASS (bootstrap Assignment count 0, protected capability DENY).
+
 ## Next objective
 
-Final review and promotion of PR #16 (operator-only canonical browser evidence transport).
+Production **authenticated** smoke on `8acea18`, performed by the human operator in a browser:
+
+1. Entra login reaches the dashboard.
+2. Pages render: `/dashboard/users` (JML), `/dashboard/resources`, `/dashboard/governance/sod`, `/dashboard/governance/access-reviews`, `/dashboard/resources/onboarding`.
+3. `GET /api/resources/protected-resource-demo` returns 403 `RESOURCE_ACCESS_DENIED` with an `evidenceId`.
+4. Sign out, then LUXIA_LOCAL passkey login reaches the dashboard.
+
+Expected side effects: new Session rows and one `RESOURCE.CAPABILITY.READ` DENIED audit event. No authorization state change.
 
 ## Allowed
 
-- Review of PR16 (code, tests, certification evidence).
-- Documentation updates (handoff docs, certification summaries).
-- Non-mutating verification: GitHub/CI reads, git inspection, read-only checks.
+- Review, documentation, and non-mutating verification (GitHub/CI/Vercel reads, HTTP GETs, read-only preflight via `scripts/operators/production-resource-preflight.ts`).
 
 ## Forbidden
 
-- Any Production grant or Production data mutation.
-- Manifest generation, registration, or reuse of any old manifest/approval.
-- Merging PR16 (or any PR) without explicit human approval.
-- Any change to PR12, or mixing PR12 into PR16.
-- Starting a new product slice (dashboard, onboarding, Alma, Sovereign Runtime, etc.).
-- Changes to `app/`, `lib/`, `prisma/`, the authorization model, runner semantics or the manifest model in PR16.
+- Any Production grant, Assignment creation or business-data mutation.
+- Manifest generation before the authenticated smoke passes. After it passes, generate a manifest only per section 11 of CURRENT-STATE, then STOP for explicit human approval.
+- Reusing, editing or re-timestamping any old manifest/approval.
+- Merging any PR without explicit human approval.
+- Any change to PR12.
+- Starting a new product slice.
+- Environment variable changes, migrations, or Production deploys without explicit human approval.
 
 ## Success criteria
 
-- PR16 is Ready for Review.
-- CI PASS on PR16's exact head SHA.
-- No scope broadening: `git diff main...<PR16 head> -- app lib prisma` is empty, and no operator module is imported from `app/` or `lib/`.
+- The authenticated smoke passes, and the operator's observations are recorded in CURRENT-STATE.
+- A re-run of the read-only preflight still shows bootstrap Assignment count 0 and DENY.
+- No scope broadening.
 
 ## Stop condition
 
-STOP once the success criteria are met, and report the PR16 SHA, CI run, review status and remaining blockers. Wait for an explicit human merge decision. Never infer PASS.
-
-## After explicit merge approval (each step is a separate gate)
-
-1. CI PASS on the exact merge SHA, and Production deployment of that exact SHA.
-2. Non-mutating Production smoke: Entra login, LUXIA_LOCAL/passkey, canonical session, dashboard, JML, Resources, SoD, Access Reviews, Resource Onboarding, protected capability DENY, bootstrap Assignment count = 0.
-3. Read-only revalidation: binding, Subject ACTIVE, SoD NONE, count 0, DENY, deployed SHA. Then generate a NEW manifest (new assignmentId/operationId/validFrom, validUntil ≤ 1 h, new binding). **STOP for explicit human approval.**
-4. Ceremony: DENY → exactly one bounded DIRECT RESOURCE grant → ALLOW → exact replay idempotent → modified replay DENY → revoke → DENY → revoked replay no recreation. Then STOP.
+STOP after recording the authenticated smoke result. Manifest generation and the Production ceremony each require their own explicit human approval. Never infer PASS.

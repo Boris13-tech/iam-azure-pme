@@ -1,30 +1,35 @@
 # LUXIA Identity — CURRENT STATE
 
-Snapshot: 2026-10-10, written by Claude Code after the PR #16 documentation fix commit.
+Snapshot: 2026-10-10 ~11:30Z, written by Claude Code after the PR #16 merge, the Production deployment of the merge SHA, and the read-only Production preflight.
 The repository is the source of truth. No agent may rely on another agent's memory.
 
 Evidence labels:
 
-- **VERIFIED 2026-10-10**: observed directly in this snapshot (GitHub API, CI, git objects, source review).
-- **VERIFIED FROM PRIOR CERTIFICATION EVIDENCE**: taken from committed `docs/certification/*` files. **Not** re-executed or re-read from the database in this snapshot.
+- **VERIFIED 2026-10-10**: observed directly in this snapshot (GitHub API, CI, Vercel API, HTTP, git objects, source review, or the read-only preflight run by the operator).
+- **VERIFIED FROM PRIOR CERTIFICATION EVIDENCE**: taken from committed `docs/certification/*` files. **Not** re-executed in this snapshot.
+- **PENDING**: not yet observed.
 
-## 1. Branches and SHAs
+## 1. Branches, SHAs, deployment
 
 | Item | Value | Evidence |
 |---|---|---|
-| `main` | `e4038f89924c3e52e904a3578d086276ab890b72` (PR #15 merge) | VERIFIED 2026-10-10 |
-| CI on `main` @ e4038f8 | success | VERIFIED 2026-10-10 |
-| Production deployed SHA | `e4038f89924c3e52e904a3578d086276ab890b72` | VERIFIED 2026-10-10 from the GitHub deployment record (environment `Production`, created 2026-10-09T11:09:22Z). The Vercel control plane was not queried in this snapshot. |
-| Production smoke after the e4038f8 deploy | **No committed evidence found** | VERIFIED 2026-10-10 (absence in `docs/certification`) |
+| `main` | `8acea18fae902aad1d444db3b21eef721b4e0760` (merge of PR #16, 2026-10-10T10:39:37Z) | VERIFIED 2026-10-10 |
+| CI on `main` @ 8acea18 | `test-and-build` PASS: https://github.com/Boris13-tech/iam-azure-pme/actions/runs/38045671666 | VERIFIED 2026-10-10 |
+| Production deployment | `dpl_J3GnuWwpMFejURjG5ASKWc8nJK5U`, target production, **READY**, `githubCommitSha` = `8acea18fae902aad1d444db3b21eef721b4e0760`. It is the current Production target of Vercel project `prj_dZ6YOYRdONsicgWdlmofh7NwtoSP`, aliased to https://iam-azure-pme.vercel.app. | VERIFIED 2026-10-10 (Vercel API) |
+| How it was deployed | Vercel API `POST /v13/deployments` with `gitSource` = GitHub repo 1270644438, ref `main`, exact sha. Built by Vercel from GitHub; no local upload, no env change, no migration (build = `tsc`, lint, `prisma generate`, `next build`). | VERIFIED 2026-10-10 |
+| Rollback deployment | `dpl_DUEzcvKxUvN1wxox67sxnQdSvfpW` (`e4038f8`, READY) | VERIFIED 2026-10-10 |
+| Auto-deploy from `main` | **Disabled by design** (`vercel.json`: `git.deploymentEnabled.main = false`). Production deploys are manual operator actions. | VERIFIED 2026-10-10 |
+| Application code `e4038f8` → `8acea18` | Identical. PR16 changed only `scripts/`, `tests/`, `docs/` and `.gitignore`. | VERIFIED 2026-10-10 (git diff) |
 
 ## 2. Pull requests
 
 | PR | Head SHA | Status | Evidence |
 |---|---|---|---|
-| #16 Operator-only canonical browser evidence transport (`fix/operator-browser-evidence`) | `12e5eebb463ddf2f25a8990ca54d38f4d4ed6dfc` | Based directly on `main`. Changes only operator scripts, certification tests and allowlists, and docs. `app/`, `lib/` and `prisma/` are unchanged. See section 9 for CI and Ready-for-Review status. | VERIFIED 2026-10-10 |
-| #12 Providers Management v1 (`feat/providers-management-v1`) | `d604a48fa62fbec65676c0423a08645805d67129` | Draft. CI `test-and-build` PASS on its own head. **Merge state CONFLICTING** with `main` (`app/dashboard/layout.tsx`). It is based on old `main` `4b0d228` (before PR13). It shares no files with PR16. | VERIFIED 2026-10-10 |
+| #16 Operator-only canonical browser evidence transport | `12e5eebb463ddf2f25a8990ca54d38f4d4ed6dfc` | **MERGED** as `8acea18` with explicit human authorization. Head CI PASS (run 38045374460). | VERIFIED 2026-10-10 |
+| #17 docs(handoff) | this PR | Draft, docs only | VERIFIED 2026-10-10 |
+| #12 Providers Management v1 (`feat/providers-management-v1`) | `d604a48fa62fbec65676c0423a08645805d67129` | Draft. CI PASS on its own head. **Merge state CONFLICTING** with `main` (`app/dashboard/layout.tsx`). Based on old `main` `4b0d228` (before PR13). | VERIFIED 2026-10-10 |
 
-Merged: #1–#11, #13 (Resources & Governance v1), #14 (Resource Access Onboarding v1), and #15 (operator runner + release binding, merged 2026-10-09T11:02:35Z). VERIFIED 2026-10-10.
+Merged before PR16: #1–#11, #13 (Resources & Governance v1), #14 (Resource Access Onboarding v1), #15 (operator runner + release binding). VERIFIED 2026-10-10.
 
 ## 3. Authoritative Production constants
 
@@ -41,19 +46,38 @@ These are also hard-coded in `scripts/operators/resource-owner-bootstrap.ts`.
 
 Never reuse superseded or typo values.
 
-## 4. Production Resource binding state
+## 4. Production state: read-only preflight
 
-| Item | State | Evidence |
-|---|---|---|
-| Resource / RESOURCE Scope / Entitlement exact binding | true (active) | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE: `PR15-RELEASE-BINDING-RECERTIFICATION-2026-10-09.md`, read-only SQL at 2026-10-09T06:23:54Z, deployment `5704558`. |
-| Subject lifecycle | ACTIVE | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (same source) |
-| SoD for the target grant | ALLOW (no conflict) | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (same source) |
-| Protected capability | DENY | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (same source) |
-| **Bootstrap Assignment count on the target entitlement** | **0** (21 other existing assignments) | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (same source) |
-| Production first-owner grant ever executed | NO | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE: `PR15-MANIFEST-EXPIRY-2026-10-09.md`, `PR14-BOOTSTRAP-ABANDONED-2026-10-08.md` |
-| `PRODUCTION_REGISTRATIONS` (runner registry) | empty | VERIFIED 2026-10-10 (source) |
+Run by the operator on 2026-10-10 at **11:25:58Z**. The script was `scripts/operators/production-resource-preflight.ts` @ `8acea18`, with `app_user` on the Production pooler endpoint inside a `READ ONLY` transaction. Verdict: **PASS**. VERIFIED 2026-10-10.
 
-The last read-only Production baseline was taken **before** the e4038f8 deploy. It must be re-taken (non-mutating) before any new manifest is generated.
+| Check | Result |
+|---|---|
+| Endpoint = Production `app_user`, `neondb`, `sslmode=require` | true |
+| `app_user` NOSUPERUSER / NOBYPASSRLS / owns no tables | true / true / true |
+| RLS enabled + forced on all 12 controlled tables | true |
+| No PUBLIC EXECUTE on `luxia_*` functions, and no default PUBLIC EXECUTE | true |
+| Subject ACTIVE | true |
+| Exact Resource / RESOURCE Scope / Entitlement binding | true |
+| SoD for the target grant | no conflict (ALLOW) |
+| **Bootstrap Assignment count on the target entitlement** | **0** |
+| Protected capability decision | **DENY** |
+| Mutations | NONE |
+| Migrations applied | 19 |
+| Sessions | 68 total, 1 unexpired (59 on 2026-10-09; increase = logins) |
+
+Data preservation compared with the last baseline (`PR15-RELEASE-BINDING-RECERTIFICATION-2026-10-09.md`, 2026-10-09T06:23:54Z):
+
+| Table | Count | Digest | vs. 2026-10-09 |
+|---|---|---|---|
+| Assignment | 21 | `83e7540cab85667c96e63da4ba5f2183` | **identical** |
+| IdentityAccount | 2 | `0714d38589d2ee4dc18a4da0bf7c98a0` | identical |
+| Subject | 1 | `457b5d60f12a6dfcefe1712016502d82` | count identical |
+| Resource / ResourceScope | 1 / 1 | `6b36638b…` / `d97dbb74…` | count identical |
+| Entitlement | 22 | `ba34b454b1fbe0bbc37518a324d6d95c` | — |
+| ProviderConnection | 2 | `5f02e7ab268625a8886d5c098f4f7998` | count identical |
+| Legacy User / Role / UserRole / Permission / LegacyUserBridge | 2 / 3 / 2 / 0 / 0 | — | count identical |
+
+`PRODUCTION_REGISTRATIONS` (runner registry) is empty. No Production first-owner grant has ever been executed (VERIFIED FROM PRIOR CERTIFICATION EVIDENCE: `PR15-MANIFEST-EXPIRY-2026-10-09.md`, `PR14-BOOTSTRAP-ABANDONED-2026-10-08.md`; consistent with the Assignment digest above).
 
 ## 5. Abandoned artifacts (never reuse, extend or re-timestamp)
 
@@ -64,36 +88,38 @@ The last read-only Production baseline was taken **before** the e4038f8 deploy. 
 
 | Certification | Evidence |
 |---|---|
-| Identity baseline (Organization/Tenant, forced RLS, Subject, IdentityAccount, Entra, LUXIA_LOCAL/passkeys, sessions, JML, canonical audit) | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (earlier PRs and certification docs) |
+| Identity baseline (Organization/Tenant, forced RLS, Subject, IdentityAccount, Entra, LUXIA_LOCAL/passkeys, sessions, JML, canonical audit) | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE |
 | Resources & Governance v1, SoD v1, Access Reviews v1, SQL function privilege hardening | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (`PR13-*`, `SOD-V1-*`, `ACCESS-REVIEWS-V1-*`) |
 | Resource Access Onboarding v1 application layer (pre-bootstrap) | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (`RESOURCE-ONBOARDING-PREBOOTSTRAP-2026-10-08.md`) |
 | Operator runner on clone: DENY → one bounded DIRECT grant → ALLOW → replay → revoke → DENY → no recreation | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (`PR15-RELEASE-BINDING-RECERTIFICATION-2026-10-09.md`) |
-| PR16 browser-evidence transport on clone (ci05): 70 files, 367 passed, 11 gated skipped, 0 failed; no deadlock, open transaction or advisory lock; app_user least privilege | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (`OPERATOR-BROWSER-TRANSPORT-2026-10-09.md`) |
-| PR16 static security review: env guards, manifest binding, detached approval, expiry, replay, revoke no-recreation, no browser bypass, no secret in diff | VERIFIED 2026-10-10 (source review) |
+| PR16 browser-evidence transport on clone (ci05): 367 passed, 0 failed; no deadlock, open transaction or advisory lock | VERIFIED FROM PRIOR CERTIFICATION EVIDENCE (`OPERATOR-BROWSER-TRANSPORT-2026-10-09.md`) |
+| PR16 static security review | VERIFIED 2026-10-10 |
+| PR16 merge-SHA CI + exact-SHA Production deployment | VERIFIED 2026-10-10 |
+| Production unauthenticated HTTP smoke on `8acea18`: `/login` 200; `/dashboard` 307 → `/login`; `/api/resources/protected-resource-demo` 401 `{"error":"Unauthorized"}` | VERIFIED 2026-10-10 |
+| Production read-only DB preflight (section 4) | VERIFIED 2026-10-10 |
 
 ## 7. Pending certifications
 
+- **Production authenticated smoke (operator browser)**: PENDING. Covers Entra login, LUXIA_LOCAL/passkey login, canonical session, the dashboard, JML (`/dashboard/users`), `/dashboard/resources`, `/dashboard/governance/sod`, `/dashboard/governance/access-reviews`, `/dashboard/resources/onboarding`, and an authenticated protected route returning 403 `RESOURCE_ACCESS_DENIED`.
 - **Resource Access Onboarding v1 Production end-to-end**: NOT EXECUTED. No Production grant has ever run.
-- Production non-mutating smoke on the deployed SHA: pending (none recorded for e4038f8; required again after the PR16 merge).
 - PR12 live provider certification: Entra BLOCKED (dedicated credentials/consent missing), Google BLOCKED (same), OIDC BLOCKED (no approved issuer).
 
 ## 8. Security invariants (non-negotiable)
 
 - Default deny and tenant isolation, with PostgreSQL RLS enabled and forced on controlled tables.
-- `app_user` is NOSUPERUSER and NOBYPASSRLS, owns no controlled table, and there is no PUBLIC EXECUTE on LUXIA functions.
+- `app_user` is NOSUPERUSER and NOBYPASSRLS, owns no controlled table, and there is no PUBLIC EXECUTE on LUXIA functions. These were re-observed in Production on 2026-10-10 (section 4).
 - No secret, token or DB URL in logs. No silent grant, no implicit first owner, and `resources.manage` never implies Resource access.
 - The browser never controls Subject, Resource, action or grant. There is no legacy Role authority.
 - No cross-tenant enumeration. Every privileged operation is audited, replay-protected, idempotent and fails closed.
 - The first owner is created only by an explicit operator ceremony with a detached human approval.
 
-## 9. PR16 CI / review status
+## 9. Operator tooling state (operator workstation, not the repo)
 
-VERIFIED 2026-10-10:
-
-- CI on the exact head `12e5eebb463ddf2f25a8990ca54d38f4d4ed6dfc`: `test-and-build` **PASS**. Run: https://github.com/Boris13-tech/iam-azure-pme/actions/runs/38045374460. Vercel Preview PASS. The Production activation/identity jobs were skipped, as designed for PRs.
-- Previous head `f22d856`: CI PASS (run 37969954967).
-- Ready for Review: **YES** (marked 2026-10-10 with explicit human authorization). Merge state CLEAN. **Not merged.**
-- Commit `12e5eeb` changes only `.gitignore` (raw certification reports excluded) and `docs/certification/OPERATOR-BROWSER-TRANSPORT-2026-10-09.md` (observed CI recorded).
+- Neon CLI `neon` 8.3.5 is installed, and the operator is signed in.
+- The Neon MCP server is configured for Claude Code (user scope) with OAuth, **read-only**, and pinned to `hidden-leaf-91460552`.
+- The Neon skills `neon` and `neon-postgres` are installed at user level.
+- The Vercel CLI is signed in to scope `legrandborisohandjaedimo-4025s-projects`.
+- The operator's git `user.email` is misconfigured as `…@gmailcom` (missing dot); historical commits carry it.
 
 ## 10. Known limitations
 
@@ -101,12 +127,13 @@ VERIFIED 2026-10-10:
 - Browser evidence is bound to its probe by time only: the event must be fresh after the probe starts. The server event does not carry the probeId. Fixed actor/tenant/resource/action/assignment checks and a consumed-ID set mitigate this.
 - Evidence freshness compares the app server's `occurredAt` with the operator's local clock, with no lower-bound tolerance. Clock skew fails closed.
 - In the runner, the modified-replay check is a local `validate()` refusal. The ceremony-level modified-bytes refusal is covered by clone tests.
-- **Repo hygiene issue:** a tracked file named `" README.md"` (leading space) breaks a plain checkout on Windows. Workaround: `git config core.longpaths true` plus a sparse-checkout excluding `/ README.md`. A separate fix is proposed (rename or remove), outside PR16.
+- **Repo hygiene issue:** a tracked file named `" README.md"` (leading space) breaks a plain checkout on Windows. Workaround: `git config core.longpaths true` plus a sparse-checkout excluding `/ README.md`. A separate fix is proposed (rename or remove).
+- Windows operators must run operator shell scripts through Git Bash (`C:\Program Files\Git\bin\bash.exe`). In PowerShell, `bash` resolves to the WSL launcher.
 - PR12 must be rebased onto current `main` before any review.
 
-## 11. Blockers
+## 11. Blockers / next gates
 
-1. PR16 merge: explicit human authorization.
-2. After merge: CI on the exact merge SHA, deployment of that exact SHA, and a non-mutating Production smoke.
-3. New manifest: fresh read-only Production revalidation, then generation, then **explicit human approval**.
+1. Operator authenticated browser smoke (section 7): PENDING. This is the only remaining gate before manifest preparation.
+2. New manifest: generate it only after (1) passes, with new assignmentId/operationId/validFrom, validUntil ≤ 1 h and a new binding, revalidated against section 4. Then **STOP for explicit human approval**.
+3. Production ceremony: only after explicit approval of that new manifest.
 4. PR12: live provider credentials/consent/issuer, and a rebase.
