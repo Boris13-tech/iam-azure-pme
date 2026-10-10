@@ -448,7 +448,15 @@ export async function revokeAssignment(auth: AuthContext, assignmentId: string, 
 export async function listSessions(auth: AuthContext, changeId: string) {
   return withTenantDb(auth, async (tx) => {
     await writeAudit(tx, auth, { operation: "SESSION.READ", changeId });
-    const sessions = await tx.session.findMany({ orderBy: { createdAt: "desc" } });
+    // Explicit projection: ipHash / userAgentHash are unsalted SHA-256 values (an IPv4 address is
+    // recoverable by brute force) and are never returned. `id` stays: it is the revocation handle.
+    const sessions = await tx.session.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true, organizationId: true, tenantId: true, subjectId: true, identityAccountId: true,
+        recoveryEpoch: true, expiresAt: true, revokedAt: true, createdAt: true, lastSeenAt: true,
+      },
+    });
     return sessions.map((session) => ({
       ...session,
       recoveryEpoch: session.recoveryEpoch.toString(),
