@@ -168,6 +168,8 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
   });
 
   it("completion refuses with one generic answer: decoy transaction, bad signature, or another organization", async () => {
+    const sessions = () => owner.session.count({ where: { organizationId: { in: [a.organizationId, b.organizationId] } } });
+    const sessionsBefore = await sessions(); // other tests in this file sign in successfully
     const decoy = await beginJson({ organization: `zulu-${suffix}`, principalName: "alice" });
     const real = await beginJson({ organization: a.slug, principalName: "alice" });
     const attempt = (organization: string, started: { body: Record<string, string> }) => post(complete, "/api/auth/local/complete", {
@@ -185,7 +187,7 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
       expect(await response.json()).toEqual({ error: "LOCAL_AUTHENTICATION_FAILED" });
       expect(response.headers.get("set-cookie")).toBeNull();
     }
-    expect(await owner.session.count({ where: { organizationId: { in: [a.organizationId, b.organizationId] } } })).toBe(0);
+    expect(await sessions()).toBe(sessionsBefore); // no session from any refused attempt
   });
 
   it("requirement 3: sign-in is rate limited per client, with the same answer for every organization", async () => {
