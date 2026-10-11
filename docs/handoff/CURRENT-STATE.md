@@ -1,5 +1,12 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-11 ~14:20Z — CUSTOMER SELF-ONBOARDING V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/CUSTOMER-SELF-ONBOARDING-V1-MULTI-ORG-CERTIFICATION-2026-10-11.md`).
+> - `main` is `5e8c887` (PR #35, finding F1 fixed: passkey sign-in never lists credential IDs). Production = **`dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ` @ `5e8c887`**; rollback = `dpl_7ZzzEA3DbQdAACKZP4f9V947gkad` @ `6f9de76`.
+> - Two organizations exist: `legrand-tech` (active) and `luxia-certification-lab`. The Lab was **neutralized** by a provisional break-glass operator action: no session, accounts disabled, passkeys revoked, domain released. Its history is kept.
+> - Recorded in the report: D1 (slug deviation, no security impact) and I1 (same-value update of Legrand's identity, only `updatedAt` changed).
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-11 ~09:55Z — CUSTOMER SELF-ONBOARDING V1 RELEASED; LEGRAND TECH VALIDATED** (`docs/certification/CUSTOMER-SELF-ONBOARDING-V1-RELEASE-2026-10-11.md`).
 > - `main` is `6f9de76` (merge of PR #32, CI run 38094537834 PASS).
 > - **20 migrations** applied in Production. The latest, `20261011000000_customer_self_onboarding_v1`, was applied at 01:25:12Z. The business digest of the 45 tables is identical before and after, and Legrand Tech is now `legrand-tech`.
