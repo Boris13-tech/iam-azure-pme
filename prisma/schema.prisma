@@ -110,11 +110,21 @@ enum ProviderType {
   CUSTOM
 }
 
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
 model Organization {
   id        String   @id @default(uuid())
   name      String
   /// Customer Self-Onboarding v1: unique, normalized login identifier; immutable (trigger).
   slug      String   @unique @default(dbgenerated("('org-'::text || substr(md5(((gen_random_uuid())::text || (clock_timestamp())::text)), 1, 16))"))
+  /// First Admin / Break-glass v1: changed only by the operator procedure, under the governance lock (database guard).
+  status    OrganizationStatus @default(ACTIVE)
+  /// Set by the database on each status change; never by the application.
+  statusChangedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1062,6 +1072,11 @@ model LegacyUserBridge {
 // SESSION MANAGEMENT (PHASE 3 - COMMIT A)
 // ----------------------------------------------------------------------
 
+enum SessionScope {
+  FULL
+  RECOVERY
+}
+
 model Session {
   id                String @id
   organizationId    String
@@ -1069,6 +1084,8 @@ model Session {
   subjectId         String
   identityAccountId String
   recoveryEpoch     BigInt @default(0)
+  /// FULL, or RECOVERY (recovery-only, 15 minutes at most). Immutable (database guard).
+  scope             SessionScope @default(FULL)
 
   expiresAt  DateTime
   revokedAt  DateTime?

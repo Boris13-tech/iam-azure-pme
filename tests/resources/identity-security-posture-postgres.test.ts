@@ -44,9 +44,12 @@ async function seed(tx: Prisma.TransactionClient, now: number) {
   await tx.providerIdentityCollision.create({ data: { ...A, providerConnectionId: entra, externalObjectId: randomUUID(), reasonCode: "FIXTURE", evidence: {} } });
   await tx.providerIdentityCollision.create({ data: { ...A, providerConnectionId: entra, externalObjectId: randomUUID(), reasonCode: "FIXTURE", evidence: {}, resolvedAt: new Date(now) } });
 
-  const session = (id: string, subjectId: string, identityAccountId: string, createdAt: number, expiresAt: number, revokedAt?: number, scope = A) =>
-    tx.session.create({ data: { ...scope, id, subjectId, identityAccountId, createdAt: new Date(createdAt), expiresAt: new Date(expiresAt),
-      revokedAt: revokedAt ? new Date(revokedAt) : null, ipHash: MARK.ip, userAgentHash: MARK.ua } });
+  // Sessions are append-only: a revoked fixture is created active, then revoked once.
+  const session = async (id: string, subjectId: string, identityAccountId: string, createdAt: number, expiresAt: number, revokedAt?: number, scope = A) => {
+    await tx.session.create({ data: { ...scope, id, subjectId, identityAccountId, createdAt: new Date(createdAt), expiresAt: new Date(expiresAt),
+      ipHash: MARK.ip, userAgentHash: MARK.ua } });
+    if (revokedAt) await tx.session.update({ where: { id }, data: { revokedAt: new Date(revokedAt) } });
+  };
   await session(MARK.sess, ids.V, acct.V, now - HOUR, now + DAY);
   await session(randomUUID(), ids.s1, acct.s1, now - HOUR, now + DAY);
   await session(randomUUID(), ids.s1, acct.s1, now - 2 * HOUR, now + DAY);
