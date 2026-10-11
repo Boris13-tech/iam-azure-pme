@@ -41,6 +41,12 @@ The migration is expand-only. The application deployed before it (`ebb4f46`) kee
    - the grants are in place.
 5. **No deployment.** B3 is built and approved separately.
 
+## Note for any status change (B4)
+
+Prisma 5.20 does not report a failed COMMIT of an interactive transaction. This was verified on a Neon clone: the database refused the incomplete transition and wrote nothing, but `$transaction` resolved. Every transition must therefore:
+- end with `SET CONSTRAINTS ALL IMMEDIATE`;
+- be checked by re-reading the state after the commit.
+
 ## 3. Rollback
 
 - **Application:** nothing to roll back. The deployed code does not depend on the migration.

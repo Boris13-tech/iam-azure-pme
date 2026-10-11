@@ -63,7 +63,11 @@ async function effects(tx: Prisma.TransactionClient, org: Org, status: Status) {
 }
 type TransitionOptions = { lock?: "all" | "first" | "none"; effects?: "after" | "before" | "none"; immediate?: boolean;
   client?: PrismaClient; held?: () => void; pause?: Promise<void> };
-/** What the B4 procedure does: governance lock of every tenant, then the status, then the effects. */
+/**
+ * What the B4 procedure does: governance lock of every tenant, then the status, then the effects, then
+ * SET CONSTRAINTS ALL IMMEDIATE. Prisma 5 does not report a failed COMMIT of an interactive transaction
+ * (verified on a Neon clone): ending with the explicit check makes a refusal surface as a statement error.
+ */
 function transition(org: Org, status: Status, options: TransitionOptions = {}) {
   return (options.client ?? owner).$transaction(async (tx) => {
     const tenants = options.lock === "none" ? [] : options.lock === "first" ? [org.tenants[0]] : [...org.tenants].sort();
@@ -71,8 +75,7 @@ function transition(org: Org, status: Status, options: TransitionOptions = {}) {
     if (options.effects === "before") await effects(tx, org, status);
     await tx.$executeRaw`UPDATE "Organization" SET "status" = ${status}::"OrganizationStatus" WHERE "id" = ${org.organizationId}`;
     if ((options.effects ?? "after") === "after") await effects(tx, org, status);
-    // Surfaces the deferred completeness check here, with its own message, instead of at commit.
-    if (options.immediate) await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+    if (options.immediate ?? true) await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
     options.held?.();
     if (options.pause) await options.pause;
   }, { maxWait: 10_000, timeout: 60_000 });
@@ -82,9 +85,9 @@ function gate() { let open!: () => void; const promise = new Promise<void>((reso
 /** Waits until `count` locks are being waited for: advisory ones, or row/transaction ones. */
 async function waitBlocked(count: number, kind: "advisory" | "row") {
   for (let attempt = 0; ; attempt++) {
+    // A row wait shows as a transactionid lock (no database) or a tuple lock, never as advisory.
     const [{ waiting }] = await owner.$queryRaw<{ waiting: number }[]>`SELECT count(*)::int AS waiting FROM pg_locks
-      WHERE NOT granted AND database IS NOT DISTINCT FROM (SELECT oid FROM pg_database WHERE datname = current_database())
-        AND (locktype = 'advisory') = ${kind === "advisory"}`;
+      WHERE NOT granted AND (CASE WHEN ${kind === "advisory"} THEN locktype = 'advisory' ELSE locktype IN ('transactionid', 'tuple') END)`;
     if (waiting >= count) return;
     if (attempt > 400) throw new Error(`NOT_BLOCKED_${kind}`);
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -99,8 +102,8 @@ async function race(org: Org, operations: Array<() => Promise<unknown>>) {
   }, { timeout: 60_000 });
   await ready.promise;
   const settled = operations.map((operation) => settle(operation()));
-  await waitBlocked(operations.length, "advisory");
-  release.open(); await holder;
+  try { await waitBlocked(operations.length, "advisory"); } finally { release.open(); }
+  await holder;
   return Promise.all(settled);
 }
 async function openInvitation(org: Org) {
@@ -220,8 +223,10 @@ describe.runIf(enabled)("Organization.status and Session.scope (PostgreSQL)", ()
   it("M1: a transition without its effects fails at commit and writes nothing", async () => {
     const org = await organization();
     await signIn(org);
-    await expect(transition(org, "SUSPENDED", { effects: "none", immediate: true })).rejects.toThrow(/ORGANIZATION_TRANSITION_INCOMPLETE_SESSIONS/);
-    await expect(transition(org, "SUSPENDED", { effects: "none" })).rejects.toThrow();
+    await expect(transition(org, "SUSPENDED", { effects: "none" })).rejects.toThrow(/ORGANIZATION_TRANSITION_INCOMPLETE_SESSIONS/);
+    // Without the explicit check, the database refuses at COMMIT. Prisma 5 does not report a failed
+    // COMMIT, so the proof is the state: nothing was written.
+    await settle(transition(org, "SUSPENDED", { effects: "none", immediate: false }));
     expect(await statusOf(org)).toBe("ACTIVE");
     expect(await openSessions(org)).toBe(1);
     // CLOSED also needs the open invitation revoked and the verified domain released.
@@ -333,8 +338,8 @@ describe.runIf(enabled)("Organization.status and Session.scope (PostgreSQL)", ()
     const t = transition(org, "SUSPENDED", { held: held.open, pause: pause.promise });
     await held.promise;
     const s = settle(signIn(org));
-    await waitBlocked(1, "row");
-    pause.open(); await t;
+    try { await waitBlocked(1, "row"); } finally { pause.open(); }
+    await t;
     expect(text(await s)).toMatch(/ORGANIZATION_NOT_ACTIVE/);
     expect(await openSessions(org)).toBe(0);
   }, 60_000);
@@ -350,8 +355,8 @@ describe.runIf(enabled)("Organization.status and Session.scope (PostgreSQL)", ()
     });
     await held.promise;
     const t = settle(transition(org, "SUSPENDED"));
-    await waitBlocked(1, "row");
-    pause.open(); await s;
+    try { await waitBlocked(1, "row"); } finally { pause.open(); }
+    await s;
     expect(await t).toBe("ok");
     expect(await statusOf(org)).toBe("SUSPENDED");
     expect((await owner.session.findUniqueOrThrow({ where: { id } })).revokedAt).toBeInstanceOf(Date);
@@ -368,9 +373,9 @@ describe.runIf(enabled)("Organization.status and Session.scope (PostgreSQL)", ()
     });
     await held.promise;
     const t = settle(transition(org, "SUSPENDED", { effects: "before" }));
-    await waitBlocked(1, "row");
-    pause.open(); await s;
-    expect(await t).not.toBe("ok");
+    try { await waitBlocked(1, "row"); } finally { pause.open(); }
+    await s;
+    expect(text(await t)).toMatch(/ORGANIZATION_TRANSITION_INCOMPLETE_SESSIONS/);
     expect(await statusOf(org)).toBe("ACTIVE");
     expect((await owner.session.findUniqueOrThrow({ where: { id } })).revokedAt).toBeNull();
   }, 60_000);
