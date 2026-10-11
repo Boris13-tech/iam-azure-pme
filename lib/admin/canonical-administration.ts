@@ -519,7 +519,10 @@ export async function revokeSession(auth: AuthContext, sessionId: string, change
     await assertUnusedChangeId(tx, auth, changeId);
     const existing = await tx.session.findFirst({ where: { id: sessionId, revokedAt: null } });
     if (!existing) throw new CanonicalAdminError("ACTIVE_SESSION_NOT_FOUND", 404);
-    const session = await tx.session.update({ where: { id: sessionId }, data: { revokedAt: new Date() } });
+    // Conditional (B3): a session revoked concurrently is frozen; this is then a clean 404, not a failure.
+    const revoked = await tx.session.updateMany({ where: { id: sessionId, revokedAt: null }, data: { revokedAt: new Date() } });
+    if (revoked.count !== 1) throw new CanonicalAdminError("ACTIVE_SESSION_NOT_FOUND", 404);
+    const session = await tx.session.findFirstOrThrow({ where: { id: sessionId } });
     await writeAudit(tx, auth, {
       operation: "SESSION.REVOKE",
       changeId,

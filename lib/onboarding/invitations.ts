@@ -10,6 +10,7 @@ import { registrationChallenge, verifyPasskeyRegistration, type PasskeyRegistrat
 import { createPasskeyIdentity, grantAdministrator, localConnection } from "./provisioning";
 import type { AuthContext } from "../auth/authorization-engine";
 import { lockTenantGovernance } from "../admin/last-administrator";
+import { lockOrganizationActive } from "../organizations/lifecycle";
 
 // Customer Self-Onboarding v1, step 6 (requirements 8, 9, 16). An administrator invites a person:
 // LUXIA creates the identity (PROVISIONING) and a single-use link the administrator copies. No email
@@ -42,6 +43,7 @@ export function listInvitations(auth: AuthContext, changeId: string) {
 export async function createInvitation(auth: AuthContext, changeId: string, input: { name: unknown; role: unknown }) {
   if (!await allowRequest("invitation-create", `subject:${auth.subjectId}`)) throw new CanonicalAdminError("RATE_LIMITED", 429);
   return operation(auth, changeId, "INVITATION.CREATE", "subjects.create", async (tx) => {
+    if (!await lockOrganizationActive(tx, auth.organizationId)) throw new CanonicalAdminError("ORGANIZATION_NOT_ACTIVE", 403);
     const name = typeof input.name === "string" ? input.name.trim() : "";
     const role = input.role === "ADMIN" || input.role === "MEMBER" ? input.role : null;
     if (name.length < 2 || name.length > 120 || !role) throw new CanonicalAdminError("INVALID_REQUEST_BODY", 400);
@@ -92,6 +94,8 @@ export async function beginAcceptance(input: { token: unknown; principalName: un
   const scope = { organizationId: invitation.organization_id, tenantId: invitation.tenant_id };
   const challenge = randomBytes(32).toString("base64url");
   const subject = await inTenant(scope, async (tx) => {
+    // B3: same answer as an unknown token when the organization is not ACTIVE.
+    if (!await lockOrganizationActive(tx, scope.organizationId)) throw new InvitationError("INVITATION_INVALID", 403);
     if (!await localConnection(tx, scope)) throw new InvitationError("INVITATION_INVALID", 403);
     if (await tx.localIdentity.findFirst({ where: { ...scope, principalName }, select: { id: true } })) throw new InvitationError("IDENTIFIER_UNAVAILABLE", 409);
     const pending = await tx.invitation.updateMany({
@@ -124,6 +128,8 @@ export async function completeAcceptance(input: { token: unknown; principalName:
       // Same lock order as every governance writer (B1): the tenant lock comes before any row lock,
       // because an ADMIN acceptance writes grants, and the SoD trigger takes this lock on each one.
       await lockTenantGovernance(tx, scope);
+      // B3: then the organization row; same answer as an unknown token when it is not ACTIVE.
+      if (!await lockOrganizationActive(tx, scope.organizationId)) throw new InvitationError("INVITATION_INVALID", 403);
       const now = new Date();
       const accepted = await tx.invitation.updateMany({
         where: { ...scope, id: invitation.invitation_id, tokenHash: invitation.tokenHash, acceptedAt: null, revokedAt: null,

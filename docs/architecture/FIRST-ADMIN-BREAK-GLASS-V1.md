@@ -67,3 +67,45 @@ It checks the lock key against the SoD trigger and the lock order. A self-test p
   The mixed scenarios allow only the expected business refusals. A deadlock or any other error fails the test;
 - resource governance and the bundle cannot reach `assignments.manage`;
 - the savepoint rollback keeps the rest of the transaction.
+
+## B3, organization lifecycle enforcement
+
+Scope approved by the operator on 2026-10-11. It builds on the migration `20261011180000_organization_status_session_scope` (design: `FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-DESIGN.md`).
+
+**Before authentication, SUSPENDED and CLOSED look exactly like an unknown organization.**
+- `resolveLoginOrganization` returns `null` unless the organization is ACTIVE. Every caller already answers `null` generically:
+  - passkey begin: same anonymous answer, same timing floor;
+  - passkey completion: `LOCAL_AUTHENTICATION_FAILED` (401);
+  - Microsoft sign-in: `/login?error=signin`.
+- If the organization stops being ACTIVE during the Microsoft round trip, the callback returns the same generic `/login?error=signin`, with no session. The refusal is still recorded for the known identity.
+- An invitation of a non-ACTIVE organization resolves like an unknown token (`INVITATION_INVALID`).
+
+**Session resolution goes through the canonical resolver only.**
+- Migration `20261011200000_session_resolve_subject_account` extends `luxia_session_resolve`, with the same signature, so grants are kept. It now also refuses a session whose subject is not ACTIVE, or whose identity account is not ACTIVE. `resolve_session` wraps it and inherits the rule. Rollback: `docs/operations/B3-SESSION-RESOLVE-ROLLBACK.sql`, always lossless.
+- `getSession` reads `luxia_session_resolve` and accepts FULL sessions only. B2 will add the recovery-only allow-list.
+
+**Conditional writes.** These no longer fail on a concurrent revocation: a session revoked in the meantime is frozen, and the write becomes a no-op or a clean 404.
+- the `lastSeenAt` refresh;
+- sign-out, which also records `SESSION.SIGN_OUT` once;
+- administrator session revocation.
+
+**Lock order** (B1 rule, extended):
+1. the tenant governance lock, when the transaction takes one;
+2. the organization row (`lockOrganizationActive`, `FOR SHARE`);
+3. the first write.
+
+This applies to every transaction that creates a session, an invitation or a domain, or starts, accepts or verifies one. `tests/security/organization-lifecycle-architecture.test.ts` enforces the order per function, and fails on any new writer of that kind. Authenticated writes refuse with an audited denial (`ORGANIZATION_NOT_ACTIVE`).
+
+**Transition primitive** (`lib/organizations/lifecycle.ts`, `transitionOrganization`). It is operator-only: the database refuses any other role, and nothing in `lib/` or `app/` calls it. B4 will wrap it. In one transaction, it:
+1. takes the governance locks of every tenant;
+2. changes the status;
+3. applies the effects. Suspension revokes every active session at once; closing also revokes the open invitations and releases the domains. Reactivation revokes nothing and brings nothing back, because revoked sessions are frozen;
+4. runs `SET CONSTRAINTS ALL IMMEDIATE`.
+
+`readOrganizationLifecycle` re-reads the committed state (finding P1). CLOSED is final.
+
+**Tests:**
+- `tests/resources/organization-lifecycle-postgres.test.ts`, on PostgreSQL through the real routes;
+- the suspended-organization case in `tests/security/oidc-callback.test.ts`;
+- `tests/security/organization-lifecycle-architecture.test.ts`;
+- a unit test of the session refusal.

@@ -5,6 +5,7 @@ import { CanonicalAdminError } from "../admin/canonical-administration";
 import { operation, requireNative } from "../resources/service";
 import { allowRequest } from "../security/rate-limit";
 import type { AuthContext } from "../auth/authorization-engine";
+import { lockOrganizationActive } from "../organizations/lifecycle";
 
 // Customer Self-Onboarding v1, step 5 (requirements 3, 10, 11). A domain is verified only by a
 // random, single-use DNS TXT challenge with an expiry. A typed domain is never trusted. A verified
@@ -46,6 +47,7 @@ export function listDomains(auth: AuthContext, changeId: string) {
 /** Adds a domain, or issues a new challenge for one that is not verified. The value is shown once. */
 export function addDomain(auth: AuthContext, changeId: string, input: unknown) {
   return operation(auth, changeId, "DOMAIN.ADD", "providers.manage", async (tx) => {
+    if (!await lockOrganizationActive(tx, auth.organizationId)) throw new CanonicalAdminError("ORGANIZATION_NOT_ACTIVE", 403);
     const domain = normalizeDomain(input);
     if (!domain) throw new CanonicalAdminError("INVALID_DOMAIN", 400);
     const token = randomBytes(32).toString("base64url");
@@ -79,6 +81,7 @@ export async function checkDomain(auth: AuthContext, changeId: string, id: strin
     records = [];
   }
   return operation(auth, changeId, "DOMAIN.CHECK", "providers.manage", async (tx) => {
+    if (!await lockOrganizationActive(tx, auth.organizationId)) throw new CanonicalAdminError("ORGANIZATION_NOT_ACTIVE", 403);
     const row = await tx.organizationDomain.findFirst({ where: { ...context(auth), id } });
     if (!row) throw new CanonicalAdminError("DOMAIN_NOT_FOUND", 404);
     const now = new Date();

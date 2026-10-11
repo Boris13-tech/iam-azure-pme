@@ -5,6 +5,7 @@ import { NextRequest } from "next/server";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import crypto from "crypto";
 import { AuthTransactionStore } from "../../lib/auth/auth-transaction-store";
+import { transitionOrganization } from "../../lib/organizations/lifecycle";
 
 vi.mock("../../lib/auth/providers/entra", () => ({
   completeEntraAuthentication: vi.fn().mockResolvedValue({
@@ -134,5 +135,27 @@ describe("OIDC Callback Security", () => {
 
     const res = await GET(req);
     expect(res.status).toBe(400); // Because it was already consumed
+  });
+
+  it("B3: an organization suspended during the Microsoft round trip gets the generic sign-in return, no session", async () => {
+    await adminPrisma.$transaction((tx) => transitionOrganization(tx, orgId, "SUSPENDED"));
+    await AuthTransactionStore.createTransaction({
+      stateHash: "suspended_state", nonce: "nonce", codeVerifier: "verifier",
+      expectedOrganizationId: orgId, expectedTenantId: tenantId, expectedProviderConnectionId: providerConnectionId, returnTo: "/dashboard",
+    });
+    mockCookieSet.mockClear();
+    const sessionsBefore = await adminPrisma.session.count({ where: { organizationId: orgId } });
+    const req = new NextRequest("http://localhost:3000/auth/callback?code=abc&state=suspended_state");
+    req.cookies.set("oidc_state", "suspended_state");
+    req.cookies.set("oidc_code_verifier", "verifier");
+
+    const res = await GET(req);
+    expect(res.status).toBe(303);
+    expect(new URL(res.headers.get("location")!).pathname + new URL(res.headers.get("location")!).search).toBe("/login?error=signin");
+    expect(mockCookieSet).not.toHaveBeenCalled();
+    expect(await adminPrisma.session.count({ where: { organizationId: orgId } })).toBe(sessionsBefore);
+    // The refusal is recorded for the known identity (W2), without revealing anything to the browser.
+    const rejected = await adminPrisma.authenticationEvidence.findMany({ where: { organizationId: orgId, outcome: "REJECTED" } });
+    expect(rejected.map((row) => row.reasonCode)).toContain("ORGANIZATION_NOT_ACTIVE");
   });
 });

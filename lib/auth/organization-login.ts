@@ -38,8 +38,10 @@ export type LoginOrganization = {
 };
 
 export async function resolveLoginOrganization(slug: string): Promise<LoginOrganization | null> {
-  const organization = await rawPrisma.organization.findUnique({ where: { slug }, select: { id: true } });
-  if (!organization) return null;
+  const organization = await rawPrisma.organization.findUnique({ where: { slug }, select: { id: true, status: true } });
+  // B3: a SUSPENDED or CLOSED organization is indistinguishable from an unknown one before
+  // authentication: same null, so every caller gives the same generic answer.
+  if (!organization || organization.status !== "ACTIVE") return null;
   // v1 creates exactly one tenant per organization; anything else is ambiguous and refused.
   const tenants = await rawPrisma.tenant.findMany({ where: { organizationId: organization.id }, select: { id: true }, take: 2 });
   if (tenants.length !== 1) return null;
