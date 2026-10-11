@@ -126,7 +126,7 @@ An architecture test fails if any other file in `lib/` or `app/` calls `getRecov
 - create the new passkey for the session's own identity account;
 - **revoke the recovery session**;
 - **revoke every other session of that identity account**;
-- **revoke the previous passkeys of that account** (decision R4);
+- **revoke the previous passkeys of that account** (decision R4): passkeys and security keys. TOTP is not touched, because it is not used as a sign-in authenticator in the product;
 - write `RECOVERY.PASSKEY_ENROLLED` (with the number of passkeys and sessions revoked) and `LOCAL_AUTHENTICATOR.ENROLL`.
 
 The response clears the cookie. The person then **signs in normally with the new passkey**, which gives a FULL session.
@@ -231,6 +231,6 @@ French journal labels (B5): « Codes de récupération générés », « Codes d
 | R1 | **Codes do not expire automatically.** They end by use, a new batch or revocation. | Their security comes from entropy, single use, revocation and rate limiting. |
 | R2 | **Generating a batch requires a passkey authentication less than 15 minutes old**, for a LUXIA local identity. | 15 minutes at most. |
 | R3 | **No account lockout after failed recovery attempts**: rate limits and anti-abuse protections only (5 per hour per person, 10 per hour per client). | This prevents a denial of service against the owner. |
-| R4 | **After a successful recovery and the enrolment of a new passkey, the previous passkeys of the account and its other sessions are revoked**, in the same transaction. | It is the safest choice. |
+| R4 | **After a successful recovery and the enrolment of a new passkey, the previous passkeys of the account and its other sessions are revoked**, in the same transaction. | It is the safest choice. Precision of 2026-10-12: "passkeys" means passkeys and security keys; TOTP is not touched, because it is not used as a sign-in authenticator in the product. |
 | R5 | **The remaining codes of the batch stay technically valid after a recovery, and the interface pushes strongly for a new batch right away** (section 9). | A stricter policy, "recovery = mandatory rotation of the batch", may be decided later if the user experience allows it. It is out of scope for B2. |
 | R6 | **Production certification only with a dedicated test identity**, never the operator's Legrand account. | R4 would revoke the operator's own passkeys and sessions. |

@@ -292,6 +292,8 @@ export async function completeRecoveryEnrollment(context: RecoveryContext, input
         subject: { lifecycleState: "ACTIVE" } } }, select: { id: true, status: true, lockedUntil: true } });
       if (!local || !usableLocalIdentity(local, now)) throw sessionInvalid();
       if (local.status !== "ACTIVE") await tx.localIdentity.update({ where: { id: local.id }, data: { status: "ACTIVE", failedAttempts: 0, lockedUntil: null } });
+      // R4: every sign-in authenticator of the account (passkeys and security keys). TOTP is not touched:
+      // it is not used as a sign-in authenticator in the product (no route enrols or verifies one).
       const passkeysRevoked = await tx.localAuthenticator.updateMany({ where: { ...own, status: "ACTIVE", type: { in: ["PASSKEY", "SECURITY_KEY"] } },
         data: { status: "REVOKED", revokedAt: now, stateVersion: { increment: 1 } } });
       const authenticatorId = randomUUID();

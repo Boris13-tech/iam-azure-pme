@@ -161,7 +161,7 @@ Design approved by the operator on 2026-10-11 (R1 to R6): `FIRST-ADMIN-BREAK-GLA
 1. organization lock;
 2. the recovery session is revoked, once, so a second completion is refused;
 3. the single-use challenge (purpose RECOVERY, accepted by no other flow) is consumed;
-4. the previous passkeys of the account are revoked;
+4. the previous passkeys and security keys of the account are revoked. TOTP is not touched: it is not used as a sign-in authenticator in the product (the only local sign-in route accepts passkeys, and no route enrols or verifies a TOTP; operator decision, 2026-10-12);
 5. the new passkey is created;
 6. every other session of the account ends;
 7. `RECOVERY.PASSKEY_ENROLLED` and `LOCAL_AUTHENTICATOR.ENROLL` are written.
