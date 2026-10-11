@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { AuthContext } from "../auth/authorization-engine";
 import { CanonicalAdminError } from "../admin/canonical-administration";
+import { preserveLastAdministrator } from "../admin/last-administrator";
 import { withTenantDb } from "../db/scoped-client";
 import { requireNative } from "./service";
 import { evaluateSoD } from "./sod";
@@ -157,7 +158,9 @@ export function decideReviewItem(auth: AuthContext, campaignId: string, itemId: 
         assignmentOperation: "MODIFY", excludeAssignmentId: assignment.id, validFrom: assignment.validFrom ?? undefined, validUntil: assignment.validUntil ?? undefined });
       if (sod.decision === "DENY") await remediate("REQUIRES_REMEDIATION", "ACTIVE");
     } else if (observed === "ACTIVE") {
-      await tx.assignment.update({ where: { organizationId_tenantId_id: { ...scope(auth), id: item.assignmentId } }, data: { status: "REVOKED" } });
+      // B1 (defense in depth): review items only hold resource-scoped grants, never assignments.manage.
+      await preserveLastAdministrator(tx, auth, () =>
+        tx.assignment.update({ where: { organizationId_tenantId_id: { ...scope(auth), id: item.assignmentId } }, data: { status: "REVOKED" } }));
       observed = "REVOKED";
     }
     const value = await tx.accessReviewItem.update({ where: { id: item.id }, data: { decision: input.decision, justification, decidedAt: now, reviewState: "DECIDED", observedAssignmentState: observed } });

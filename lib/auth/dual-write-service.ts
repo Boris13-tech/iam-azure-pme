@@ -2,11 +2,14 @@ import { withTenantDb } from "../db/scoped-client";
 import { AuthContext } from "./authorization-engine";
 import { ENTITLEMENT_CATALOG_V1, CatalogEntitlement, LEGACY_ADMIN_ENTITLEMENT_KEYS_V1 } from "./entitlements-catalog";
 import { mapLegacyPermission } from "./legacy-permission-map";
+import { lockTenantGovernance } from "../admin/last-administrator";
 
 export async function dualWriteUpdateUserRole(auth: AuthContext, legacyUserId: string, roleId: string) {
   await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
     // 1. Transactional Serialization
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('dualwrite'), hashtext(${legacyUserId}))`;
+    // Tenant governance lock before any row lock: the SoD trigger takes it on each grant written below (B1).
+    await lockTenantGovernance(tx, auth);
 
     // 2. Validate isolation constraints BEFORE any mutation
     const bridge = await tx.legacyUserBridge.findFirst({
@@ -42,6 +45,8 @@ export async function dualWriteRevokeUserRole(auth: AuthContext, legacyUserId: s
   await withTenantDb({ organizationId: auth.organizationId, tenantId: auth.tenantId }, async (tx) => {
     // 1. Transactional Serialization
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('dualwrite'), hashtext(${legacyUserId}))`;
+    // Tenant governance lock before any row lock: the SoD trigger takes it on each grant written below (B1).
+    await lockTenantGovernance(tx, auth);
 
     // 2. Validate isolation constraints BEFORE any mutation
     const bridge = await tx.legacyUserBridge.findFirst({

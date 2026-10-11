@@ -1,6 +1,7 @@
 import { withTenantDb } from "../db/scoped-client";
 import { CanonicalAdminError } from "../admin/canonical-administration";
 import { requireNative } from "./service";
+import { preserveLastAdministrator } from "../admin/last-administrator";
 import type { AuthContext } from "../auth/authorization-engine";
 
 export const GOVERNANCE_ADMIN_V2 = ["sod.read", "sod.manage", "access_reviews.read", "access_reviews.create", "access_reviews.decide", "access_reviews.manage"] as const;
@@ -50,7 +51,8 @@ export async function rollbackGovernanceAdminBundle(auth: AuthContext, targetSub
     const assignments = await tx.assignment.findMany({ where: { ...context, subjectId: targetSubjectId, sourceRef, status: "ACTIVE" } });
     const assignmentIds = assignments.map(row => row.id);
     if (assignmentIds.length !== GOVERNANCE_ADMIN_V2.length) throw new CanonicalAdminError("BUNDLE_NO_LONGER_ACTIVE", 409);
-    await tx.assignment.updateMany({ where: { ...context, id: { in: assignmentIds }, subjectId: targetSubjectId, sourceRef }, data: { status: "REVOKED" } });
+    // B1 (defense in depth): the v2 bundle does not contain assignments.manage.
+    await preserveLastAdministrator(tx, auth, () => tx.assignment.updateMany({ where: { ...context, id: { in: assignmentIds }, subjectId: targetSubjectId, sourceRef }, data: { status: "REVOKED" } }));
     await tx.canonicalAdminAuditEvent.create({ data: { ...context, actorSubjectId: auth.subjectId, targetSubjectId, operation: "ROLE.GOVERNANCE.REVOKE", roleKey: "LUXIA_ORG_ADMIN", roleVersion: 2, assignmentIds, changeId, result: "SUCCESS", metadata: { entitlementKeys: [...GOVERNANCE_ADMIN_V2] } } });
     return { assignmentIds, replay: false };
   });
