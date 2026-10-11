@@ -32,6 +32,8 @@ async function organization(name: string): Promise<Org> {
   const local = await owner.providerConnection.create({ data: { organizationId: org.organizationId, providerType: "LUXIA_LOCAL", externalScopeId: org.tenantId, name: "LUXIA Local" } });
   await owner.providerConnectionTenantScope.create({ data: { ...scope, providerConnectionId: local.id } });
   for (const id of [org.admin, org.helper]) await owner.subject.create({ data: { ...scope, id, type: "HUMAN", name: id === org.admin ? "Admin" : "Helper" } });
+  // An administrator needs an active identity account (definition shared with the last-administrator guard).
+  await owner.identityAccount.create({ data: { ...scope, subjectId: org.admin, providerConnectionId: local.id, externalObjectId: randomUUID() } });
   // Admin: full catalog. Helper: may create people but not grant access (no assignments.manage).
   for (const key of [...LUXIA_ORG_ADMIN_V1.entitlements, ...GOVERNANCE_ADMIN_V2]) {
     const [resource, action] = key.split(".");

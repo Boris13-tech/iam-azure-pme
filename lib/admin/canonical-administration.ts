@@ -10,16 +10,10 @@ import type { AuthContext } from "../auth/authorization-engine";
 import { ENTITLEMENT_CATALOG_V1 } from "../auth/entitlements-catalog";
 import { withTenantDb } from "../db/scoped-client";
 import { assertSubjectLifecycleTransition } from "../identity";
+import { CanonicalAdminError } from "./canonical-admin-error";
+import { LAST_ADMINISTRATOR_PROTECTED, lockAdministrators, preserveLastAdministrator } from "./last-administrator";
 
-export class CanonicalAdminError extends Error {
-  constructor(
-    public readonly code: string,
-    public readonly httpStatus: number,
-  ) {
-    super(code);
-    this.name = "CanonicalAdminError";
-  }
-}
+export { CanonicalAdminError };
 
 type AuditInput = {
   operation: string;
@@ -109,6 +103,38 @@ async function writeAudit(
   });
 }
 
+type Guarded<T> = { value: T } | { refused: CanonicalAdminError };
+
+/**
+ * B1: runs a change that may remove an administrator. A refusal commits its DENIED evidence; the
+ * change itself was already rolled back to its savepoint by preserveLastAdministrator.
+ */
+async function guardLastAdministrator<T>(
+  tx: Prisma.TransactionClient,
+  auth: AuthContext,
+  input: { operation: string; changeId: string; targetSubjectId: string },
+  change: () => Promise<T>,
+): Promise<Guarded<T>> {
+  try {
+    return { value: await preserveLastAdministrator(tx, auth, change) };
+  } catch (error) {
+    if (!(error instanceof CanonicalAdminError) || error.code !== LAST_ADMINISTRATOR_PROTECTED) throw error;
+    await writeAudit(tx, auth, {
+      operation: `${input.operation}.DENIED`,
+      changeId: input.changeId,
+      targetSubjectId: input.targetSubjectId,
+      result: "DENIED",
+      metadata: { reasonCode: error.code },
+    });
+    return { refused: error };
+  }
+}
+
+function settle<T>(outcome: Guarded<T>): T {
+  if ("refused" in outcome) throw outcome.refused;
+  return outcome.value;
+}
+
 export const newReadChangeId = (operation: string) =>
   `read:${operation.toLowerCase()}:${randomUUID()}`;
 
@@ -191,14 +217,13 @@ export async function updateSubject(
   changeId: string,
 ) {
   return withTenantDb(auth, async (tx) => {
+    // B1: leaving ACTIVE can remove an administrator, so the lock comes before any read.
+    const leavesActive = input.lifecycleState != null && input.lifecycleState !== "ACTIVE";
+    if (leavesActive) await lockAdministrators(tx, auth);
     await assertUnusedChangeId(tx, auth, changeId);
     const existing = await tx.subject.findFirst({ where: { id: subjectId } });
     if (!existing) throw new CanonicalAdminError("SUBJECT_NOT_FOUND", 404);
-    if (
-      subjectId === auth.subjectId &&
-      input.lifecycleState != null &&
-      input.lifecycleState !== "ACTIVE"
-    ) {
+    if (subjectId === auth.subjectId && leavesActive) {
       throw new CanonicalAdminError("SELF_LIFECYCLE_DOWNGRADE_FORBIDDEN", 409);
     }
     const lifecycleChanged = input.lifecycleState != null && input.lifecycleState !== existing.lifecycleState;
@@ -209,50 +234,58 @@ export async function updateSubject(
         throw new CanonicalAdminError(`INVALID_SUBJECT_LIFECYCLE_TRANSITION:${existing.lifecycleState}:${input.lifecycleState}`, 409);
       }
     }
-    const subject = await tx.subject.update({
-      where: {
-        organizationId_tenantId_id: {
-          organizationId: auth.organizationId,
-          tenantId: auth.tenantId,
-          id: subjectId,
-        },
-      },
-      data: {
-        ...(input.name != null ? { name: input.name.trim() } : {}),
-        ...(input.lifecycleState != null
-          ? {
-              lifecycleState: input.lifecycleState,
-              ...(lifecycleChanged
-                ? { lifecycleVersion: { increment: 1 }, lifecycleChangedAt: new Date() }
-                : {}),
-            }
-          : {}),
-      },
-    });
-    let revokedSessions = 0;
-    let revokedAssignments = 0;
-    if (lifecycleChanged && subject.lifecycleState !== "ACTIVE") {
-      revokedSessions = (await tx.session.updateMany({
+    const change = async () => {
+      const subject = await tx.subject.update({
         where: {
-          organizationId: auth.organizationId,
-          tenantId: auth.tenantId,
-          subjectId: subject.id,
-          revokedAt: null,
+          organizationId_tenantId_id: {
+            organizationId: auth.organizationId,
+            tenantId: auth.tenantId,
+            id: subjectId,
+          },
         },
-        data: { revokedAt: new Date() },
-      })).count;
-    }
-    if (lifecycleChanged && (subject.lifecycleState === "DISABLED" || subject.lifecycleState === "RETIRED")) {
-      revokedAssignments = (await tx.assignment.updateMany({
-        where: {
-          organizationId: auth.organizationId,
-          tenantId: auth.tenantId,
-          subjectId: subject.id,
-          status: "ACTIVE",
+        data: {
+          ...(input.name != null ? { name: input.name.trim() } : {}),
+          ...(input.lifecycleState != null
+            ? {
+                lifecycleState: input.lifecycleState,
+                ...(lifecycleChanged
+                  ? { lifecycleVersion: { increment: 1 }, lifecycleChangedAt: new Date() }
+                  : {}),
+              }
+            : {}),
         },
-        data: { status: "REVOKED", validUntil: new Date() },
-      })).count;
-    }
+      });
+      let revokedSessions = 0;
+      let revokedAssignments = 0;
+      if (lifecycleChanged && subject.lifecycleState !== "ACTIVE") {
+        revokedSessions = (await tx.session.updateMany({
+          where: {
+            organizationId: auth.organizationId,
+            tenantId: auth.tenantId,
+            subjectId: subject.id,
+            revokedAt: null,
+          },
+          data: { revokedAt: new Date() },
+        })).count;
+      }
+      if (lifecycleChanged && (subject.lifecycleState === "DISABLED" || subject.lifecycleState === "RETIRED")) {
+        revokedAssignments = (await tx.assignment.updateMany({
+          where: {
+            organizationId: auth.organizationId,
+            tenantId: auth.tenantId,
+            subjectId: subject.id,
+            status: "ACTIVE",
+          },
+          data: { status: "REVOKED", validUntil: new Date() },
+        })).count;
+      }
+      return { subject, revokedSessions, revokedAssignments };
+    };
+    const guarded = leavesActive
+      ? await guardLastAdministrator(tx, auth, { operation: "SUBJECT.UPDATE", changeId, targetSubjectId: subjectId }, change)
+      : { value: await change() };
+    if ("refused" in guarded) return guarded;
+    const { subject, revokedSessions, revokedAssignments } = guarded.value;
     await writeAudit(tx, auth, {
       operation: "SUBJECT.UPDATE",
       changeId,
@@ -265,8 +298,8 @@ export async function updateSubject(
         revokedAssignments,
       },
     });
-    return subject;
-  });
+    return { value: subject };
+  }).then(settle);
 }
 
 export async function listIdentityAccounts(auth: AuthContext, changeId: string) {
@@ -326,6 +359,7 @@ export async function disableIdentityAccount(
   changeId: string,
 ) {
   return withTenantDb(auth, async (tx) => {
+    await lockAdministrators(tx, auth); // B1: before any read
     await assertUnusedChangeId(tx, auth, changeId);
     const existing = await tx.identityAccount.findFirst({ where: { id: identityAccountId } });
     if (!existing) throw new CanonicalAdminError("IDENTITY_ACCOUNT_NOT_FOUND", 404);
@@ -334,28 +368,35 @@ export async function disableIdentityAccount(
     }
     if (existing.status === "DISABLED") throw new CanonicalAdminError("IDENTITY_ACCOUNT_ALREADY_DISABLED", 409);
     const disabledAt = new Date();
-    const account = await tx.identityAccount.update({
-      where: {
-        organizationId_tenantId_id: {
-          organizationId: auth.organizationId,
-          tenantId: auth.tenantId,
-          id: identityAccountId,
+    const guarded = await guardLastAdministrator(tx, auth, {
+      operation: "IDENTITY_ACCOUNT.DISABLE", changeId, targetSubjectId: existing.subjectId,
+    }, async () => {
+      const account = await tx.identityAccount.update({
+        where: {
+          organizationId_tenantId_id: {
+            organizationId: auth.organizationId,
+            tenantId: auth.tenantId,
+            id: identityAccountId,
+          },
         },
-      },
-      data: { status: "DISABLED", disabledAt },
+        data: { status: "DISABLED", disabledAt },
+      });
+      const revoked = await tx.session.updateMany({
+        where: { identityAccountId, revokedAt: null },
+        data: { revokedAt: disabledAt },
+      });
+      return { account, revoked };
     });
-    const revoked = await tx.session.updateMany({
-      where: { identityAccountId, revokedAt: null },
-      data: { revokedAt: disabledAt },
-    });
+    if ("refused" in guarded) return guarded;
+    const { account, revoked } = guarded.value;
     await writeAudit(tx, auth, {
       operation: "IDENTITY_ACCOUNT.DISABLE",
       changeId,
       targetSubjectId: account.subjectId,
       metadata: { identityAccountId: account.id, sessionsRevoked: revoked.count },
     });
-    return account;
-  });
+    return { value: account };
+  }).then(settle);
 }
 
 export async function listAssignments(auth: AuthContext, changeId: string) {
@@ -423,13 +464,16 @@ export async function grantAssignment(
 
 export async function revokeAssignment(auth: AuthContext, assignmentId: string, changeId: string) {
   return withTenantDb(auth, async (tx) => {
+    await lockAdministrators(tx, auth); // B1: before any read
     await assertUnusedChangeId(tx, auth, changeId);
     const existing = await tx.assignment.findFirst({ where: { id: assignmentId, status: "ACTIVE" } });
     if (!existing) throw new CanonicalAdminError("ACTIVE_ASSIGNMENT_NOT_FOUND", 404);
     if (existing.subjectId === auth.subjectId) {
       throw new CanonicalAdminError("SELF_ASSIGNMENT_REVOKE_FORBIDDEN", 409);
     }
-    const assignment = await tx.assignment.update({
+    const guarded = await guardLastAdministrator(tx, auth, {
+      operation: "ASSIGNMENT.REVOKE", changeId, targetSubjectId: existing.subjectId,
+    }, () => tx.assignment.update({
       where: {
         organizationId_tenantId_id: {
           organizationId: auth.organizationId,
@@ -438,7 +482,9 @@ export async function revokeAssignment(auth: AuthContext, assignmentId: string, 
         },
       },
       data: { status: "REVOKED", validUntil: new Date() },
-    });
+    }));
+    if ("refused" in guarded) return guarded;
+    const assignment = guarded.value;
     await writeAudit(tx, auth, {
       operation: "ASSIGNMENT.REVOKE",
       changeId,
@@ -446,8 +492,8 @@ export async function revokeAssignment(auth: AuthContext, assignmentId: string, 
       assignmentIds: [assignment.id],
       metadata: { entitlementId: assignment.entitlementId },
     });
-    return assignment;
-  });
+    return { value: assignment };
+  }).then(settle);
 }
 
 export async function listSessions(auth: AuthContext, changeId: string) {
