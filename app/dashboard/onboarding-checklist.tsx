@@ -7,7 +7,7 @@ import { CheckCircle2, Circle, ListChecks } from "lucide-react";
 // has no right to see it, when it cannot be loaded, or once every item is done.
 const ITEMS = [
   { key: "domainVerified", label: "Vérifier un domaine de l’organisation", href: "/dashboard/organization" },
-  { key: "secondAdministrator", label: "Avoir un second administrateur", href: "/dashboard/organization" },
+  { key: "secondAdministrator", label: "Avoir un second administrateur permanent, qui peut se connecter", href: "/dashboard/organization" },
   { key: "teamInvited", label: "Inviter votre équipe", href: "/dashboard/organization" },
   { key: "firstResource", label: "Enregistrer une première ressource", href: "/dashboard/resources" },
   { key: "firstAccessReview", label: "Lancer une première revue d’accès", href: "/dashboard/governance/access-reviews" },

@@ -11,7 +11,7 @@ import { ENTITLEMENT_CATALOG_V1 } from "../auth/entitlements-catalog";
 import { withTenantDb } from "../db/scoped-client";
 import { assertSubjectLifecycleTransition } from "../identity";
 import { CanonicalAdminError } from "./canonical-admin-error";
-import { LAST_ADMINISTRATOR_PROTECTED, lockAdministrators, preserveLastAdministrator } from "./last-administrator";
+import { LAST_ADMINISTRATOR_PROTECTED, lockTenantGovernance, preserveLastAdministrator } from "./last-administrator";
 
 export { CanonicalAdminError };
 
@@ -217,9 +217,8 @@ export async function updateSubject(
   changeId: string,
 ) {
   return withTenantDb(auth, async (tx) => {
-    // B1: leaving ACTIVE can remove an administrator, so the lock comes before any read.
+    await lockTenantGovernance(tx, auth); // B1: before any read or row lock
     const leavesActive = input.lifecycleState != null && input.lifecycleState !== "ACTIVE";
-    if (leavesActive) await lockAdministrators(tx, auth);
     await assertUnusedChangeId(tx, auth, changeId);
     const existing = await tx.subject.findFirst({ where: { id: subjectId } });
     if (!existing) throw new CanonicalAdminError("SUBJECT_NOT_FOUND", 404);
@@ -234,7 +233,9 @@ export async function updateSubject(
         throw new CanonicalAdminError(`INVALID_SUBJECT_LIFECYCLE_TRANSITION:${existing.lifecycleState}:${input.lifecycleState}`, 409);
       }
     }
-    const change = async () => {
+    const guarded = await guardLastAdministrator(tx, auth, {
+      operation: "SUBJECT.UPDATE", changeId, targetSubjectId: subjectId,
+    }, async () => {
       const subject = await tx.subject.update({
         where: {
           organizationId_tenantId_id: {
@@ -280,10 +281,7 @@ export async function updateSubject(
         })).count;
       }
       return { subject, revokedSessions, revokedAssignments };
-    };
-    const guarded = leavesActive
-      ? await guardLastAdministrator(tx, auth, { operation: "SUBJECT.UPDATE", changeId, targetSubjectId: subjectId }, change)
-      : { value: await change() };
+    });
     if ("refused" in guarded) return guarded;
     const { subject, revokedSessions, revokedAssignments } = guarded.value;
     await writeAudit(tx, auth, {
@@ -359,7 +357,7 @@ export async function disableIdentityAccount(
   changeId: string,
 ) {
   return withTenantDb(auth, async (tx) => {
-    await lockAdministrators(tx, auth); // B1: before any read
+    await lockTenantGovernance(tx, auth); // B1: before any read or row lock
     await assertUnusedChangeId(tx, auth, changeId);
     const existing = await tx.identityAccount.findFirst({ where: { id: identityAccountId } });
     if (!existing) throw new CanonicalAdminError("IDENTITY_ACCOUNT_NOT_FOUND", 404);
@@ -423,6 +421,7 @@ export async function grantAssignment(
   changeId: string,
 ) {
   return withTenantDb(auth, async (tx) => {
+    await lockTenantGovernance(tx, auth); // same lock order as every grant writer (B1)
     await assertUnusedChangeId(tx, auth, changeId);
     const [subject, entitlement] = await Promise.all([
       tx.subject.findFirst({ where: { id: input.subjectId }, select: { id: true } }),
@@ -464,7 +463,7 @@ export async function grantAssignment(
 
 export async function revokeAssignment(auth: AuthContext, assignmentId: string, changeId: string) {
   return withTenantDb(auth, async (tx) => {
-    await lockAdministrators(tx, auth); // B1: before any read
+    await lockTenantGovernance(tx, auth); // B1: before any read or row lock
     await assertUnusedChangeId(tx, auth, changeId);
     const existing = await tx.assignment.findFirst({ where: { id: assignmentId, status: "ACTIVE" } });
     if (!existing) throw new CanonicalAdminError("ACTIVE_ASSIGNMENT_NOT_FOUND", 404);

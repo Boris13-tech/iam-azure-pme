@@ -9,6 +9,7 @@ import { assertSubjectLifecycleTransition } from "../identity/semantics";
 import { registrationChallenge, verifyPasskeyRegistration, type PasskeyRegistration } from "../provider-adapters/implementations/luxia-local/webauthn-registration";
 import { createPasskeyIdentity, grantAdministrator, localConnection } from "./provisioning";
 import type { AuthContext } from "../auth/authorization-engine";
+import { lockTenantGovernance } from "../admin/last-administrator";
 
 // Customer Self-Onboarding v1, step 6 (requirements 8, 9, 16). An administrator invites a person:
 // LUXIA creates the identity (PROVISIONING) and a single-use link the administrator copies. No email
@@ -120,6 +121,9 @@ export async function completeAcceptance(input: { token: unknown; principalName:
   const scope = { organizationId: invitation.organization_id, tenantId: invitation.tenant_id };
   try {
     return await inTenant(scope, async (tx) => {
+      // Same lock order as every governance writer (B1): the tenant lock comes before any row lock,
+      // because an ADMIN acceptance writes grants, and the SoD trigger takes this lock on each one.
+      await lockTenantGovernance(tx, scope);
       const now = new Date();
       const accepted = await tx.invitation.updateMany({
         where: { ...scope, id: invitation.invitation_id, tokenHash: invitation.tokenHash, acceptedAt: null, revokedAt: null,

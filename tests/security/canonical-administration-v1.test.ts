@@ -163,6 +163,7 @@ describe("Canonical Administration v1", () => {
         findFirst: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "RETIRED" }),
         update: vi.fn(),
       },
+      $queryRaw: vi.fn().mockResolvedValue([]),
     } as never));
     await expect(updateSubject(auth, "subject-1", { lifecycleState: "ACTIVE" }, "change-reactivate"))
       .rejects.toMatchObject({ code: "INVALID_SUBJECT_LIFECYCLE_TRANSITION:RETIRED:ACTIVE", httpStatus: 409 });
@@ -174,6 +175,7 @@ describe("Canonical Administration v1", () => {
     vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
       canonicalAdminAuditEvent: { findUnique: vi.fn().mockResolvedValue(null), create: auditCreate },
       subject: { findFirst: vi.fn().mockResolvedValue(null), update },
+      $queryRaw: vi.fn().mockResolvedValue([]),
     } as never));
 
     await expect(updateSubject(auth, "subject-in-other-tenant", { name: "No" }, "change-x"))
