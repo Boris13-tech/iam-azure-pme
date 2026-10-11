@@ -127,7 +127,7 @@ describe.runIf(enabled)("Domains, invitations and checklist (app_user, PostgreSQ
     expect((await accept(token, "marie2")).begin.body).toEqual({ error: "INVITATION_INVALID" });
     // The invitee signs in to their organization only.
     const started = await call(loginBegin, "/api/auth/local/begin", { organization: a.slug, principalName: "marie" });
-    expect(started.body.allowCredentials).toEqual([passkey.credentialId]);
+    expect(started.body.allowCredentials).toEqual([]); // finding F1: never listed
     const signedIn = await call(loginComplete, "/api/auth/local/complete", { organization: a.slug, transactionId: started.body.transactionId, challenge: started.body.challenge, ...passkey.assert(started.body.challenge) });
     expect(signedIn.status).toBe(200);
   });

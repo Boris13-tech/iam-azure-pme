@@ -50,6 +50,16 @@ describe("Organization-aware sign-in contract", () => {
     expect(entra).toContain("safeReturnTo(");
   });
 
+  it("finding F1: passkey begin never lists credential IDs; every registration asks for a discoverable passkey", () => {
+    const beginRoute = readFileSync("app/api/auth/local/begin/route.ts", "utf8");
+    expect(beginRoute).toContain("allowCredentials: [] as string[]");
+    expect(beginRoute).not.toMatch(/credentialId: true|\.credentialId\)/);
+    const lib = readFileSync("lib/auth/organization-login.ts", "utf8");
+    expect(lib).not.toMatch(/luxia_login_decoy|decoyPasskeyChallenge/);
+    for (const client of ["app/dashboard/settings/passkey-enrollment.tsx", "app/signup/signup-form.tsx", "app/invitation/accept-invitation.tsx"])
+      expect(readFileSync(client, "utf8"), client).toContain('residentKey: "required"');
+  });
+
   it("requirement 14: no provider connection is chosen globally or as a first result anywhere in the application", () => {
     for (const file of [...sources("app"), ...sources("lib")]) {
       const source = readFileSync(file, "utf8");

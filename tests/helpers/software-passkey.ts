@@ -4,9 +4,9 @@ import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto"
 // registration (attestation "none") and for an assertion, so server checks run unmodified.
 const b64 = (value: Buffer) => value.toString("base64url");
 
-export function softwarePasskey(rpId = "localhost", origin = "http://localhost:3000") {
+export function softwarePasskey(rpId = "localhost", origin = "http://localhost:3000", credentialIdBytes = 32) {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-  const rawId = randomBytes(32);
+  const rawId = randomBytes(credentialIdBytes);
   const jwk = publicKey.export({ format: "jwk" }) as { x: string; y: string };
   const cose = Buffer.concat([
     Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]), Buffer.from(jwk.x, "base64url"),
@@ -16,6 +16,7 @@ export function softwarePasskey(rpId = "localhost", origin = "http://localhost:3
   let counter = 0;
   return {
     credentialId: b64(rawId),
+    publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
     register(challenge: string, overrides: { flags?: number; type?: string; origin?: string; rpId?: string; publicKey?: string; credentialId?: string } = {}) {
       const clientDataJSON = Buffer.from(JSON.stringify({ type: overrides.type ?? "webauthn.create", challenge, origin: overrides.origin ?? origin, crossOrigin: false }));
       const length = Buffer.alloc(2); length.writeUInt16BE(rawId.length);

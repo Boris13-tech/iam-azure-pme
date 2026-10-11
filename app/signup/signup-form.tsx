@@ -52,7 +52,7 @@ export function SignupForm() {
         challenge: decode(options.challenge), rp: options.rp,
         user: { id: decode(options.user.id), name: options.user.name, displayName: options.user.displayName },
         pubKeyCredParams: [{ type: "public-key", alg: -7 }],
-        authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
+        authenticatorSelection: { residentKey: "required", userVerification: "required" },
         timeout: 120000, attestation: "none",
       } }) as PublicKeyCredential | null;
       if (!credential) throw new Refused("PASSKEY_REGISTRATION_INVALID");

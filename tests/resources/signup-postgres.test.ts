@@ -95,7 +95,7 @@ describe.runIf(enabled)("Beta-code signup: atomic organization and first adminis
     expect(elsewhere.body.allowCredentials).not.toContain(passkey.credentialId);
 
     const started = await call(loginBegin, "/api/auth/local/begin", { organization: slug, principalName: "solo@example.test" });
-    expect(started.body.allowCredentials).toEqual([passkey.credentialId]);
+    expect(started.body.allowCredentials).toEqual([]); // finding F1: never listed
     const signedIn = await call(loginComplete, "/api/auth/local/complete", { organization: slug, transactionId: started.body.transactionId, challenge: started.body.challenge, ...passkey.assert(started.body.challenge) });
     expect(signedIn.status).toBe(200);
     expect(signedIn.cookie).toMatch(/luxia_session=/);
