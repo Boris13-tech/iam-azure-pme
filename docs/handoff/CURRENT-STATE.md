@@ -1,5 +1,13 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-11 ~09:55Z — CUSTOMER SELF-ONBOARDING V1 RELEASED; LEGRAND TECH VALIDATED** (`docs/certification/CUSTOMER-SELF-ONBOARDING-V1-RELEASE-2026-10-11.md`).
+> - `main` is `6f9de76` (merge of PR #32, CI run 38094537834 PASS).
+> - **20 migrations** applied in Production. The latest, `20261011000000_customer_self_onboarding_v1`, was applied at 01:25:12Z. The business digest of the 45 tables is identical before and after, and Legrand Tech is now `legrand-tech`.
+> - Production deployment: `dpl_7ZzzEA3DbQdAACKZP4f9V947gkad` @ `6f9de76`. Rollback deployment: `dpl_EDZXLTXRrHDbBbVGqcEhCTF3SnpW` @ `2d7ec62`. Database backup branch: `br-plain-union-ah2o23ll`, which expires 2026-10-25.
+> - The second organization and the cross-tenant certification in Production are **not done yet** and need a separate approval.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-10 21:1xZ — SECURITY JOURNAL V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/SECURITY-JOURNAL-V1-PRODUCTION-2026-10-10.md`). Production = `dpl_EDZXLTXRrHDbBbVGqcEhCTF3SnpW` @ `2d7ec62`. Also shipped since the dashboard certification: sober UI and readable copy (#25, #26), canonical audit journal and legacy roles out of navigation (#27). This header supersedes older deployment rows below.
 
 > **2026-10-10 17:2xZ — DASHBOARD V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/DASHBOARD-V1-PRODUCTION-2026-10-10.md`). Production = `dpl_48xvYWVVJUiZg1k9A53tyD7yf7tu` @ `5c71df8`. This header supersedes the deployment rows in section 1.
