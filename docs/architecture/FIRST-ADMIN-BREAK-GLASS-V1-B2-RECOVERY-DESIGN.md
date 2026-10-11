@@ -1,6 +1,8 @@
 # First Admin / Break-glass v1, B2: personal recovery codes and the recovery-only session (design)
 
-Status: **design proposal, for operator approval.** Until it is approved there is no code, no migration and no deployment.
+Status:
+- **Design. Decisions R1 to R6 approved by the operator on 2026-10-11, with a precision on R5** (section 12).
+- No code, no migration and no deployment until the operator approves the merge of this design, then each later step separately.
 
 Binding inputs:
 - `docs/product/FIRST-ADMIN-BREAK-GLASS-V1-SCOPE.md`: requirement 2 and section 9.4;
@@ -129,7 +131,7 @@ An architecture test fails if any other file in `lib/` or `app/` calls `getRecov
 
 The response clears the cookie. The person then **signs in normally with the new passkey**, which gives a FULL session.
 
-The remaining codes of the batch stay valid. The page then recommends generating a new set (decision R5).
+The remaining codes of the batch stay technically valid (R5). The interface **pushes strongly for a new batch right away**, as section 9 describes.
 
 **Anti-replay:**
 - the enrolment challenge is single use (existing `LocalAuthChallenge` rules);
@@ -169,6 +171,10 @@ French journal labels (B5): « Codes de récupération générés », « Codes d
   - « Révoquer tous mes codes ».
 - **Sign-in page:** link « J'ai perdu ma clé d'accès ». The form asks for the organization, the identifier and the code, with the same generic error as for any failure.
 - **`/recovery`:** « Votre session de récupération expire dans 15 minutes. » Then « Ajouter une nouvelle clé d'accès » and « Se déconnecter ».
+- **After a recovery (R5, strong recommendation).** Until the person generates a new batch, a persistent notice is shown at the top of the overview and of the Authentication page: « Vous avez utilisé un code de récupération. Générez dès maintenant un nouveau lot : les codes restants de l'ancien lot restent valides jusqu'à ce moment. » It has one primary button, « Générer un nouveau lot ».
+  - The notice cannot be dismissed. It disappears only when a new batch exists.
+  - The fact behind it (a batch partly consumed by a recovery) is read from the database: no flag is stored in the browser.
+  - B5 adds the same fact to the « Mise en route » checklist.
 
 ## 10. Rollback (defined before implementation)
 
@@ -218,13 +224,13 @@ French journal labels (B5): « Codes de récupération générés », « Codes d
 6. sign in with it;
 7. check that the code cannot be reused.
 
-## 12. Decisions for the operator
+## 12. Decisions (approved by the operator on 2026-10-11)
 
-| # | Question | Recommendation |
+| # | Decision | Operator precision |
 |---|---|---|
-| R1 | Do codes expire? | **No.** They end by use, a new batch or revocation. Expiring codes fail exactly when they are needed. |
-| R2 | What does generating codes require? | **A FULL session signed in with a passkey less than 15 minutes ago**, for a LUXIA local identity. Otherwise « Reconnectez-vous avec votre clé d'accès ». |
-| R3 | Lockout after failed recovery attempts? | **No lockout**, rate limits only (5 per hour per person, 10 per hour per client). A lockout would let an attacker lock out the real person. |
-| R4 | At recovery enrolment, revoke the previous passkeys and the other sessions of the account? | **Yes, both.** Recovery means a passkey was lost; the lost device must stop working. Passkey revocation is not available elsewhere yet. |
-| R5 | After a recovery, keep the remaining codes of the batch? | **Yes**, and recommend generating a new set. Revoking them would leave the person without a fallback until they generate again. |
-| R6 | Which identity for the Production ceremony? | **A dedicated test identity in Legrand Tech, created only for the ceremony and disabled afterwards**, with your approval, or a fresh test organization through a beta code. Never your own account, because of R4. |
+| R1 | **Codes do not expire automatically.** They end by use, a new batch or revocation. | Their security comes from entropy, single use, revocation and rate limiting. |
+| R2 | **Generating a batch requires a passkey authentication less than 15 minutes old**, for a LUXIA local identity. | 15 minutes at most. |
+| R3 | **No account lockout after failed recovery attempts**: rate limits and anti-abuse protections only (5 per hour per person, 10 per hour per client). | This prevents a denial of service against the owner. |
+| R4 | **After a successful recovery and the enrolment of a new passkey, the previous passkeys of the account and its other sessions are revoked**, in the same transaction. | It is the safest choice. |
+| R5 | **The remaining codes of the batch stay technically valid after a recovery, and the interface pushes strongly for a new batch right away** (section 9). | A stricter policy, "recovery = mandatory rotation of the batch", may be decided later if the user experience allows it. It is out of scope for B2. |
+| R6 | **Production certification only with a dedicated test identity**, never the operator's Legrand account. | R4 would revoke the operator's own passkeys and sessions. |
