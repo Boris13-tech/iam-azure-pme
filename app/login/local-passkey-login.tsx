@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Fingerprint } from "lucide-react";
 
 const decode = (value: string) => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=")), c => c.charCodeAt(0));
@@ -53,5 +54,6 @@ export function LocalPasskeyLogin({ organization, onBeforeSignIn }: { organizati
       <Fingerprint className="w-5 h-5" aria-hidden /> Se connecter avec une clé d’accès
     </button>
     {status && <p className="text-sm text-slate-600 text-center" role="status">{status}</p>}
+    <p className="text-center text-sm"><Link href="/login/recovery" className="font-medium text-[#1f5fbf] hover:underline">J’ai perdu ma clé d’accès</Link></p>
   </div>;
 }

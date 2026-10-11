@@ -13,6 +13,10 @@ export const RATE_LIMITS = {
   "invitation-accept": { windowSeconds: 3600, max: 200 },
   "invitation-create": { windowSeconds: 86400, max: 500 }, // per administrator
   "dns-verify": { windowSeconds: 3600, max: 30 },          // per organization
+  // B2 recovery codes (decision R3: limits only, never a lockout of the person).
+  "recovery": { windowSeconds: 3600, max: 10 },            // recovery sign-in, per client
+  "recovery-identity": { windowSeconds: 3600, max: 5 },    // recovery sign-in, per (organization, identifier)
+  "recovery-generate": { windowSeconds: 86400, max: 5 },   // new batches, per person
 } as const;
 export type RateLimitScope = keyof typeof RATE_LIMITS;
 

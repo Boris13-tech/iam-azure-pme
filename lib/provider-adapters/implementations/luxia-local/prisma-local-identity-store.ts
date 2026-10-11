@@ -140,16 +140,13 @@ export class PrismaLocalIdentityStore implements LocalIdentityStore {
         data: { ...update, lastUsedAt: new Date() } })).count === 1;
     });
   }
-  async saveRecoveryCode(context: ProviderOperationContext, input: { identityAccountId: string; codeHash: string; expiresAt?: string }): Promise<void> {
-    await withTenantDb(scope(context), async (tx) => { await tx.localRecoveryCode.create({ data: { organizationId: context.organizationId,
-      tenantId: context.tenantId, identityAccountId: input.identityAccountId, codeHash: input.codeHash,
-      expiresAt: input.expiresAt ? new Date(input.expiresAt) : undefined } }); });
+  // B2: recovery codes are issued and consumed only by the B2 recovery service (batches, account-bound
+  // hashes, database guard). This older adapter path is closed: it stores nothing and accepts nothing.
+  async saveRecoveryCode(): Promise<void> {
+    throw new ProviderAdapterError({ code: "UNSUPPORTED_CAPABILITY", message: "Recovery codes are managed by the B2 recovery service" });
   }
-  async consumeRecoveryCode(context: ProviderOperationContext, identityAccountId: string, codeHash: string, now: string): Promise<boolean> {
-    return withTenantDb(scope(context), async (tx) => (await tx.localRecoveryCode.updateMany({ where: {
-      organizationId: context.organizationId, tenantId: context.tenantId, identityAccountId, codeHash, usedAt: null,
-      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date(now) } }],
-    }, data: { usedAt: new Date(now) } })).count === 1);
+  async consumeRecoveryCode(): Promise<boolean> {
+    return false;
   }
 
   private async find(tx: Tx, context: ProviderOperationContext, where: { externalObjectId?: string; principalName?: string }): Promise<LocalIdentityRecord | null> {
