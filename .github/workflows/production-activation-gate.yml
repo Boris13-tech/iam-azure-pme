@@ -203,6 +203,8 @@ jobs:
           GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
           GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
           GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
+          GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
+          GRANT EXECUTE ON FUNCTION public.luxia_organization_lock_active(TEXT) TO app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
@@ -255,9 +257,11 @@ jobs:
                 rolsuper: boolean;
                 rolbypassrls: boolean;
                 resolver_execute: boolean;
+                canonical_resolver_execute: boolean;
               }>>`
                 SELECT current_user, r.rolsuper, r.rolbypassrls,
-                  has_function_privilege(current_user, 'public.resolve_session(text)', 'EXECUTE') AS resolver_execute
+                  has_function_privilege(current_user, 'public.resolve_session(text)', 'EXECUTE') AS resolver_execute,
+                  has_function_privilege(current_user, 'public.luxia_session_resolve(text)', 'EXECUTE') AS canonical_resolver_execute
                 FROM pg_roles r WHERE r.rolname = current_user
               `;
               if (posture.length !== 1) throw new Error("Runtime role not resolved");
@@ -266,6 +270,7 @@ jobs:
               if (role.rolsuper) throw new Error("Runtime role is SUPERUSER");
               if (role.rolbypassrls) throw new Error("Runtime role has BYPASSRLS");
               if (!role.resolver_execute) throw new Error("Runtime role cannot execute resolve_session");
+              if (!role.canonical_resolver_execute) throw new Error("Runtime role cannot execute luxia_session_resolve");
 
               const rls = await db.$queryRaw<Array<{ relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>>`
                 SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity

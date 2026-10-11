@@ -98,6 +98,12 @@ The B4 procedure therefore has to:
 
 Otherwise nothing is written. SUSPENDED keeps open invitations (they cannot be accepted, see 4.4) and keeps verified domains (still owned), as 9.1 requires.
 
+**Implementation note, verified on a Neon clone on 2026-10-11, binding for B4.** When this check fails at COMMIT, PostgreSQL refuses the commit and writes nothing. However, Prisma 5.20 does not report a failed COMMIT of an interactive transaction: `$transaction` resolves as if it had succeeded. The B4 procedure therefore:
+- ends every transition with `SET CONSTRAINTS ALL IMMEDIATE`, so that a refusal surfaces as a statement error inside the transaction;
+- re-reads the organization's status and counts after the commit, and compares them with the confirmed plan.
+
+The database guarantee does not depend on either step.
+
 ### 4.3 Sessions are append-only (`luxia_session_guard`, BEFORE INSERT OR UPDATE, M5, A3, A4)
 
 - **INSERT:**

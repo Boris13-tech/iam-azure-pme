@@ -4,14 +4,17 @@ import { rawPrisma } from "../../lib/db/raw-prisma";
 
 const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "luxia_review_immutable_guard", "luxia_resource_onboarding_evidence_guard",
   "luxia_organization_slug_guard", "luxia_signup_code_guard", "luxia_invitation_guard", "luxia_organization_domain_guard",
-  "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy"];
+  "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy",
+  "luxia_organization_lock_active", "luxia_organization_status_guard", "luxia_organization_status_effects", "luxia_session_guard", "luxia_session_resolve"];
 // The only functions app_user may execute. Customer Self-Onboarding v1 adds five narrow SECURITY DEFINER
-// entry points that take hashes only; trigger guards stay owner-only.
-const runtime = ["luxia_sod_scope_contains", "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy"];
+// entry points that take hashes only; trigger guards stay owner-only. First Admin / Break-glass v1 adds
+// the canonical session resolver and the organization status lock helper.
+const runtime = ["luxia_sod_scope_contains", "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy",
+  "luxia_organization_lock_active", "luxia_session_resolve"];
 describe("LUXIA SQL function privilege architecture", () => {
   it("every function introduced by these migrations explicitly revokes PUBLIC", () => {
     const files = ["20261004120000_resource_governance_foundation", "20261004160000_static_sod_v1", "20261004180000_access_reviews_v1", "20261008040000_resource_onboarding_evidence",
-      "20261011000000_customer_self_onboarding_v1"];
+      "20261011000000_customer_self_onboarding_v1", "20261011180000_organization_status_session_scope"];
     const names: string[] = [];
     for (const file of files) {
       const sql = readFileSync(`prisma/migrations/${file}/migration.sql`, "utf8");
@@ -58,12 +61,15 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LU
     const triggers = await rawPrisma.$queryRaw<Array<{ tgname: string; proname: string }>>`
       SELECT t.tgname,p.proname FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
       WHERE t.tgname IN ('assignment_static_sod','review_campaign_immutable','review_item_immutable',
-        'organization_slug_immutable','signup_code_guard','invitation_guard','organization_domain_guard') ORDER BY t.tgname`;
-    expect(triggers).toHaveLength(7);
+        'organization_slug_immutable','signup_code_guard','invitation_guard','organization_domain_guard',
+        'organization_status_guard','organization_status_effects','session_guard') ORDER BY t.tgname`;
+    expect(triggers).toHaveLength(10);
     expect(triggers.filter(row => row.proname === 'luxia_review_immutable_guard')).toHaveLength(2);
     expect(triggers.filter(row => row.proname === 'luxia_sod_assignment_guard')).toHaveLength(1);
     for (const [trigger, fn] of [["organization_slug_immutable", "luxia_organization_slug_guard"], ["signup_code_guard", "luxia_signup_code_guard"],
-      ["invitation_guard", "luxia_invitation_guard"], ["organization_domain_guard", "luxia_organization_domain_guard"]])
+      ["invitation_guard", "luxia_invitation_guard"], ["organization_domain_guard", "luxia_organization_domain_guard"],
+      ["organization_status_guard", "luxia_organization_status_guard"], ["organization_status_effects", "luxia_organization_status_effects"],
+      ["session_guard", "luxia_session_guard"]])
       expect(triggers.find(row => row.tgname === trigger)?.proname, trigger).toBe(fn);
     // New runtime entry points are SECURITY DEFINER with a pinned search_path; nothing else is definer.
     const definer = await rawPrisma.$queryRaw<Array<{ proname: string; prosecdef: boolean; proconfig: string[] | null }>>`
