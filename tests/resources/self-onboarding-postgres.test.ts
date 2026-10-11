@@ -206,12 +206,13 @@ describe.runIf(enabled)("Customer Self-Onboarding v1: migration, RLS and adversa
     expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(7 * 86_400_000);
     expect(row.createdAt.getTime()).toBeGreaterThan(Date.now() - 600_000);
     await expect(invite(c, `inv-c2-${suffix}`, sha(`token-c2-${suffix}`))).rejects.toThrow(/23505/);
+    // Started one at a time: each rejection is awaited as soon as it happens (no unhandled rejection).
     for (const change of [
-      withTenantDb(c, tx => tx.$executeRaw`UPDATE "Invitation" SET "role"='ADMIN' WHERE "id"=${id}`),
-      withTenantDb(c, tx => tx.$executeRaw`UPDATE "Invitation" SET "subjectId"=${c.admin} WHERE "id"=${id}`),
-      withTenantDb(c, tx => tx.$executeRaw`UPDATE "Invitation" SET "expiresAt"="expiresAt" + interval '30 days' WHERE "id"=${id}`),
-      owner.$executeRaw`DELETE FROM "Invitation" WHERE "id"=${id}`,
-    ]) await expect(change).rejects.toThrow(/INVITATION_IMMUTABLE/);
+      () => withTenantDb(c, tx => tx.$executeRaw`UPDATE "Invitation" SET "role"='ADMIN' WHERE "id"=${id}`),
+      () => withTenantDb(c, tx => tx.$executeRaw`UPDATE "Invitation" SET "subjectId"=${c.admin} WHERE "id"=${id}`),
+      () => withTenantDb(c, tx => tx.$executeRaw`UPDATE "Invitation" SET "expiresAt"="expiresAt" + interval '30 days' WHERE "id"=${id}`),
+      () => owner.$executeRaw`DELETE FROM "Invitation" WHERE "id"=${id}`,
+    ]) await expect(change()).rejects.toThrow(/INVITATION_IMMUTABLE/);
     await expect(withTenantDb(c, tx => tx.$executeRaw`DELETE FROM "Invitation" WHERE "id"=${id}`)).rejects.toThrow(/permission denied/);
 
     expect(await resolveInvitation(tokenHash)).toEqual([{ invitation_id: id, organization_id: c.organizationId, tenant_id: c.tenantId, subject_id: c.member, invitation_role: "MEMBER" }]);
