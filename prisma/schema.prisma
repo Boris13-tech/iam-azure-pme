@@ -937,8 +937,12 @@ model LocalRecoveryCode {
   tenantId          String
   identityAccountId String
   codeHash          String
+  /// B2: one generation of 10 codes; a new batch revokes the unused codes of earlier ones.
+  batchId           String
   expiresAt         DateTime?
   usedAt            DateTime?
+  /// B2: set once (NULL to a timestamp) by a new batch or "revoke all"; a used or revoked code is frozen.
+  revokedAt         DateTime?
   createdAt         DateTime  @default(now())
 
   organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)

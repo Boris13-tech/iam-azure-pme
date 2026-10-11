@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Activity, AlertTriangle, Boxes, KeyRound, Scale, ShieldCheck, Users } from "lucide-react";
 import { RESULT_LABELS, operationLabel } from "../../lib/ui/activity-labels";
 import { OnboardingChecklist } from "./onboarding-checklist";
+import { RecoveryNoticeLink } from "./settings/recovery-codes";
 import { breakdownTotal, type ActivityEntry, type Breakdown, type PostureResponse, type SectionId, type Widget, type WidgetId } from "../../lib/dashboard/posture-contract";
 
 // Identity security posture: real canonical data only, no score, no estimate.
@@ -183,6 +184,7 @@ export default function DashboardPage() {
       <h1>Vue d’ensemble</h1>
       {data && <p>{data.organization.name}, environnement {data.tenant.name}. Mis à jour le {new Date(data.asOf).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.</p>}
     </header>
+    <RecoveryNoticeLink />
     {failed ? <p role="alert" className="posture-alert">Impossible de charger les données. Réessayez dans quelques instants.</p>
       : !data ? <p role="status" className="posture-muted">Chargement...</p> : <>
       <OnboardingChecklist />

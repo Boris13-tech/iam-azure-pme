@@ -33,6 +33,9 @@ const LOCKED: Record<string, string[]> = {
   "lib/auth/session-store.ts": ["createSession"],
   "lib/onboarding/invitations.ts": ["createInvitation", "beginAcceptance", "completeAcceptance"],
   "lib/onboarding/domains.ts": ["addDomain", "checkDomain"],
+  // B2: recovery sign-in creates a RECOVERY session; recovery enrolment ends it (the other B2 writers
+  // are checked in recovery-architecture.test.ts).
+  "lib/auth/recovery.ts": ["recoverySignIn", "completeRecoveryEnrollment"],
 };
 
 describe("B3 organization lifecycle enforcement architecture", () => {

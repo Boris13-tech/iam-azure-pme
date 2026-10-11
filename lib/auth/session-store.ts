@@ -95,8 +95,8 @@ export class SessionStore {
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     
     // B3: the canonical resolver (database) returns nothing unless the organization and the subject
-    // are ACTIVE and the identity account is ACTIVE. Only FULL sessions are accepted here; B2 adds the
-    // recovery-only allow-list.
+    // are ACTIVE and the identity account is ACTIVE. Only FULL sessions are accepted here; a RECOVERY
+    // session is read only through getRecoverySession (B2 allow-list).
     const sessions = await rawPrisma.$queryRaw<Array<ResolvedSession>>`SELECT * FROM luxia_session_resolve(${hashedToken})`;
 
     if (!sessions || sessions.length === 0) return null;
@@ -113,6 +113,18 @@ export class SessionStore {
       await SessionStore.touch(session.organizationId, session.tenantId, hashedToken);
     }
 
+    return session;
+  }
+
+  /**
+   * B2: a recovery-only session (scope RECOVERY), through the same canonical resolver. Only
+   * getRecoveryContext calls it (architecture test). Never refreshed: nothing extends its 15 minutes.
+   */
+  static async getRecoverySession(rawToken: string) {
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const sessions = await rawPrisma.$queryRaw<Array<ResolvedSession>>`SELECT * FROM luxia_session_resolve(${hashedToken})`;
+    const session = sessions?.[0];
+    if (!session || session.scope !== "RECOVERY" || session.revokedAt || session.expiresAt <= new Date()) return null;
     return session;
   }
 

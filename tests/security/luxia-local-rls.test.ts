@@ -1,7 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTenantDb } from "../../lib/db/scoped-client";
 import { adminPrisma } from "../helpers/admin-prisma";
+
+const hex = (value: string) => createHash("sha256").update(value).digest("hex");
 
 describe("LUXIA_LOCAL PostgreSQL tenant isolation", () => {
   const org = randomUUID(), tenantA = randomUUID(), tenantB = randomUUID(), provider = randomUUID();
@@ -31,17 +33,15 @@ describe("LUXIA_LOCAL PostgreSQL tenant isolation", () => {
       { organizationId: org, tenantId: tenantB, identityAccountId: accountB, purpose: "AUTHENTICATION", challengeHash: "hash-b", expiresAt: new Date(Date.now() + 60000) },
     ] });
     await adminPrisma.localRecoveryCode.createMany({ data: [
-      { organizationId: org, tenantId: tenantA, identityAccountId: accountA, codeHash: "recovery-a" },
-      { organizationId: org, tenantId: tenantB, identityAccountId: accountB, codeHash: "recovery-b" },
+      { organizationId: org, tenantId: tenantA, identityAccountId: accountA, codeHash: hex("recovery-a"), batchId: randomUUID() },
+      { organizationId: org, tenantId: tenantB, identityAccountId: accountB, codeHash: hex("recovery-b"), batchId: randomUUID() },
     ] });
   });
+  // B2: recovery codes are never deleted (database guard), so the rows that reference them stay too.
+  // The fixture uses random identifiers and is left in the throwaway test database, like the others.
   afterAll(async () => {
-    await adminPrisma.localRecoveryCode.deleteMany({ where: { organizationId: org } });
     await adminPrisma.localAuthChallenge.deleteMany({ where: { organizationId: org } });
     await adminPrisma.localAuthenticator.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.localIdentity.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.identityAccount.deleteMany({ where: { organizationId: org } }); await adminPrisma.subject.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: org } }); await adminPrisma.tenant.deleteMany({ where: { organizationId: org } }); await adminPrisma.organization.deleteMany({ where: { id: org } });
   });
 
   it("shows each of the four new tables only inside its tenant", async () => {
@@ -56,7 +56,7 @@ describe("LUXIA_LOCAL PostgreSQL tenant isolation", () => {
       await expect(tx.localIdentity.create({ data: { organizationId: org, tenantId: tenantB, identityAccountId: accountB, principalName: "intruder" } })).rejects.toThrow();
       await expect(tx.localAuthenticator.create({ data: { organizationId: org, tenantId: tenantB, identityAccountId: accountB, type: "TOTP", secretRef: "vault://intruder" } })).rejects.toThrow();
       await expect(tx.localAuthChallenge.create({ data: { organizationId: org, tenantId: tenantB, identityAccountId: accountB, purpose: "AUTHENTICATION", challengeHash: "intruder", expiresAt: new Date(Date.now() + 60000) } })).rejects.toThrow();
-      await expect(tx.localRecoveryCode.create({ data: { organizationId: org, tenantId: tenantB, identityAccountId: accountB, codeHash: "intruder" } })).rejects.toThrow();
+      await expect(tx.localRecoveryCode.create({ data: { organizationId: org, tenantId: tenantB, identityAccountId: accountB, codeHash: hex("intruder"), batchId: randomUUID() } })).rejects.toThrow();
     });
   });
 });

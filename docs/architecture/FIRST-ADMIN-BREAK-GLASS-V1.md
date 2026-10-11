@@ -82,7 +82,7 @@ Scope approved by the operator on 2026-10-11. It builds on the migration `202610
 
 **Session resolution goes through the canonical resolver only.**
 - Migration `20261011200000_session_resolve_subject_account` extends `luxia_session_resolve`, with the same signature, so grants are kept. It now also refuses a session whose subject is not ACTIVE, or whose identity account is not ACTIVE. `resolve_session` wraps it and inherits the rule. Rollback: `docs/operations/B3-SESSION-RESOLVE-ROLLBACK.sql`, always lossless.
-- `getSession` reads `luxia_session_resolve` and accepts FULL sessions only. B2 will add the recovery-only allow-list.
+- `getSession` reads `luxia_session_resolve` and accepts FULL sessions only. A RECOVERY session is read only through the B2 allow-list (section B2 below).
 
 **Conditional writes.** These no longer fail on a concurrent revocation: a session revoked in the meantime is frozen, and the write becomes a no-op or a clean 404.
 - the `lastSeenAt` refresh;
@@ -109,3 +109,72 @@ This applies to every transaction that creates a session, an invitation or a dom
 - the suspended-organization case in `tests/security/oidc-callback.test.ts`;
 - `tests/security/organization-lifecycle-architecture.test.ts`;
 - a unit test of the session refusal.
+
+## B2, recovery codes and the recovery-only session
+
+Design approved by the operator on 2026-10-11 (R1 to R6): `FIRST-ADMIN-BREAK-GLASS-V1-B2-RECOVERY-DESIGN.md`. Self-service only: no operator action, no permission, no grant (B4 is separate).
+
+**Migration** `20261012090000_recovery_codes_b2` (expand only). Rollback: `docs/operations/B2-RECOVERY-CODES-ROLLBACK.sql`.
+- `LocalRecoveryCode` gets `batchId` and `revokedAt`, a CHECK that new hashes are SHA-256 hex, and an index of usable codes.
+- Backfill: every row written before B2 becomes its own batch, and an unused one is revoked (Production had 0 rows).
+- The guard `luxia_recovery_code_guard` (trigger, owner-only):
+  - creation: ACTIVE organization, unused and unrevoked, at most 10 usable codes per account, counted under the account's local identity row lock;
+  - afterwards only `usedAt` or `revokedAt` changes, from NULL to a timestamp, once, one of them; consumption needs an ACTIVE organization;
+  - a used or revoked code is frozen, and no row is ever deleted.
+- The rollback drops the guard and the CHECK first. It then marks every revoked unused code as used, so that none can become usable again, closes open RECOVERY sessions, and drops the rest.
+
+**Codes** (`lib/auth/recovery.ts`).
+- 20 Crockford base32 characters (100 bits), shown as `XXXXX-XXXXX-XXXXX-XXXXX`, returned once by the generation answer.
+- Stored only as `SHA-256("luxia-recovery-code:v1:" + identityAccountId + ":" + code)`, in hex.
+- Input is normalized: case, spaces and hyphens, `O` read as `0`, `I` and `L` read as `1`.
+- No expiry (R1).
+- The older adapter helpers are closed: the Prisma store stores and accepts no code.
+
+**Generation and revocation** (`/api/me/recovery-codes`, `/api/me/recovery-codes/revoke`). FULL session only, with the `x-luxia-change-id` header.
+- Generation needs the session's own LUXIA local account and a passkey sign-in less than 15 minutes old (R2): the session and its VERIFIED passkey evidence.
+- One transaction: organization lock, then the person's local identity row lock; unused earlier codes revoked; 10 hashes stored; `RECOVERY_CODES.GENERATE` in the journal.
+- 5 batches per day per person.
+- "Revoke all" revokes every unused code, with `RECOVERY_CODES.REVOKE`.
+- The status answer gives only the number of codes left, the batch date, and whether a recovery used the current batch (R5 notice).
+
+**Recovery sign-in** (`POST /api/auth/local/recovery`).
+- Every refusal is the same 401 `LOCAL_AUTHENTICATION_FAILED`, after a 400 ms minimum duration.
+- Limits: 10 per hour per client, 5 per hour per (organization, identifier). There is no lockout (R3); a lock that has expired no longer refuses.
+- Success, in one transaction, in this order:
+  1. organization lock;
+  2. check of the person, account and local identity;
+  3. conditional consumption of the code;
+  4. VERIFIED evidence (`CUSTOM`, `LOCAL_RECOVERY_CODE_VERIFIED`, LOW);
+  5. a RECOVERY session of exactly 15 minutes;
+  6. `RECOVERY.SIGN_IN`.
+- A known person who is refused gets a REJECTED evidence with the precise reason.
+
+**The recovery-only session.**
+- `getAuthContext` / `requireAuth` never return it, so every page and API refuses it (401 or redirect), even for an administrator.
+- `getRecoveryContext` returns a branded `RecoveryContext`, which has no `AuthContext` shape, so tsc refuses it in any permission check.
+- Its callers are allow-listed:
+  - enrolment begin and complete (`/api/auth/recovery/enrollment/*`);
+  - the `/recovery` page.
+- Sign-out revokes any scope. Nothing refreshes or extends the session.
+
+**Enrolment ends the recovery** (R4). In one transaction:
+1. organization lock;
+2. the recovery session is revoked, once, so a second completion is refused;
+3. the single-use challenge (purpose RECOVERY, accepted by no other flow) is consumed;
+4. the previous passkeys and security keys of the account are revoked. TOTP is not touched: it is not used as a sign-in authenticator in the product (the only local sign-in route accepts passkeys, and no route enrols or verifies a TOTP; operator decision, 2026-10-12);
+5. the new passkey is created;
+6. every other session of the account ends;
+7. `RECOVERY.PASSKEY_ENROLLED` and `LOCAL_AUTHENTICATOR.ENROLL` are written.
+
+The cookie is cleared, and the person signs in with the new passkey. The remaining codes stay valid (R5). A notice that cannot be dismissed asks for a new batch, on the overview and on the Authentication page.
+
+**Tests:**
+- `tests/resources/recovery-postgres.test.ts`, PostgreSQL through the real routes:
+  - generation, sign-in, refusals and limits;
+  - the session refused by 14 routes;
+  - enrolment;
+  - the database guard;
+  - the section 7 races, with real lock waits;
+- `tests/security/recovery-architecture.test.ts`: allow-list, type separation, lock order, no permission or B4 logic, rollback order;
+- `tests/security/recovery-codes.test.ts`;
+- the B3 lock-order map and the function privilege gate, extended.
