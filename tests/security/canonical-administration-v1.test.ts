@@ -282,6 +282,8 @@ describe("Canonical Administration v1", () => {
         }),
       },
       session: { create: sessionCreate },
+      // B3: the organization row is locked first; ACTIVE here, so the account check decides.
+      $queryRaw: vi.fn().mockResolvedValue([{ status: "ACTIVE" }]),
     } as never));
 
     await expect(SessionStore.createSession({
@@ -290,6 +292,22 @@ describe("Canonical Administration v1", () => {
       subjectId: "subject-1",
       identityAccountId: "identity-1",
     })).rejects.toBeInstanceOf(SessionCreationDeniedError);
+    expect(sessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("cannot create a session for an organization that is not ACTIVE (B3)", async () => {
+    const accountRead = vi.fn();
+    const sessionCreate = vi.fn();
+    vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
+      identityAccount: { findFirst: accountRead },
+      session: { create: sessionCreate },
+      $queryRaw: vi.fn().mockResolvedValue([{ status: "SUSPENDED" }]),
+    } as never));
+
+    await expect(SessionStore.createSession({
+      organizationId: auth.organizationId, tenantId: auth.tenantId, subjectId: "subject-1", identityAccountId: "identity-1",
+    })).rejects.toMatchObject({ name: "SessionCreationDeniedError", reason: "ORGANIZATION_NOT_ACTIVE" });
+    expect(accountRead).not.toHaveBeenCalled();
     expect(sessionCreate).not.toHaveBeenCalled();
   });
 });
