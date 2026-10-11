@@ -1,5 +1,20 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-11 ~20:45Z — B3 ORGANIZATION LIFECYCLE ENFORCEMENT: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B3-RELEASE-2026-10-11.md`).
+> - `main` is `8aec711` (PR #43). Production = **`dpl_8YEyT71Z1o3CUfb8qSCTZ9V1dr6o` @ `8aec711`**; rollback = `dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`.
+> - **22 migrations** in Production; the last one, `20261011200000_session_resolve_subject_account`, was applied 20:28:54–29:04Z.
+> - First Admin / Break-glass v1 status:
+>   - **B1 PASS**;
+>   - **migration `Organization.status` + `Session.scope` PASS**;
+>   - **B3 PASS**;
+>   - next is **B2**, design first.
+> - Sessions resolve only through `luxia_session_resolve`. It refuses a non-ACTIVE organization, subject or identity account, and accepts FULL sessions only until B2.
+> - Neon backups:
+>   - `br-cold-bread-ah1hlohl` (before B3) and `br-twilight-wildflower-ah68mp0p` (before status and scope), both until 2026-10-25;
+>   - the Lab archive `br-icy-darkness-aho1v83p`, kept until B4 is certified.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-11 ~17:20Z — MIGRATION `Organization.status` + `Session.scope`: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-RELEASE-2026-10-11.md`).
 > - `main` is `4e98edf` (PR #41). **21 migrations** in Production; the last one, `20261011180000_organization_status_session_scope`, was applied 17:16:44–57Z.
 > - The application is unchanged: `dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`, with rollback `dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ`.

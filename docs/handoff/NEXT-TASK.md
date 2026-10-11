@@ -11,18 +11,15 @@ Read `docs/handoff/CURRENT-STATE.md` first.
 - 2026-10-11: **First Admin / Break-glass v1: scope approved** (PR #37, `docs/product/FIRST-ADMIN-BREAK-GLASS-V1-SCOPE.md`, K1 to K5 and section 9).
 - 2026-10-11: **B1 last-administrator guard: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B1-RELEASE-2026-10-11.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1.md`).
 - 2026-10-11: **Migration `Organization.status` + `Session.scope`: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-RELEASE-2026-10-11.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-DESIGN.md`).
+- 2026-10-11: **B3 organization lifecycle enforcement: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B3-RELEASE-2026-10-11.md`, notes in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1.md`).
+
+First Admin / Break-glass v1 status: **B1 = PASS**; **migration `Organization.status` + `Session.scope` = PASS**; **B3 = PASS**; **next = B2**.
 
 ## Next objective: First Admin / Break-glass v1, in the order approved by the operator
 
-1. **B3, Organization Lifecycle Enforcement** (scope approved by the operator on 2026-10-11), in a separate code PR, with no merge and no deployment without separate approval:
-   - SUSPENDED and CLOSED are indistinguishable from an unknown organization at sign-in, and every pre-authentication answer stays generic;
-   - `getSession` goes through the canonical resolver and also refuses a non-ACTIVE subject or a DISABLED account;
-   - conditional `lastSeenAt` updates and conditional sign-out;
-   - the tenant governance lock comes first, enforced by an architecture test;
-   - suspension revokes every active session in the same transaction, reactivation never brings a revoked session back, and closing is irreversible.
-2. **B2**: personal recovery codes and the `recovery-only` session (15 minutes, own passkey enrolment only).
-3. **B4**: closed-action operator procedure with dry run, digest and confirmation. Then replay the Lab neutralization on a clone of the archive branch `br-icy-darkness-aho1v83p`, and delete that branch once B4 is certified.
-4. **B5**: visibility: durable second administrator, recovery codes created, French labels for operator actions.
+1. **B2, next**: personal recovery codes and the `recovery-only` session (15 minutes, own passkey enrolment only). Write the design first (docs only), with no code before the operator approves it.
+2. **B4**: closed-action operator procedure with dry run, digest and confirmation. Then replay the Lab neutralization on a clone of the archive branch `br-icy-darkness-aho1v83p`, and delete that branch once B4 is certified.
+3. **B5**: visibility: durable second administrator, recovery codes created, French labels for operator actions.
 
 ## Small follow-ups (each needs its own approval)
 
