@@ -397,7 +397,8 @@ describe.runIf(enabled)("Organization.status and Session.scope (PostgreSQL)", ()
       const [transitioned, accepted, granted] = order ? [...results].reverse() : results;
       expect(transitioned, `order ${order}`).toBe("ok");
       expect(granted, `order ${order}`).toBe("ok");
-      if (accepted !== "ok") expect(text(accepted), `order ${order}`).toMatch(/ORGANIZATION_NOT_ACTIVE/);
+      // B3: a refused acceptance answers like an unknown token, never with the organization status.
+      if (accepted !== "ok") expect(accepted, `order ${order}`).toMatchObject({ code: "INVITATION_INVALID", status: 403 });
       expect(await statusOf(org)).toBe("SUSPENDED");
       expect(await openSessions(org)).toBe(0);
     }
