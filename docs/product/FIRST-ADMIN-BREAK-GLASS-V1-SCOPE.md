@@ -88,3 +88,73 @@ The Customer Self-Onboarding v1 certification (2026-10-11) proved an operational
 4. Every operator action is limited to the closed list, requires a reference, is audited in the organization's journal by "Opérateur LUXIA", and gives LUXIA no access.
 5. The certification-lab neutralization can be replayed through the procedure, with the same before/after result and no raw SQL.
 6. CI PASS on exact SHAs. Production certification with an independent read-only database cross-check.
+
+---
+
+## 9. Operator decisions and binding requirements (2026-10-11)
+
+K1 to K5 are **approved as recommended**. The requirements below are binding for the implementation.
+
+### 9.1 Organization status: `ACTIVE`, `SUSPENDED`, `CLOSED`
+
+| | ACTIVE | SUSPENDED | CLOSED |
+|---|---|---|---|
+| Meaning | Normal operation | Temporary stop, for example an incident or the customer's request | Definitive end of service |
+| Sign-in (Microsoft, passkey, recovery code) | Allowed | **Refused**, with the same generic answer as for an unknown organization | **Refused**, same answer |
+| Existing sessions | Valid | **Revoked** in the transition transaction; any session found later is refused at resolution | Revoked, same rules |
+| Open invitations | Usable | Cannot be accepted, but stay open | **Revoked** in the transition transaction |
+| Verified domains | Kept | **Kept** (still owned) | **Released (LOST)**, so another organization can verify them |
+| Signup code, slug | Unchanged | Unchanged | Unchanged. The slug stays reserved forever (immutable). |
+| Data and journal | Kept | Kept | Kept, for retention and evidence |
+| Allowed transitions | to SUSPENDED or CLOSED | to ACTIVE or CLOSED | **None in v1.** CLOSED is final and a database trigger refuses any change. Reopening would need a separate, reviewed procedure. |
+| Who changes it | Only the operator procedure (9.2) | same | same |
+
+### 9.2 Break-glass: closed actions only, never generic SQL
+
+- The procedure is a fixed list of named actions in code:
+  - `suspend`, `reactivate` and `close` an organization;
+  - `revoke-sessions`;
+  - `disable-account <person of this organization>`;
+  - `release-domain <domain of this organization>`, only if its TXT record is absent;
+  - `recovery-invitation <person named in the customer's written request>`.
+- It accepts **no SQL, query or free expression**. Every parameter is validated against the target organization: a person, account or domain of another organization is refused.
+- It runs with the owner connection only because RLS requires it. Each action is one transaction. It writes its journal event, authored by "Opérateur LUXIA" (a disabled `SERVICE` identity without account, key or right), with the reference, the reason and before/after counts.
+- LUXIA never receives a grant or a session, and never reads business data beyond the counts needed for the plan.
+
+### 9.3 Mandatory dry run and explicit confirmation before any mutation
+
+1. **Dry run first, always.** The command computes the exact plan (organization, action, targets, before counts and expected after counts) and prints it with a **plan digest** (SHA-256 of the plan). Nothing is written.
+2. **Explicit confirmation.** Applying requires `--confirm <plan digest>`. Before writing, the command recomputes the plan inside the transaction. If the state changed, the digest differs and the run is refused with nothing written.
+3. A mandatory **reference** (ticket or written customer request) and **reason** are part of the plan and of the journal event.
+4. The command prints the after state and keeps a local copy of the plan, digest and result, with no secret.
+
+### 9.4 Recovery: a `recovery-only` session that can only enrol a new passkey
+
+- A recovery code opens a session marked `RECOVERY`, with a **15-minute** lifetime.
+- That session can call **only**:
+  - passkey enrolment for its own identity (begin and complete);
+  - sign-out.
+
+  Every other page and API refuses it with 403 and the same message, including the dashboard, journal, sessions, administration and recovery-code generation. The refusal is enforced on the server, at session resolution, for every route.
+- Enrolling the new passkey **ends** the recovery session (revoked), and the person then signs in normally with the new passkey.
+- The code is single use, hashed, rate limited, and recorded in the Security Journal as a recovery sign-in (assurance LOW, not phishing-resistant), followed by the enrolment.
+- A recovery session never satisfies an administrator permission, even for an administrator.
+
+### 9.5 B4 certification proof: replay of the Lab neutralization
+
+- **Preserved starting state.** Neon keeps 6 hours of history. To keep this proof possible, the state of Production just before the 2026-10-11 neutralization (13:51:16Z) was archived:
+  - archive branch `br-icy-darkness-aho1v83p` = **`archive-lab-pre-neutralization-20261011-1350`**;
+  - 2026-10-11 13:50:30Z, LSN `0/3C43E70`;
+  - no compute, expires 2026-11-10.
+- **Replay on an isolated clone of that archive.** Run the procedure (dry run, confirm, apply) to neutralize `luxia-certification-lab`. Expected result: the same before/after as the SQL action (2→0 sessions, 2→0 active accounts, local identities and passkeys, domain LOST), no raw SQL, and journal events authored by "Opérateur LUXIA". Then `close`: the organization becomes CLOSED, and its sign-ins get the generic refusal.
+- **In Production, after release and approval.** Run the procedure's dry run on `luxia-certification-lab`. Expected: nothing left to neutralize, except the status change to CLOSED, which is applied only after explicit confirmation.
+
+### Updated implementation order
+
+1. B1, last-administrator guard (no migration)
+2. Migration: `Organization.status` with its transition trigger (CLOSED is final), `Session.scope`
+3. B3, status enforced at sign-in, session resolution and invitation acceptance; CLOSED revokes invitations and releases domains
+4. B2, recovery codes and `recovery-only` session (9.4)
+5. B4, closed-action operator procedure with dry run and confirmation (9.2, 9.3), then the Lab replay on the archive clone (9.5)
+6. B5, visibility and French labels
+7. PostgreSQL, RLS and adversarial tests, then Production certification
