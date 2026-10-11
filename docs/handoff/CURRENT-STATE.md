@@ -1,5 +1,20 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-11 ~17:20Z — MIGRATION `Organization.status` + `Session.scope`: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-RELEASE-2026-10-11.md`).
+> - `main` is `4e98edf` (PR #41). **21 migrations** in Production; the last one, `20261011180000_organization_status_session_scope`, was applied 17:16:44–57Z.
+> - The application is unchanged: `dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`, with rollback `dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ`.
+> - Both organizations are ACTIVE and every session is FULL.
+> - The database enforces:
+>   - status changes only by the operator role, under the governance lock;
+>   - CLOSED is final;
+>   - sessions are append-only;
+>   - SUSPENDED and CLOSED resolve nothing.
+> - Backup branch `br-twilight-wildflower-ah68mp0p` expires 2026-10-25. The rollback script is lossless while no status is in use.
+> - **Binding for B4:** Prisma 5.20 does not report a failed COMMIT. End every transition with `SET CONSTRAINTS ALL IMMEDIATE` and re-read the state.
+> - The Lab archive `br-icy-darkness-aho1v83p` is kept until B4 is certified.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-11 ~16:00Z — FIRST ADMIN / BREAK-GLASS V1, B1 LAST-ADMINISTRATOR GUARD: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B1-RELEASE-2026-10-11.md`).
 > - `main` is `ebb4f46` (PR #38, merged pinned on `2d61ee6`). Production = **`dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`**; rollback = `dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ` @ `5e8c887`.
 > - No migration: Production still has the **20** repository migrations applied.
