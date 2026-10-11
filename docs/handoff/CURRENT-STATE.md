@@ -1,5 +1,14 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-11 ~16:00Z — FIRST ADMIN / BREAK-GLASS V1, B1 LAST-ADMINISTRATOR GUARD: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B1-RELEASE-2026-10-11.md`).
+> - `main` is `ebb4f46` (PR #38, merged pinned on `2d61ee6`). Production = **`dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`**; rollback = `dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ` @ `5e8c887`.
+> - No migration: Production still has the **20** repository migrations applied.
+> - No change may take a tenant from at least one durable administrator to none (`LAST_ADMINISTRATOR_PROTECTED`). Legrand Tech has 1 durable administrator. The neutralized Lab has 0 and is not frozen.
+> - Proven in Production by a rolled-back `app_user` transaction, with nothing changed.
+> - Neon archive branch `br-icy-darkness-aho1v83p` (the Lab's state before neutralization) is kept until B4 is certified, then deleted.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-11 ~14:20Z — CUSTOMER SELF-ONBOARDING V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/CUSTOMER-SELF-ONBOARDING-V1-MULTI-ORG-CERTIFICATION-2026-10-11.md`).
 > - `main` is `5e8c887` (PR #35, finding F1 fixed: passkey sign-in never lists credential IDs). Production = **`dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ` @ `5e8c887`**; rollback = `dpl_7ZzzEA3DbQdAACKZP4f9V947gkad` @ `6f9de76`.
 > - Two organizations exist: `legrand-tech` (active) and `luxia-certification-lab`. The Lab was **neutralized** by a provisional break-glass operator action: no session, accounts disabled, passkeys revoked, domain released. Its history is kept.
