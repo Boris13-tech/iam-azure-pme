@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { allowRequest } from "../../lib/security/rate-limit";
+import { softwarePasskey } from "../helpers/software-passkey";
 
 // Customer Self-Onboarding v1, step 2: organization-aware sign-in and anti-enumeration, exercised
 // through the real route handlers as app_user on PostgreSQL. Microsoft itself is not called: only
@@ -64,7 +65,8 @@ const shape = (value: Record<string, unknown>) => ({
   transactionId: /^[0-9a-f-]{36}$/.test(String(value.transactionId)),
   challenge: String(value.challenge).length,
   rpId: value.rpId,
-  credentials: Array.isArray(value.allowCredentials) && value.allowCredentials.every((id: unknown) => typeof id === "string" && id.length === 43),
+  // Finding F1 (2026-10-11): no credential ID is ever listed, for anyone.
+  credentials: Array.isArray(value.allowCredentials) && value.allowCredentials.length === 0,
 });
 const credential = () => Buffer.from(randomUUID() + randomUUID()).subarray(0, 32).toString("base64url");
 
@@ -85,10 +87,10 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
   }, 120_000);
   afterAll(async () => { await rawPrisma.$disconnect(); await owner?.$disconnect(); });
 
-  it("a real and every decoy answer have the same status, shape and comparable timing", async () => {
+  it("a real answer and every other answer are identical in status, fields, list and timing", async () => {
     const real = await beginJson({ organization: a.slug, principalName: "Alice " });
     expect(real.status).toBe(200);
-    expect(real.body.allowCredentials).toEqual([aliceCredential]);
+    expect(real.body.allowCredentials).toEqual([]);
     const decoys = await Promise.all([
       beginJson({ organization: a.slug, principalName: "nobody" }),          // unknown identifier
       beginJson({ organization: `zulu-${suffix}`, principalName: "alice" }), // unknown organization
@@ -98,23 +100,54 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
     ]);
     for (const decoy of decoys) {
       expect(decoy.status).toBe(200);
-      expect(shape(decoy.body)).toEqual({ ...shape(real.body), credentials: true });
-      expect(decoy.body.allowCredentials.length).toBeGreaterThanOrEqual(1);
-      expect(decoy.body.allowCredentials.length).toBeLessThanOrEqual(2);
+      expect(shape(decoy.body)).toEqual(shape(real.body));
+      expect(shape(decoy.body).credentials).toBe(true);
       expect(decoy.ms).toBeGreaterThanOrEqual(380);
     }
     expect(real.ms).toBeGreaterThanOrEqual(380);
     expect(JSON.stringify(decoys)).not.toMatch(/alpha|bravo|Alice|organizationId|tenantId|externalObjectId/i);
+    expect(JSON.stringify(real.body)).not.toContain(aliceCredential);
   });
 
-  it("decoys are stable per identifier (no tell from repeating), challenges are always fresh", async () => {
-    const first = await beginJson({ organization: `zulu-${suffix}`, principalName: "someone" });
-    const second = await beginJson({ organization: `zulu-${suffix}`, principalName: "someone" });
-    const other = await beginJson({ organization: `zulu-${suffix}`, principalName: "someone-else" });
-    expect(second.body.allowCredentials).toEqual(first.body.allowCredentials);
-    expect(other.body.allowCredentials).not.toEqual(first.body.allowCredentials);
-    expect(second.body.challenge).not.toBe(first.body.challenge);
-    expect(second.body.transactionId).not.toBe(first.body.transactionId);
+  it("repeating a request tells nothing: the list stays empty, challenge and transaction are always fresh", async () => {
+    for (const [organization, principalName] of [[`zulu-${suffix}`, "someone"], [a.slug, "alice"]]) {
+      const first = await beginJson({ organization, principalName });
+      const second = await beginJson({ organization, principalName });
+      expect([first.body.allowCredentials, second.body.allowCredentials]).toEqual([[], []]);
+      expect(second.body.challenge).not.toBe(first.body.challenge);
+      expect(second.body.transactionId).not.toBe(first.body.transactionId);
+    }
+  });
+
+  it("finding F1: real credential IDs of 16, 20, 32 and 64 bytes all sign in, and never show in the begin answer", async () => {
+    const unknown = await beginJson({ organization: a.slug, principalName: "nobody-at-all" });
+    for (const bytes of [16, 20, 32, 64]) {
+      const passkey = softwarePasskey("localhost", "http://localhost:3000", bytes);
+      const principalName = `length-${bytes}`;
+      const { accountId } = await person(a, principalName, []);
+      await owner.localAuthenticator.create({ data: { organizationId: a.organizationId, tenantId: a.tenantId, identityAccountId: accountId, type: "PASSKEY",
+        credentialId: passkey.credentialId, publicKey: passkey.publicKeyPem, relyingPartyId: "localhost", allowedOrigin: "http://localhost:3000",
+        userVerificationRequired: true, credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", algorithmId: "WEBAUTHN_ES256" } });
+      const started = await beginJson({ organization: a.slug, principalName });
+      expect(Buffer.from(passkey.credentialId, "base64url")).toHaveLength(bytes);
+      expect(shape(started.body)).toEqual(shape(unknown.body));
+      expect(JSON.stringify(started.body)).not.toContain(passkey.credentialId);
+      const done = await post(complete, "/api/auth/local/complete", { organization: a.slug, transactionId: started.body.transactionId, challenge: started.body.challenge, ...passkey.assert(started.body.challenge) });
+      expect(done.status, `${bytes}-byte credential`).toBe(200);
+      expect(done.headers.get("set-cookie")).toMatch(/luxia_session=/);
+    }
+  });
+
+  it("a passkey of another person of the same organization cannot complete someone else's sign-in", async () => {
+    const mallory = softwarePasskey();
+    const { accountId } = await person(a, "mallory", []);
+      await owner.localAuthenticator.create({ data: { organizationId: a.organizationId, tenantId: a.tenantId, identityAccountId: accountId, type: "PASSKEY",
+        credentialId: mallory.credentialId, publicKey: mallory.publicKeyPem, relyingPartyId: "localhost", allowedOrigin: "http://localhost:3000",
+        userVerificationRequired: true, credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", algorithmId: "WEBAUTHN_ES256" } });
+    const started = await beginJson({ organization: a.slug, principalName: "alice" });
+    const refused = await post(complete, "/api/auth/local/complete", { organization: a.slug, transactionId: started.body.transactionId, challenge: started.body.challenge, ...mallory.assert(started.body.challenge) });
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toEqual({ error: "LOCAL_AUTHENTICATION_FAILED" });
   });
 
   it("only a real identity gets a stored challenge; browser-supplied tenant or connection ids are ignored", async () => {
@@ -135,6 +168,8 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
   });
 
   it("completion refuses with one generic answer: decoy transaction, bad signature, or another organization", async () => {
+    const sessions = () => owner.session.count({ where: { organizationId: { in: [a.organizationId, b.organizationId] } } });
+    const sessionsBefore = await sessions(); // other tests in this file sign in successfully
     const decoy = await beginJson({ organization: `zulu-${suffix}`, principalName: "alice" });
     const real = await beginJson({ organization: a.slug, principalName: "alice" });
     const attempt = (organization: string, started: { body: Record<string, string> }) => post(complete, "/api/auth/local/complete", {
@@ -152,7 +187,7 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
       expect(await response.json()).toEqual({ error: "LOCAL_AUTHENTICATION_FAILED" });
       expect(response.headers.get("set-cookie")).toBeNull();
     }
-    expect(await owner.session.count({ where: { organizationId: { in: [a.organizationId, b.organizationId] } } })).toBe(0);
+    expect(await sessions()).toBe(sessionsBefore); // no session from any refused attempt
   });
 
   it("requirement 3: sign-in is rate limited per client, with the same answer for every organization", async () => {

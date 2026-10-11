@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { rawPrisma } from "../db/raw-prisma";
 import { withTenantDb } from "../db/scoped-client";
 
@@ -60,18 +60,13 @@ export async function resolveLoginOrganization(slug: string): Promise<LoginOrgan
 }
 
 /**
- * Passkey sign-in begin answer for an unknown organization, identifier or unusable identity. Same
- * shape as a real answer; the credential list is derived from a database-held pepper, so it is
- * stable for a given (organization, identifier) and cannot be predicted from outside.
+ * Passkey sign-in begin answer when no sign-in can start: unknown organization or person, locked or
+ * passkey-less identity. Identical in form to a real answer. Credential IDs are never sent before
+ * verification: allowCredentials is always empty (discoverable passkeys), so nothing in the answer
+ * depends on whether the person exists (finding F1, multi-organization certification 2026-10-11).
  */
-export async function decoyPasskeyChallenge(slug: string, principalName: string, rpId: string) {
-  const input = createHash("sha256").update(`${slug}\u0000${principalName}`).digest("hex");
-  const rows = await rawPrisma.$queryRaw<Array<{ value: string }>>`SELECT luxia_login_decoy(${input}) AS value`;
-  const seed = Buffer.from(rows[0].value, "hex");
-  const count = 1 + (seed[0] % 2);
-  const allowCredentials = Array.from({ length: count }, (_, index) =>
-    createHash("sha256").update(seed).update(String(index)).digest().subarray(0, 32).toString("base64url"));
-  return { transactionId: randomUUID(), challenge: randomBytes(32).toString("base64url"), allowCredentials, rpId };
+export function anonymousPasskeyChallenge(rpId: string) {
+  return { transactionId: randomUUID(), challenge: randomBytes(32).toString("base64url"), allowCredentials: [] as string[], rpId };
 }
 
 /** Pads a pre-authentication answer to a minimum duration so known and unknown paths take comparable time. */
