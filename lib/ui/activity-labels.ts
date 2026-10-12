@@ -1,6 +1,9 @@
 // Readable French labels for canonical audit operations and results. Client-safe (no server imports).
 // Unknown codes are never guessed: the UI shows a neutral label and keeps the code available as a tooltip.
 
+/** Start of every label of a LUXIA operator action (B4, B5). */
+export const OPERATOR_ACTION_PREFIX = "Action opérateur LUXIA : ";
+
 export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze({
   "RESOURCE.ONBOARDING.BOOTSTRAP": "Accès initial accordé", "RESOURCE.ONBOARDING.BOOTSTRAP.REVOKE": "Accès initial révoqué",
   "RESOURCE.ONBOARDING.BOOTSTRAP.DENIED": "Accès initial refusé", "RESOURCE.ONBOARDING.CONFIGURE": "Ressource configurée",
@@ -24,6 +27,17 @@ export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze(
   "DOMAIN.ADD": "Domaine ajouté", "DOMAIN.CHECK": "Domaine contrôlé", "INVITATION.CREATE": "Invitation créée",
   "INVITATION.REVOKE": "Invitation révoquée", "INVITATION.ACCEPT": "Invitation acceptée",
   "RESOURCE.AUTHORIZATION.CHECK": "Autorisation vérifiée", "RESOURCE.CAPABILITY.READ": "Accès à la ressource de test vérifié",
+  // Recovery codes and recovery sign-in (First Admin / Break-glass v1, B2)
+  "RECOVERY_CODES.GENERATE": "Codes de récupération créés", "RECOVERY_CODES.REVOKE": "Codes de récupération révoqués",
+  "RECOVERY.SIGN_IN": "Connexion par code de récupération", "RECOVERY.PASSKEY_ENROLLED": "Clé d’accès remplacée après une récupération",
+  // LUXIA operator actions on the organization (B4). Always prefixed, so a customer tells them apart from its own administrators.
+  "BREAK_GLASS.ORGANIZATION.SUSPEND": `${OPERATOR_ACTION_PREFIX}organisation suspendue`,
+  "BREAK_GLASS.ORGANIZATION.REACTIVATE": `${OPERATOR_ACTION_PREFIX}organisation réactivée`,
+  "BREAK_GLASS.ORGANIZATION.CLOSE": `${OPERATOR_ACTION_PREFIX}organisation fermée définitivement`,
+  "BREAK_GLASS.SESSION.REVOKE": `${OPERATOR_ACTION_PREFIX}sessions révoquées`,
+  "BREAK_GLASS.IDENTITY_ACCOUNT.DISABLE": `${OPERATOR_ACTION_PREFIX}compte désactivé`,
+  "BREAK_GLASS.DOMAIN.RELEASE": `${OPERATOR_ACTION_PREFIX}domaine libéré`,
+  "BREAK_GLASS.RECOVERY_INVITATION.ISSUE": `${OPERATOR_ACTION_PREFIX}invitation d’administrateur de secours émise`,
   // Consultations (read events)
   "AUDIT.READ": "Journal d’audit consulté", "DASHBOARD.POSTURE.READ": "Vue d’ensemble consultée", "SUBJECT.READ": "Identités consultées",
   "SESSION.READ": "Sessions consultées", "ASSIGNMENT.READ": "Accès consultés", "IDENTITY_ACCOUNT.READ": "Comptes consultés",
@@ -49,10 +63,13 @@ export function operationLabel(operation: string): string | null {
 /** Sign-in labels (Security Journal v1). Entra is "attestée par Microsoft": never MFA (decision S1). */
 export const SIGN_IN_METHOD_LABELS: Readonly<Record<string, string>> = Object.freeze({
   FEDERATED_OIDC: "Microsoft Entra ID", PASSKEY: "Clé d’accès", SECURITY_KEY: "Clé de sécurité", TOTP: "Code à usage unique",
+  RECOVERY_CODE: "Code de récupération",
 });
 export const ASSURANCE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   PROVIDER_ATTESTED: "Connexion attestée par Microsoft", PHISHING_RESISTANT: "Résistante à l’hameçonnage", STANDARD: "Standard",
+  RECOVERY_CODE: "Faible, code à usage unique, accès limité à l’ajout d’une clé d’accès",
 });
 export const REFUSAL_LABELS: Readonly<Record<string, string>> = Object.freeze({
   SUBJECT_NOT_ACTIVE: "Identité non active", IDENTITY_ACCOUNT_DISABLED: "Compte désactivé",
+  RECOVERY_CODE_INVALID: "Code de récupération invalide ou déjà utilisé",
 });

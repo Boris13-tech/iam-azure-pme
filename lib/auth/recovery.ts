@@ -4,6 +4,7 @@ import type { AuthContext } from "./auth-context";
 import type { RecoveryContext } from "./recovery-session";
 import { normalizeOrganizationSlug, normalizePrincipalName, resolveLoginOrganization } from "./organization-login";
 import { recordRejectedSignIn } from "./sign-in-evidence";
+import { RECOVERY_ASSURANCE_PROFILE } from "./recovery-evidence";
 import { CanonicalAdminError } from "../admin/canonical-admin-error";
 import { withTenantDb } from "../db/scoped-client";
 import { CURRENT_WEBAUTHN_CRYPTO } from "../identity";
@@ -175,7 +176,7 @@ function recoveryEvidence(scope: Scope, person: Person, providerConnectionId: st
   return {
     id: randomUUID(), ...scope, ...person, providerConnectionId,
     method: "CUSTOM", outcome, source: "LOCAL_VERIFIER",
-    assuranceLevel: "LOW", assuranceProfile: "local-recovery", assuranceProfileVersion: 1,
+    assuranceLevel: "LOW", assuranceProfile: RECOVERY_ASSURANCE_PROFILE, assuranceProfileVersion: 1,
     phishingResistant: false, hardwareBound: false, userVerification: "NOT_VERIFIED",
     sourceRef: `recovery-sign-in:${operationId}`, verifierPolicyVersion: 1, operationId, reasonCode, occurredAt: now,
   };

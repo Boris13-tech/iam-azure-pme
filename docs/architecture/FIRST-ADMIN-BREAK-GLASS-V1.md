@@ -238,3 +238,35 @@ Design approved on 2026-10-12 (D1 to D7, Q1): `FIRST-ADMIN-BREAK-GLASS-V1-B4-OPE
 - `tests/security/break-glass-architecture.test.ts`;
 - the B1 and B3 architecture maps, extended;
 - the PGlite drill of the migration and its rollback.
+
+## B5, visibility for the customer (no migration)
+
+Approved scope (section 3 of `docs/product/FIRST-ADMIN-BREAK-GLASS-V1-SCOPE.md`): facts only, no score; French labels for operator actions; the checklist for administrators only.
+
+**Measured before B5 (Production, read only, 2026-10-12):** 8 of the 44 operations in the journal had no label and showed « Autre action ». They were every B2 and B4 operation, including the two closures by the LUXIA operator. The 3 recovery-code sign-ins showed the raw method « CUSTOM » with the assurance « Standard », although the evidence records LOW.
+
+**What B5 changes:**
+- **Journal labels** (`lib/ui/activity-labels.ts`):
+  - the 7 operator actions read « Action opérateur LUXIA : … ». The prefix is a constant, and no other operation may use it;
+  - the 4 B2 operations have their own labels;
+  - a test fails if any operation the application journals has no label.
+- **Recovery-code sign-ins** (`lib/auth/recovery-evidence.ts`):
+  - recognised by the assurance profile `local-recovery`, which B2 writes, never guessed from a reason code;
+  - shown as « Code de récupération », with the assurance « Faible, code à usage unique, accès limité à l'ajout d'une clé d'accès », in the security journal and in the 24-hour sign-ins of the overview;
+  - a refused code reads « Code de récupération invalide ou déjà utilisé ».
+- **« Mes sessions »:** each session carries its scope. A RECOVERY session is shown as a recovery-code session, never as a passkey session.
+- **Checklist item `recoveryCodes`:**
+  - it is a fact: every LUXIA local account of a durable administrator that signs in with a passkey or a security key holds at least one usable recovery code;
+  - it is null, and not shown, when no such account exists (for example, administrators who sign in only with Microsoft);
+  - counts only; no code or hash is read.
+- **Checklist for administrators only:**
+  - the posture response tells the overview whether the viewer holds the checklist's own right (`subjects.read`, native grants, the rule of `requireNative`);
+  - the overview requests the checklist only then, so members no longer cause a journaled `ONBOARDING.CHECKLIST.READ.DENIED`;
+  - the API still checks the right itself.
+
+**Tests:**
+- `tests/security/b5-visibility.test.ts`;
+- PostgreSQL:
+  - the checklist goes null → false → true → false as codes are added, used and revoked;
+  - the recovery sign-in shows in the journal and in « Mes sessions » as a recovery;
+  - the posture `viewer` flag, for the full, partial and no-rights viewers.

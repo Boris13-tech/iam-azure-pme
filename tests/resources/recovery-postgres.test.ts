@@ -22,6 +22,8 @@ import {
   beginRecoveryEnrollment, completeRecoveryEnrollment, generateRecoveryCodes, normalizeRecoveryCode, recoveryCodeHash, revokeRecoveryCodes,
 } from "../../lib/auth/recovery";
 import { transitionOrganization, type OrganizationStatus } from "../../lib/organizations/lifecycle";
+import { listSecurityJournal } from "../../lib/audit/security-journal";
+import { listMySessions } from "../../lib/auth/self-service";
 import { softwarePasskey } from "../helpers/software-passkey";
 import { POST as begin } from "../../app/api/auth/local/begin/route";
 import { POST as complete } from "../../app/api/auth/local/complete/route";
@@ -234,6 +236,13 @@ describe.runIf(enabled)("B2 recovery codes and recovery-only session (app_user, 
     expect(evidence).toMatchObject({ outcome: "VERIFIED", method: "CUSTOM", assuranceLevel: "LOW", assuranceProfile: "local-recovery",
       phishingResistant: false, hardwareBound: false, userVerification: "NOT_VERIFIED", source: "LOCAL_VERIFIER", identityAccountId: org.accountId });
     expect(await owner.canonicalAdminAuditEvent.count({ where: { organizationId: org.organizationId, operation: "RECOVERY.SIGN_IN" } })).toBe(1);
+    // B5: the security journal and « Mes sessions » name it for what it is, never a generic method or a passkey.
+    const self = { organizationId: org.organizationId, tenantId: org.tenantId, subjectId: org.subjectId };
+    const signIns = (await listSecurityJournal(self, { kind: "sign-in" })).entries;
+    expect(signIns.filter((entry) => entry.method === "RECOVERY_CODE")).toEqual([expect.objectContaining({ result: "SUCCESS", assurance: "RECOVERY_CODE" })]);
+    expect(signIns.some((entry) => entry.method === "CUSTOM")).toBe(false);
+    const mine = await listMySessions({ ...self, sessionId: "not-a-session", identityAccountId: org.accountId });
+    expect(mine.filter((own) => own.scope === "RECOVERY")).toEqual([expect.objectContaining({ providerType: "LUXIA_LOCAL", current: false })]);
 
     expect(await SessionStore.getSession(result.cookie!)).toBeNull(); // never a FULL session
     expect(await SessionStore.getRecoverySession(result.cookie!)).toMatchObject({ id: session.id, scope: "RECOVERY" });

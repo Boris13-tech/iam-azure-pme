@@ -147,6 +147,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Identity Security Pos
 
   it("full viewer: exact real values per widget", async () => {
     const r = await loadIdentitySecurityPosture(auth(ids.V, acct.V), { now: new Date(now) });
+    expect(r.viewer).toEqual({ onboardingChecklist: true }); // B5: subjects.read, the checklist's own right
     expect(r.organization.name).toBe("Posture fixture org");
     expect(nonZero(value(r, "identity.subjectsByLifecycle"))).toEqual({ ACTIVE: 5, SUSPENDED: 1, RECOVERY_REQUIRED: 1 });
     expect(nonZero(value(r, "identity.subjectsByType"))).toEqual({ HUMAN: 6, SERVICE: 1 });
@@ -209,6 +210,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Identity Security Pos
     expect(all.every(w => w.state === "restricted")).toBe(true);
     expect(all.every(w => Object.keys(w).sort().join() === "id,state")).toBe(true);
     expect(r.attention).toEqual([]);
+    expect(r.viewer).toEqual({ onboardingChecklist: false }); // B5: the overview never asks, so no denied read is journaled
   });
 
   it("partial viewer (subjects.read only): governance and sessions hidden; restricted ≠ 0", async () => {
@@ -219,6 +221,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Identity Security Pos
     expect(r.sections.sessions.every(w => w.state === "restricted")).toBe(true);
     expect(r.sections.governance.every(w => w.state === "restricted")).toBe(true);
     expect(r.attention.map(a => a.id)).toEqual(["identity.recoveryRequiredSubjects"]);
+    expect(r.viewer).toEqual({ onboardingChecklist: true });
   });
 
   it("tenant isolation: tenant B sees only its own data; tenant A counts exclude B", async () => {
