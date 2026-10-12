@@ -1,5 +1,18 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-12 ~19:35Z — B4 OPERATOR BREAK-GLASS PROCEDURE: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B4-RELEASE-2026-10-12.md`).
+> - `main` is `41d7220` (PR #50, journal-time fix, after PR #49 `2414ec6`). Production = **`dpl_3Jm2usCcwnM4JZndgAU9A7ngkfnT` @ `2414ec6`**; rollback = `dpl_CiB2VuvFtru15AxNJfa5NfDF8q2F` @ `fe34cf7`. PR #50 changes only the operator module, which the application never imports, so it is not deployed.
+> - **24 migrations** in Production; the last one, `20261012180000_break_glass_operator_invitation`, was applied 18:52:31–40Z. Rollback script: `docs/operations/B4-BREAK-GLASS-ROLLBACK.sql`.
+> - First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS → B2 PASS → B4 PASS**; next is **B5**, design first.
+> - Operator actions on an organization go only through `scripts/operators/break-glass.ts` (dry run, digest, apply, journal event by « Opérateur LUXIA (break-glass) »). Runbook: `docs/operations/B4-BREAK-GLASS-RUNBOOK.md`.
+> - `luxia-certification-lab` **CLOSED** at 19:13:29Z and `luxia-cert-b2-r6` **CLOSED** at 19:32:00Z, through the procedure, with all history kept. Legrand Tech was unchanged by both.
+> - Neon backups:
+>   - `br-snowy-dawn-ahbgmqhr` (before B4) and `br-dawn-scene-ahdunopo` (before B2), both until 2026-10-26;
+>   - `br-cold-bread-ah1hlohl` (before B3) and `br-twilight-wildflower-ah68mp0p` (before status and scope), both until 2026-10-25;
+>   - the Lab archive `br-icy-darkness-aho1v83p`: B4 is certified, so it is deleted on the operator's confirmation.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-12 ~15:20Z — B2 RECOVERY CODES AND RECOVERY-ONLY SESSION: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`).
 > - `main` is `fe34cf7` (PR #46, merged pinned on `db9f740`). Production = **`dpl_CiB2VuvFtru15AxNJfa5NfDF8q2F` @ `fe34cf7`**; rollback = `dpl_8YEyT71Z1o3CUfb8qSCTZ9V1dr6o` @ `8aec711`.
 > - **23 migrations** in Production; the last one, `20261012090000_recovery_codes_b2`, was applied 07:03:35–46Z. Rollback script: `docs/operations/B2-RECOVERY-CODES-ROLLBACK.sql`.
