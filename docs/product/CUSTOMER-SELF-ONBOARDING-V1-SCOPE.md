@@ -1,6 +1,8 @@
 # LUXIA Identity — Customer Self-Onboarding v1: scope proposal
 
-Status: **PROPOSAL, awaiting operator validation.** No code, migration or Production change is part of this document.
+Status: **VALIDATED and SHIPPED.** The operator validated this scope (decisions O1 to O5 and the 17 mandatory requirements of section 9), as recorded in `docs/architecture/CUSTOMER-SELF-ONBOARDING-V1.md`. It shipped in PR #32 (`6f9de76`) and PR #35 (finding F1), and was certified in `docs/certification/CUSTOMER-SELF-ONBOARDING-V1-RELEASE-2026-10-11.md` and `docs/certification/CUSTOMER-SELF-ONBOARDING-V1-MULTI-ORG-CERTIFICATION-2026-10-11.md`. This file is the record of the approved scope as written before the code. Later changes are in the architecture and certification documents, not here.
+
+Original status: proposal awaiting operator validation; no code, migration or Production change was part of this document.
 Baseline: `main` @ `b506c97`, Production `dpl_EDZXLTXRrHDbBbVGqcEhCTF3SnpW`.
 
 ## 1. Observed state (code and Production, 2026-10-10)
