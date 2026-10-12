@@ -2,7 +2,9 @@
 
 Status:
 - **Design only.** No code, migration, deployment or Production change is part of this document.
-- **Decisions D1 to D7 (section 12) await the operator's approval.** Code starts only after that approval.
+- **Decisions D1 to D7 were approved by the operator on 2026-10-12**, with guardrails for D3, the complete authority matrix for D7 and one cross-cutting invariant. They are recorded verbatim in section 12, and the sections below follow them.
+- **One open point** (section 12) asks for confirmation before implementation.
+- Code starts only after this design is merged.
 
 Binding inputs:
 - `docs/product/FIRST-ADMIN-BREAK-GLASS-V1-SCOPE.md`, decisions K3 and K4, and the binding requirements in section 9:
@@ -36,6 +38,8 @@ Binding inputs:
 4. **Everything is audited where the customer can see it.** Each action writes its event in the organization's own journal, in the same transaction as the change.
 5. **The lock order of B1 and B3, and the P1 rule.** Governance locks of every tenant first, then the organization row, then the other rows. Every apply ends with `SET CONSTRAINTS ALL IMMEDIATE` and a committed re-read.
 6. **Irreversible means a human gate.** CLOSE and DISABLE_ACCOUNT cannot be undone in v1. They need an extra typed confirmation, and in Production the operator's explicit approval for each run.
+7. **A plan never widens its authority between dry run and apply** (operator invariant, 2026-10-12). The action, the target, the reference, the named person, the digest and the type of justification must all match exactly. Apply takes the same inputs as the dry run, and every one of them is part of the digest. A different input gives a different digest, and nothing is written.
+8. **No reference gives generic or implicit authority.** Each reference type allows only the actions listed for it in the authority matrix (section 5).
 
 ## 2. The tool
 
@@ -49,15 +53,15 @@ Binding inputs:
 
 ## 3. Closed actions
 
-| Action | Preconditions | Effects (one transaction) | Journal event | Reversible |
+| Action (command) | Preconditions | Effects (one transaction) | Journal event | Reversible |
 |---|---|---|---|---|
-| `suspend` | ACTIVE | B3 primitive to SUSPENDED: every open session revoked | `BREAK_GLASS.ORGANIZATION.SUSPEND` | Yes, through `reactivate` |
-| `reactivate` | SUSPENDED | B3 primitive to ACTIVE. Nothing comes back: revoked sessions stay revoked | `BREAK_GLASS.ORGANIZATION.REACTIVATE` | Yes, through `suspend` |
-| `close` | ACTIVE or SUSPENDED; typed slug confirmation (D4) | B3 primitive to CLOSED: sessions and open invitations revoked, domains released (VERIFIED to LOST, PENDING to EXPIRED). Accounts, passkeys and recovery codes are left untouched: sign-in is refused at the organization level, and the B2 guard refuses any code consumption outside ACTIVE (D4) | `BREAK_GLASS.ORGANIZATION.CLOSE` | **No.** The database refuses any change after CLOSED |
-| `revoke-sessions` | any status | every open session of the organization, any scope, revoked conditionally | `BREAK_GLASS.SESSION.REVOKE` | No, but people simply sign in again |
-| `disable-account <identity account id>` | the account belongs to this organization; last durable administrator rule (D2) | identity account DISABLED (with `disabledAt`), local identity DISABLED, active passkeys REVOKED, sessions of that account revoked | `BREAK_GLASS.IDENTITY_ACCOUNT.DISABLE` | **No** in v1: the product has no "re-enable" |
-| `release-domain <domain>` | the domain belongs to this organization and is VERIFIED or PENDING; the TXT record is absent on two public resolvers, both at plan time and again at apply | VERIFIED to LOST, or PENDING to EXPIRED | `BREAK_GLASS.DOMAIN.RELEASE` | No: the customer verifies the domain again |
-| `recovery-invitation <named person>` | ACTIVE; a verified customer request that names the person (section 5); the rule of D3 | a PROVISIONING subject, plus a single-use ADMIN invitation with operator authority (section 6). The link is shown once | `BREAK_GLASS.RECOVERY_INVITATION.ISSUE` | Yes: the invitation can be revoked until it is used |
+| `SUSPEND_ORGANIZATION` (`suspend`) | ACTIVE | B3 primitive to SUSPENDED: every open session revoked | `BREAK_GLASS.ORGANIZATION.SUSPEND` | Yes, through `reactivate` |
+| `REACTIVATE_ORGANIZATION` (`reactivate`) | SUSPENDED | B3 primitive to ACTIVE. Nothing comes back: revoked sessions stay revoked | `BREAK_GLASS.ORGANIZATION.REACTIVATE` | Yes, through `suspend` |
+| `CLOSE_ORGANIZATION` (`close`) | ACTIVE or SUSPENDED; the exact organization identifier typed, in addition to the digest and the confirmation (D4) | B3 primitive to CLOSED: sessions and open invitations revoked, domains released (VERIFIED to LOST, PENDING to EXPIRED). Accounts, passkeys and recovery codes are left untouched: sign-in is refused at the organization level, and the B2 guard refuses any code consumption outside ACTIVE (D4) | `BREAK_GLASS.ORGANIZATION.CLOSE` | **No.** The database refuses any change after CLOSED |
+| `REVOKE_SESSIONS` (`revoke-sessions`) | any status | every open session of the organization, any scope, revoked conditionally | `BREAK_GLASS.SESSION.REVOKE` | No, but people simply sign in again |
+| `DISABLE_ACCOUNT` (`disable-account <identity account id>`) | the account belongs to this organization; last durable administrator rule (D2) | identity account DISABLED (with `disabledAt`), local identity DISABLED, active passkeys REVOKED, sessions of that account revoked | `BREAK_GLASS.IDENTITY_ACCOUNT.DISABLE` | **No** in v1: the product has no "re-enable" |
+| `RELEASE_DOMAIN` (`release-domain <domain>`) | the domain belongs to this organization and is VERIFIED or PENDING; the TXT record is absent on two public resolvers, both at plan time and again at apply | VERIFIED to LOST, or PENDING to EXPIRED | `BREAK_GLASS.DOMAIN.RELEASE` | No: the customer verifies the domain again |
+| `RECOVERY_INVITATION` (`recovery-invitation <named person>`) | ACTIVE; a written, verified customer request that names the person; no durable administrator can currently sign in (D3, section 6) | a PROVISIONING subject, plus a single-use ADMIN invitation with operator authority (section 6). The link is shown once | `BREAK_GLASS.RECOVERY_INVITATION.ISSUE` | Yes: the invitation can be revoked until it is used |
 
 Refused in every case:
 - a target of another organization;
@@ -81,45 +85,67 @@ The operation names keep the `BREAK_GLASS.*` family the Lab journal already uses
   - reference and verification (section 5);
   - reason;
   - `notAfter`, the issue time + 15 minutes (D5).
-- **Digest:** `SHA-256` of the canonical JSON.
+- **Digest:** `SHA-256` of the canonical JSON. It covers every input that carries authority: action, target, reference, named person, type of justification and verification methods. It also covers the state the plan was computed from, so any change of state gives a different digest at once (D5).
 - Nothing is written to the database.
 
-**`apply --confirm <digest>`** runs one owner transaction:
+**`apply --confirm <digest>`** takes **the same inputs as the dry run**, and nothing else, then runs one owner transaction:
 1. takes the governance lock of every tenant, then the organization row lock;
-2. **recomputes the plan inside the transaction**; if the digest differs, or `notAfter` has passed, it is refused and nothing is written;
+2. **recomputes the plan inside the transaction**, from those inputs and the current state. It is refused, with nothing written, if:
+   - the digest differs, which is what happens when any input or the state changed;
+   - `notAfter` has passed;
+   - the action is not allowed for the reference type (section 5).
+
+   This is how a plan can never widen its authority between dry run and apply (principle 7);
 3. applies the action, the B3 primitive for status changes, and writes the journal event, whose `changeId` is `break-glass:<digest>`;
 4. runs `SET CONSTRAINTS ALL IMMEDIATE`;
 5. after the commit, **re-reads the committed state** (P1) and compares it with the expected after counts.
 
-The unique `changeId` per organization means one plan applies at most once: a replayed confirmation fails on the unique index, with nothing written.
+**Idempotence (D6).** The unique `changeId` per organization means one plan applies at most once: a replayed confirmation fails on the unique index, with nothing written.
 
-**`close` and `disable-account`** also require `--irreversible <slug>`, the organization slug typed exactly.
+**`CLOSE_ORGANIZATION` and `DISABLE_ACCOUNT`** also require `--irreversible <slug>`, the exact organization identifier typed, in addition to the digest and the confirmation (D4).
 
-## 5. A verified customer request (new)
+## 5. References and the authority matrix (D1, D7)
 
-Every plan carries a **reference**, and every reference has a type.
+Every plan carries **one reference**, and every reference has a type. **No reference gives generic or implicit authority**: a type allows only the actions listed below. Apply refuses any other action, whatever the digest.
 
-| Reference type | Allowed actions | Required verification (recorded in the plan and the event) |
+| Reference type | Allowed actions | Required justification (recorded in the plan and the event) |
 |---|---|---|
-| `CUSTOMER_REQUEST` | all | The requester's name and role, the channel, and at least **two independent verification methods** from a fixed list:<br>• a call back to a contact recorded before the request;<br>• an email from a domain this organization has VERIFIED;<br>• confirmation by another administrator who can still sign in;<br>• a signed letter or contract.<br>The plan stores the **SHA-256 of the request document**, never the document itself. |
-| `LUXIA_INCIDENT` | `suspend`, `revoke-sessions` only | An incident id and a reason. `close` is not allowed: closing a customer organization needs the customer's request (or a legal basis, which is out of v1). |
-| `LUXIA_CERTIFICATION` | all, but **only on LUXIA's own certification organizations** | The organization must be on a fixed list in code: the Lab `luxia-certification-lab` and `luxia-cert-b2-r6`. |
+| `LUXIA_INCIDENT` | **only** `SUSPEND_ORGANIZATION` and `REVOKE_SESSIONS` | An incident id and a reason |
+| `LUXIA_CERTIFICATION` | the actions of the certification run, **only on organizations explicitly marked as LUXIA certification organizations** | The marking is a fixed list in code, `LUXIA_CERTIFICATION_ORGANIZATIONS` (`luxia-certification-lab`, `luxia-cert-b2-r6`), changed only through a reviewed PR. It is not a database flag, so nothing at runtime can mark an organization |
+| `VERIFIED_CUSTOMER_REQUEST` | the B4 customer recovery actions, **only those explicitly requested and verified**: `REACTIVATE_ORGANIZATION`, `DISABLE_ACCOUNT`, `RELEASE_DOMAIN`, `RECOVERY_INVITATION` and, if explicitly requested, `CLOSE_ORGANIZATION` | A written request, verified out of band (D1):<br>• the requester's name and role, and the channel;<br>• at least **two independent verification methods** from a fixed list: a call back to a contact recorded before the request; an email from a domain this organization has VERIFIED; confirmation by another administrator who can still sign in; a signed letter or contract;<br>• the list of actions the request asks for, and the person it names, if any;<br>• the **SHA-256 of the request document**. No raw customer document is ever stored. |
 
-- `recovery-invitation` needs `CUSTOMER_REQUEST`, and the request must name the person who receives the invitation (K4).
-- **D1** asks whether v1 relies on this out-of-band evidence only. The recommendation is yes. An in-product « demande à l'opérateur » signed by a durable administrator is stronger, but it is a separate product feature (table, interface, API), and it cannot help the main break-glass case, an organization whose administrators can no longer sign in.
+Rules that follow from the matrix:
+- **The plan's action must be one the request explicitly asks for.** A `VERIFIED_CUSTOMER_REQUEST` plan records the requested actions, and apply refuses an action that is not among them.
+- `RECOVERY_INVITATION` needs a `VERIFIED_CUSTOMER_REQUEST`, written and verified, that names the person who receives the invitation (K4, D3).
+- `CLOSE_ORGANIZATION` under `VERIFIED_CUSTOMER_REQUEST` needs the request to ask for the closure explicitly.
+
+**Why the request is verified out of band in v1 (D1).** An in-product « demande à l'opérateur » signed by a durable administrator would be stronger. It is a separate product feature (table, interface, API), and it cannot help the main break-glass case: an organization whose administrators can no longer sign in.
 
 ## 6. Recovery invitation with operator authority
 
 Today an ADMIN invitation is accepted only if the **inviter still holds `assignments.manage`** when the link is used. The operator's `SERVICE` identity holds nothing by design, so B4 needs a separate, narrow authority rule.
 
+**Mandatory guardrails (D3, approved).** The emergency administrator invitation is allowed only:
+- on a **written and verified** customer request;
+- for the person **explicitly named** in that request;
+- if **no durable administrator can currently sign in**;
+- with a validity of **24 hours at most**;
+- with an **opaque token, hashed in the database, single use**;
+- with **no `assignments.manage` granted to the operator**;
+- with authority coming **exclusively from the approved break-glass event**;
+- with the link **shown once and never logged in clear**.
+
+How it is built:
 - **Migration (expand only).** `Invitation.issuedByOperatorChangeId` (TEXT, nullable). It points to the `break-glass:<digest>` journal event that issued the invitation.
-- **Acceptance.** An invitation that carries this column grants the administrator bundle because of that event, not because of the inviter's rights.
+- **Acceptance.** An invitation that carries this column grants the administrator bundle because of that event alone, never because of the inviter's rights. The operator's `SERVICE` identity holds no assignment before, during or after.
 - **Database checks at acceptance:**
   - the organization is ACTIVE;
   - the event exists in the same organization, with `BREAK_GLASS.RECOVERY_INVITATION.ISSUE` and SUCCESS;
+  - the event names this invitation;
   - the invitation is unused, unrevoked and not expired.
-- **Lifetime 24 hours** (D3), instead of the 7 days of ordinary invitations: the window in which a leaked link is dangerous is shorter.
-- **When it is allowed** (D3, recommended): only when the organization has **no durable administrator who can still sign in**, which is the real break-glass case. Otherwise the customer's own administrators can invite.
+- **Lifetime.** Today the invitation guard sets every `expiresAt` to creation + 7 days and ignores client values. The B4 migration makes that guard set **creation + 24 hours** when `issuedByOperatorChangeId` is present, so the database, not the tool, enforces the limit.
+- **The token** is the existing invitation token: opaque, only its hash stored, single use. It is printed once by `apply`, and never written to the evidence file, the journal or any log.
+- **When it is allowed:** the plan computes, under the governance lock, the number of durable administrators who can currently sign in. It must be 0; otherwise the customer's own administrators can invite, and apply refuses.
 - **Residual risk, stated plainly.** The operator sees the link once and delivers it to the named person through the verified channel. In v1 nothing technical stops a dishonest operator from using it. Mitigations:
   - the 24-hour lifetime;
   - the acceptance is journaled (`INVITATION.ACCEPT` plus the role grants) and visible to the customer's administrators;
@@ -128,7 +154,7 @@ Today an ADMIN invitation is accepted only if the **inviter still holds `assignm
 
 ## 7. The last-administrator rule (B1) for `disable-account`
 
-B1 refuses any change that takes a tenant from at least one durable administrator to none. Recommendation **D2**:
+B1 refuses any change that takes a tenant from at least one durable administrator to none. **D2 (approved):** the last administrator can be disabled only if the organization is already `SUSPENDED`.
 - in an **ACTIVE** organization, `disable-account` keeps that refusal: the right tool is `recovery-invitation` or the customer's own administration;
 - in a **SUSPENDED** organization, disabling the last durable administrator is allowed. The organization no longer operates, and this is exactly the Lab case.
 
@@ -168,7 +194,7 @@ Each race gets a PostgreSQL test with real lock waits, as in B1, B2 and B3.
 ## 10. Lab replay (scope 9.5)
 
 1. Clone the archive `br-icy-darkness-aho1v83p`: the Lab before neutralization, 2026-10-11 13:50:30Z, LSN `0/3C43E70`. The clone is temporary and is deleted afterwards.
-2. Bring the clone to the current schema with `prisma migrate deploy`: the 23 Production migrations, plus the B4 migration if D3 is approved.
+2. Bring the clone to the current schema with `prisma migrate deploy`: the 23 Production migrations, plus the B4 migration (D3).
 3. Run the procedure only, with `plan` and then `apply`, under reference `LUXIA_CERTIFICATION`:
    - `suspend`;
    - `revoke-sessions`;
@@ -198,22 +224,65 @@ Each step needs a separate approval, and each CLOSE is a human gate.
 | `luxia-cert-b2-r6` | SUSPENDED since 2026-10-12, by the B3 primitive, not journaled | Dry run, then `close` under `LUXIA_CERTIFICATION`. The event records the earlier, unjournaled suspension (section 8) |
 | `legrand-tech` | ACTIVE | **No action.** Every run proves Legrand Tech is unchanged (fingerprint), as in B2 |
 
-## 12. Decisions requested
+## 12. Decisions approved by the operator (2026-10-12)
 
-| # | Question | Recommendation |
-|---|---|---|
-| D1 | How is a customer request verified in v1? | **Out-of-band evidence recorded in the plan**: at least two independent methods and the request document hash (section 5). An in-product request comes later as its own feature. |
-| D2 | Can `disable-account` disable the last durable administrator? | **Only in a SUSPENDED organization.** In ACTIVE the B1 refusal stays (section 7). |
-| D3 | Recovery invitation: authority, lifetime, when | **Operator authority bound to its journal event** (one expand migration); **24 hours**; **only when no durable administrator can still sign in**. The residual risk is stated (section 6). |
-| D4 | What does `close` do beyond the B3 effects? | **Nothing more**: accounts, passkeys and codes stay as they are, because every sign-in and code use is already refused for CLOSED. It requires the typed slug in addition to the digest. |
-| D5 | How long is a plan valid? | **15 minutes** (`notAfter` is part of the digest). |
-| D6 | Is a separate LUXIA-side table needed for operator actions? | **No.** The organization journal (same transaction), the unique `changeId` and the local evidence files are enough in v1. |
-| D7 | Which reference types may trigger which actions? | `CUSTOMER_REQUEST`: all. `LUXIA_INCIDENT`: `suspend` and `revoke-sessions` only. `LUXIA_CERTIFICATION`: all, on the fixed list of LUXIA certification organizations only (section 5). |
+Recorded verbatim, as given by the operator:
+
+> **D1 — APPROUVÉE.** Demande client vérifiée hors produit avec deux méthodes indépendantes + empreinte du document. Aucun document client brut stocké.
+>
+> **D2 — APPROUVÉE.** Le dernier administrateur ne peut être désactivé que si l'organisation est déjà `SUSPENDED`.
+>
+> **D3 — APPROUVÉE avec garde-fous obligatoires.** L'invitation administrateur de secours est autorisée uniquement :
+> - sur demande client écrite et vérifiée ;
+> - pour la personne explicitement nommée dans cette demande ;
+> - si aucun administrateur durable ne peut actuellement se connecter ;
+> - validité maximale 24 h ;
+> - jeton opaque, hashé en base, usage unique ;
+> - aucun `assignments.manage` accordé à l'opérateur ;
+> - l'autorité vient exclusivement de l'événement break-glass approuvé ;
+> - lien affiché une seule fois et jamais journalisé en clair.
+>
+> **D4 — APPROUVÉE.** `CLOSED` applique uniquement les effets B3 déjà définis, avec saisie obligatoire de l'identifiant exact de l'organisation en plus du digest et de la confirmation.
+>
+> **D5 — APPROUVÉE.** Un plan break-glass expire après 15 minutes. Toute modification d'état invalide également immédiatement son digest.
+>
+> **D6 — APPROUVÉE.** Pas de nouvelle table de suivi. Utiliser un identifiant de changement unique, le journal canonique et les preuves de certification. L'idempotence doit être garantie par cet identifiant.
+>
+> **D7 — APPROUVÉE avec matrice complète :**
+> - `LUXIA_INCIDENT` → uniquement `SUSPEND_ORGANIZATION` et `REVOKE_SESSIONS` ;
+> - `LUXIA_CERTIFICATION` → uniquement sur organisations explicitement marquées comme organisations de certification LUXIA ;
+> - `VERIFIED_CUSTOMER_REQUEST` → peut autoriser les actions de récupération client prévues par B4, mais uniquement celles explicitement demandées et vérifiées : réactiver, désactiver un compte, libérer un domaine, inviter un administrateur de secours et, si explicitement demandé, fermer l'organisation ;
+> - aucune référence ne donne une autorité générique ou implicite.
+>
+> **Invariant transversal :** un plan ne peut jamais élargir son autorité entre dry-run et apply. L'action, la cible, la référence, la personne nommée, le digest et le type de justification doivent tous correspondre exactement.
+
+Where each decision is applied:
+- D1 and D7: section 5;
+- D2: section 7;
+- D3: section 6;
+- D4: sections 3 and 4;
+- D5 and the invariant: section 4 and principle 7;
+- D6: sections 4 and 8.
+
+### Open point, for confirmation before implementation
+
+**Q1. Can a verified customer request ask for a suspension or a revocation of sessions?** The D7 matrix lists, for `VERIFIED_CUSTOMER_REQUEST`:
+- `REACTIVATE_ORGANIZATION`;
+- `DISABLE_ACCOUNT`;
+- `RELEASE_DOMAIN`;
+- `RECOVERY_INVITATION`;
+- `CLOSE_ORGANIZATION`, if explicitly requested.
+
+It does not list `SUSPEND_ORGANIZATION` or `REVOKE_SESSIONS`, which today only `LUXIA_INCIDENT` allows. Two cases depend on it:
+- **A customer who asks to stop service temporarily**, for example after a compromise. Under the matrix as written, LUXIA would have to open an incident to do it.
+- **D2 and the customer's own request.** Disabling the last administrator requires the organization to be SUSPENDED first. If the suspension is not allowed under `VERIFIED_CUSTOMER_REQUEST`, a customer-requested neutralization would need two references: an incident for the suspension and the customer request for the rest.
+
+Proposal: add `SUSPEND_ORGANIZATION` and `REVOKE_SESSIONS` to `VERIFIED_CUSTOMER_REQUEST`, **only if explicitly requested and verified**, like the other actions. Until the operator decides, the matrix stays exactly as approved above, and implementation does not start.
 
 ## 13. Rollback
 
-- **Code:** the procedure is an operator command. Rolling back means not running it. The application changes only if D3 is approved (invitation acceptance with operator authority), and the B2 deployment `fe34cf7` stays a safe rollback target.
-- **Migration** (only with D3): expand only, with a written rollback script. It is rehearsed on a clone, including the case of an operator invitation that has not been used yet.
+- **Code:** the procedure is an operator command. Rolling back means not running it. The application changes only for D3 (invitation acceptance with operator authority), and the B2 deployment `fe34cf7` stays a safe rollback target.
+- **Migration** (D3): expand only, with a written rollback script. It is rehearsed on a clone, including the case of an operator invitation that has not been used yet.
 - **Actions:**
   - `suspend` and `reactivate` undo each other;
   - `recovery-invitation` can be revoked until it is used;
@@ -233,7 +302,14 @@ Each step needs a separate approval, and each CLOSE is a human gate.
   - the B1 rule of D2;
   - the operator `SERVICE` subject never holds an account, assignment or session;
   - the races of section 9;
-  - and, if D3 is approved, operator invitations: 24 hours, single use, refused in a non-ACTIVE organization, refused without the event, granted bundle identical to a founder's.
+  - operator invitations (D3):
+    - 24 hours, enforced by the database;
+    - single use, with the token never written to a log or file;
+    - refused in a non-ACTIVE organization, without the event, or while a durable administrator can still sign in;
+    - the granted bundle identical to a founder's;
+    - the operator `SERVICE` identity holds no assignment;
+  - the authority matrix (D7): each reference type refuses every action outside its list, and a `VERIFIED_CUSTOMER_REQUEST` plan refuses any action the request did not ask for;
+  - the invariant: changing any input between dry run and apply (action, target, reference, named person, type of justification) is refused, with nothing written.
 - **Architecture:**
   - the closed list;
   - no free SQL in the operator module;
@@ -241,8 +317,8 @@ Each step needs a separate approval, and each CLOSE is a human gate.
   - the B3 lock-order map extended.
 - **Lab replay** on the archive clone (section 10), and **a fingerprint of Legrand Tech** before and after every run.
 - **Production** (each step approved separately):
-  1. migration (only with D3);
-  2. deployment (only with D3);
+  1. migration (D3);
+  2. deployment (D3);
   3. dry runs on the Lab and on `luxia-cert-b2-r6`;
   4. then each `close` as a human gate.
 
