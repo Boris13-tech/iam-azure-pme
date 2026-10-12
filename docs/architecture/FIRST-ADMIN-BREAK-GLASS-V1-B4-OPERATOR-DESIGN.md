@@ -177,6 +177,7 @@ The other parts of the audit:
 - **No new journal table** (D6). The organization's journal survives CLOSED, because data is kept. A LUXIA-wide view is a read-only query over `BREAK_GLASS.*` events across organizations.
 - **Refusals:** a refused apply (digest mismatch, expired plan, rule refusal) writes nothing to the database. It is recorded in the local evidence file.
 - **Earlier changes that were not journaled** are referenced in the next event. When `luxia-cert-b2-r6` is closed, its `BREAK_GLASS.ORGANIZATION.CLOSE` event records the earlier SUSPENDED change (2026-10-12 15:18:29Z, B3 primitive, reference `docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`).
+- **Event time.** The event's `occurredAt` is the database transaction time, read in the apply transaction. It is the same instant, on the same clock, as the `statusChangedAt` the status trigger sets, so a status change made by the procedure always reads as journaled in later plans. The operator machine's clock is never used. Fixed on 2026-10-12 after the Lab closure: the client clock was about 180 ms behind the database.
 
 ## 9. Concurrency
 
