@@ -2,8 +2,7 @@
 
 Status:
 - **Design only.** No code, migration, deployment or Production change is part of this document.
-- **Decisions D1 to D7 were approved by the operator on 2026-10-12**, with guardrails for D3, the complete authority matrix for D7 and one cross-cutting invariant. They are recorded verbatim in section 12, and the sections below follow them.
-- **One open point** (section 12) asks for confirmation before implementation.
+- **Decisions D1 to D7 and Q1 were approved by the operator on 2026-10-12**, with guardrails for D3, the complete authority matrix for D7 (completed by Q1) and one cross-cutting invariant. They are recorded verbatim in section 12, and the sections below follow them. **No point is left open.**
 - Code starts only after this design is merged.
 
 Binding inputs:
@@ -112,10 +111,10 @@ Every plan carries **one reference**, and every reference has a type. **No refer
 |---|---|---|
 | `LUXIA_INCIDENT` | **only** `SUSPEND_ORGANIZATION` and `REVOKE_SESSIONS` | An incident id and a reason |
 | `LUXIA_CERTIFICATION` | the actions of the certification run, **only on organizations explicitly marked as LUXIA certification organizations** | The marking is a fixed list in code, `LUXIA_CERTIFICATION_ORGANIZATIONS` (`luxia-certification-lab`, `luxia-cert-b2-r6`), changed only through a reviewed PR. It is not a database flag, so nothing at runtime can mark an organization |
-| `VERIFIED_CUSTOMER_REQUEST` | the B4 customer recovery actions, **only those explicitly requested and verified**: `REACTIVATE_ORGANIZATION`, `DISABLE_ACCOUNT`, `RELEASE_DOMAIN`, `RECOVERY_INVITATION` and, if explicitly requested, `CLOSE_ORGANIZATION` | A written request, verified out of band (D1):<br>• the requester's name and role, and the channel;<br>• at least **two independent verification methods** from a fixed list: a call back to a contact recorded before the request; an email from a domain this organization has VERIFIED; confirmation by another administrator who can still sign in; a signed letter or contract;<br>• the list of actions the request asks for, and the person it names, if any;<br>• the **SHA-256 of the request document**. No raw customer document is ever stored. |
+| `VERIFIED_CUSTOMER_REQUEST` | **only the actions explicitly requested and verified**, among: `SUSPEND_ORGANIZATION`, `REVOKE_SESSIONS`, `REACTIVATE_ORGANIZATION`, `DISABLE_ACCOUNT`, `RELEASE_DOMAIN`, `RECOVERY_INVITATION`, `CLOSE_ORGANIZATION` (D7 completed by Q1). None is implicit | A written request, verified out of band (D1):<br>• the requester's name and role, and the channel;<br>• at least **two independent verification methods** from a fixed list: a call back to a contact recorded before the request; an email from a domain this organization has VERIFIED; confirmation by another administrator who can still sign in; a signed letter or contract;<br>• the list of actions the request asks for, and the person it names, if any;<br>• the **SHA-256 of the request document**. No raw customer document is ever stored. |
 
 Rules that follow from the matrix:
-- **The plan's action must be one the request explicitly asks for.** A `VERIFIED_CUSTOMER_REQUEST` plan records the requested actions, and apply refuses an action that is not among them.
+- **The plan's action must be one the request explicitly asks for.** A `VERIFIED_CUSTOMER_REQUEST` plan records the list of actions the request contains. **That list is part of the plan digest**, and apply refuses an action that is not in it.
 - `RECOVERY_INVITATION` needs a `VERIFIED_CUSTOMER_REQUEST`, written and verified, that names the person who receives the invitation (K4, D3).
 - `CLOSE_ORGANIZATION` under `VERIFIED_CUSTOMER_REQUEST` needs the request to ask for the closure explicitly.
 
@@ -158,7 +157,7 @@ B1 refuses any change that takes a tenant from at least one durable administrato
 - in an **ACTIVE** organization, `disable-account` keeps that refusal: the right tool is `recovery-invitation` or the customer's own administration;
 - in a **SUSPENDED** organization, disabling the last durable administrator is allowed. The organization no longer operates, and this is exactly the Lab case.
 
-The sequence for neutralizing an organization is therefore `suspend` → `revoke-sessions` → `disable-account` … → `release-domain` → `close`.
+The sequence for neutralizing an organization is therefore `suspend` → `revoke-sessions` → `disable-account` … → `release-domain` → `close`. Thanks to Q1, a customer can ask for that whole sequence (suspension, then revocation of sessions, then disabling of the last administrator, and so on) **under one verified customer reference**, as long as the request names every action. No artificial LUXIA incident is needed.
 
 ## 8. Complete audit
 
@@ -262,22 +261,38 @@ Where each decision is applied:
 - D3: section 6;
 - D4: sections 3 and 4;
 - D5 and the invariant: section 4 and principle 7;
-- D6: sections 4 and 8.
+- D6: sections 4 and 8;
+- Q1: sections 5 and 7.
 
-### Open point, for confirmation before implementation
+### Q1 — APPROUVÉE (2026-10-12)
 
-**Q1. Can a verified customer request ask for a suspension or a revocation of sessions?** The D7 matrix lists, for `VERIFIED_CUSTOMER_REQUEST`:
-- `REACTIVATE_ORGANIZATION`;
-- `DISABLE_ACCOUNT`;
-- `RELEASE_DOMAIN`;
-- `RECOVERY_INVITATION`;
-- `CLOSE_ORGANIZATION`, if explicitly requested.
+Recorded verbatim, as given by the operator:
 
-It does not list `SUSPEND_ORGANIZATION` or `REVOKE_SESSIONS`, which today only `LUXIA_INCIDENT` allows. Two cases depend on it:
-- **A customer who asks to stop service temporarily**, for example after a compromise. Under the matrix as written, LUXIA would have to open an incident to do it.
-- **D2 and the customer's own request.** Disabling the last administrator requires the organization to be SUSPENDED first. If the suspension is not allowed under `VERIFIED_CUSTOMER_REQUEST`, a customer-requested neutralization would need two references: an incident for the suspension and the customer request for the rest.
+> Pour Q1 : OUI, une `VERIFIED_CUSTOMER_REQUEST` peut autoriser `SUSPEND_ORGANIZATION` et `REVOKE_SESSIONS`, uniquement si ces actions sont explicitement demandées et vérifiées. C'est préférable à l'ouverture artificielle d'un `LUXIA_INCIDENT` quand c'est le client lui-même qui demande le confinement.
+>
+> Je valide donc la matrice ainsi :
+> `VERIFIED_CUSTOMER_REQUEST` → peut autoriser, uniquement si explicitement demandé et vérifié :
+> - `SUSPEND_ORGANIZATION`
+> - `REVOKE_SESSIONS`
+> - `REACTIVATE_ORGANIZATION`
+> - `DISABLE_ACCOUNT`
+> - `RELEASE_DOMAIN`
+> - `RECOVERY_INVITATION`
+> - `CLOSE_ORGANIZATION`
+>
+> Aucune de ces actions n'est implicite. La demande doit contenir explicitement l'action concernée, et cette liste fait partie du digest du plan.
+>
+> Cela résout aussi proprement D2 : un client peut demander suspension → révocation des sessions → désactivation du dernier administrateur sous une seule référence client vérifiée, sans fabriquer un incident LUXIA supplémentaire.
 
-Proposal: add `SUSPEND_ORGANIZATION` and `REVOKE_SESSIONS` to `VERIFIED_CUSTOMER_REQUEST`, **only if explicitly requested and verified**, like the other actions. Until the operator decides, the matrix stays exactly as approved above, and implementation does not start.
+**The complete authority matrix**, after D7 and Q1:
+
+| Reference type | Allowed actions |
+|---|---|
+| `LUXIA_INCIDENT` | `SUSPEND_ORGANIZATION`, `REVOKE_SESSIONS` |
+| `LUXIA_CERTIFICATION` | the actions of the certification run, only on organizations explicitly marked as LUXIA certification organizations |
+| `VERIFIED_CUSTOMER_REQUEST` | only the actions the request explicitly contains, among `SUSPEND_ORGANIZATION`, `REVOKE_SESSIONS`, `REACTIVATE_ORGANIZATION`, `DISABLE_ACCOUNT`, `RELEASE_DOMAIN`, `RECOVERY_INVITATION`, `CLOSE_ORGANIZATION` |
+
+No reference gives generic or implicit authority. The requested-action list is part of the plan digest.
 
 ## 13. Rollback
 
