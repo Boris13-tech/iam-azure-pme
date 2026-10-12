@@ -3,10 +3,12 @@ import React, { useCallback, useEffect, useState } from "react";
 import { SIGN_IN_METHOD_LABELS } from "../../../lib/ui/activity-labels";
 
 // Security Journal v1 (R2, R3): own sessions (with self-revocation) and own passkeys (read only, S2).
-type MySession = { ref: string; createdAt: string; lastSeenAt: string | null; expiresAt: string; providerType: string; current: boolean };
+type MySession = { ref: string; createdAt: string; lastSeenAt: string | null; expiresAt: string; providerType: string; current: boolean; scope?: string };
 type MyAuthenticator = { type: string; status: string; enrolledAt: string; lastUsedAt: string | null; hardwareBound: boolean };
 
 const PROVIDERS: Record<string, string> = { MICROSOFT_ENTRA: "Microsoft Entra ID", LUXIA_LOCAL: "Clé d’accès" };
+// B5: a recovery session is not a passkey session; it only lets the person add a new passkey (B2).
+const RECOVERY_SESSION_LABEL = "Code de récupération, pour ajouter une clé d’accès uniquement";
 const STATUSES: Record<string, string> = { PENDING: "En attente", ACTIVE: "Active", SUSPENDED: "Suspendue", REVOKED: "Révoquée",
   COMPROMISED: "Compromise", EXPIRED: "Expirée", SUPERSEDED: "Remplacée" };
 const when = (iso: string | null) => iso ? new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "Jamais";
@@ -53,7 +55,7 @@ export function MySessions() {
           <tbody className="divide-y divide-slate-100 text-base text-slate-800">
             {sessions.map(session => (
               <tr key={session.ref}>
-                <td className="py-2 pr-4">{PROVIDERS[session.providerType] ?? session.providerType}{session.current && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-sm text-accent">Cette session</span>}</td>
+                <td className="py-2 pr-4">{session.scope === "RECOVERY" ? RECOVERY_SESSION_LABEL : PROVIDERS[session.providerType] ?? session.providerType}{session.current && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-sm text-accent">Cette session</span>}</td>
                 <td className="py-2 pr-4 text-sm text-slate-600">{when(session.createdAt)}</td>
                 <td className="py-2 pr-4 text-sm text-slate-600">{when(session.lastSeenAt)}</td>
                 <td className="py-2 pr-4 text-sm text-slate-600">{when(session.expiresAt)}</td>

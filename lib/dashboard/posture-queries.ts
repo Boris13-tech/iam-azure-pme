@@ -5,6 +5,7 @@ import {
   Prisma, ProviderType, ResourceScopeKind, ResourceType, SoDPolicyStatus, SubjectLifecycleState, SubjectType,
 } from "@prisma/client";
 import { ENTITLEMENT_CATALOG_V1 } from "../auth/entitlements-catalog";
+import { signInMethodKey } from "../auth/recovery-evidence";
 import type { Breakdown, UnavailableReason, WidgetId, WidgetValue } from "./posture-contract";
 import { WIDGETS } from "./posture-contract";
 
@@ -120,9 +121,10 @@ export const POSTURE_QUERIES: PostureQueries = {
     ]);
     return new Since(Object.freeze({ VERIFIED: verified, REJECTED: rejected }), first.occurredAt.toISOString());
   },
-  "auth.signIns24hByMethod": async q => buckets(["FEDERATED_OIDC", "PASSKEY", "SECURITY_KEY", "TOTP"],
-    (await q.tx.authenticationEvidence.groupBy({ by: ["method"], where: { ...q.scope, outcome: "VERIFIED", occurredAt: { gte: since(q.now, 1) } }, _count: { _all: true } }))
-      .map(r => ({ key: r.method, count: r._count._all }))),
+  // A recovery-code sign-in (B2) has its own bucket instead of the generic "CUSTOM" (B5).
+  "auth.signIns24hByMethod": async q => buckets(["FEDERATED_OIDC", "PASSKEY", "SECURITY_KEY", "TOTP", "RECOVERY_CODE"],
+    (await q.tx.authenticationEvidence.groupBy({ by: ["method", "assuranceProfile"], where: { ...q.scope, outcome: "VERIFIED", occurredAt: { gte: since(q.now, 1) } }, _count: { _all: true } }))
+      .map(r => ({ key: signInMethodKey(r), count: r._count._all }))),
   "auth.rejectedSignIns24h": q => q.tx.authenticationEvidence.count({ where: { ...q.scope, outcome: "REJECTED", occurredAt: { gte: since(q.now, 1) } } }),
 
   // ── Access ────────────────────────────────────────────────────────────────

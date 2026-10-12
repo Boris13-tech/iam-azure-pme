@@ -3,6 +3,8 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { Activity, AlertTriangle, Boxes, KeyRound, Scale, ShieldCheck, Users } from "lucide-react";
 import { RESULT_LABELS, operationLabel } from "../../lib/ui/activity-labels";
+import { OnboardingChecklist } from "./onboarding-checklist";
+import { RecoveryNoticeLink } from "./settings/recovery-codes";
 import { breakdownTotal, type ActivityEntry, type Breakdown, type PostureResponse, type SectionId, type Widget, type WidgetId } from "../../lib/dashboard/posture-contract";
 
 // Identity security posture: real canonical data only, no score, no estimate.
@@ -97,7 +99,7 @@ const TERMS: Record<string, string> = {
   MICROSOFT_ENTRA: "Microsoft Entra ID", LUXIA_LOCAL: "Compte local LUXIA", LDAP: "LDAP", ACTIVE_DIRECTORY: "Active Directory", SAMBA_AD: "Samba AD",
   AWS: "AWS", GOOGLE_WORKSPACE: "Google Workspace", GITHUB: "GitHub", CUSTOM: "Autre",
   VERIFIED: "Réussies", REJECTED: "Refusées", VERIFIED_PHISHING_RESISTANT: "dont résistantes à l’hameçonnage",
-  FEDERATED_OIDC: "Microsoft Entra ID", PASSKEY: "Clé d’accès", SECURITY_KEY: "Clé de sécurité", TOTP: "Code à usage unique",
+  FEDERATED_OIDC: "Microsoft Entra ID", PASSKEY: "Clé d’accès", SECURITY_KEY: "Clé de sécurité", TOTP: "Code à usage unique", RECOVERY_CODE: "Code de récupération",
   LEGACY_ROLE: "Ancien rôle", DIRECT: "Attribution directe", PROVIDER: "Fournisseur", POLICY: "Politique", SYSTEM: "Système",
   TIME_BOUND: "Limités dans le temps", PERMANENT: "Permanents",
   APPLICATION: "Applications", API: "API", DATASET: "Jeux de données", DATABASE: "Bases de données", REPOSITORY: "Dépôts de code",
@@ -182,8 +184,10 @@ export default function DashboardPage() {
       <h1>Vue d’ensemble</h1>
       {data && <p>{data.organization.name}, environnement {data.tenant.name}. Mis à jour le {new Date(data.asOf).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.</p>}
     </header>
+    <RecoveryNoticeLink />
     {failed ? <p role="alert" className="posture-alert">Impossible de charger les données. Réessayez dans quelques instants.</p>
       : !data ? <p role="status" className="posture-muted">Chargement...</p> : <>
+      {data.viewer.onboardingChecklist && <OnboardingChecklist />}
       <section className="luxia-panel posture-attention" aria-label="À traiter">
         <header><h2><AlertTriangle size={18} aria-hidden /> À traiter</h2></header>
         {data.attention.length === 0

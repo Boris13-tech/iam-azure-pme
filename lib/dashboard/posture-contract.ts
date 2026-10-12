@@ -26,6 +26,8 @@ export type PostureResponse = Readonly<{
   asOf: string;
   organization: Readonly<{ id: string; name: string }>;
   tenant: Readonly<{ id: string; name: string }>;
+  /** What the overview may request for this viewer, decided on the server from native grants (B5). */
+  viewer: Readonly<{ onboardingChecklist: boolean }>;
   sections: Readonly<Record<SectionId, readonly Widget[]>>;
   // Deterministic rules with count > 0, only from widgets visible (state ok) to the viewer.
   attention: readonly Readonly<{ id: WidgetId; count: number; section: SectionId }>[];

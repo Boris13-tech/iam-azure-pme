@@ -25,7 +25,7 @@ export function PasskeyEnrollment() {
         challenge: decode(begin.challenge), rp: begin.rp,
         user: { id: new TextEncoder().encode(begin.user.id), name: begin.user.name, displayName: begin.user.displayName },
         pubKeyCredParams: [{ type: "public-key", alg: -7 }],
-        authenticatorSelection: { authenticatorAttachment: "platform", residentKey: "preferred", userVerification: "required" },
+        authenticatorSelection: { authenticatorAttachment: "platform", residentKey: "required", userVerification: "required" },
         timeout: 120000, attestation: "none",
       } }) as PublicKeyCredential | null;
       if (!credential) throw new Error();

@@ -1,5 +1,86 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-12 ~19:35Z — B4 OPERATOR BREAK-GLASS PROCEDURE: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B4-RELEASE-2026-10-12.md`).
+> - `main` is `41d7220` (PR #50, journal-time fix, after PR #49 `2414ec6`). Production = **`dpl_3Jm2usCcwnM4JZndgAU9A7ngkfnT` @ `2414ec6`**; rollback = `dpl_CiB2VuvFtru15AxNJfa5NfDF8q2F` @ `fe34cf7`. PR #50 changes only the operator module, which the application never imports, so it is not deployed.
+> - **24 migrations** in Production; the last one, `20261012180000_break_glass_operator_invitation`, was applied 18:52:31–40Z. Rollback script: `docs/operations/B4-BREAK-GLASS-ROLLBACK.sql`.
+> - First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS → B2 PASS → B4 PASS**; next is **B5**, design first.
+> - Operator actions on an organization go only through `scripts/operators/break-glass.ts` (dry run, digest, apply, journal event by « Opérateur LUXIA (break-glass) »). Runbook: `docs/operations/B4-BREAK-GLASS-RUNBOOK.md`.
+> - `luxia-certification-lab` **CLOSED** at 19:13:29Z and `luxia-cert-b2-r6` **CLOSED** at 19:32:00Z, through the procedure, with all history kept. Legrand Tech was unchanged by both.
+> - Neon backups:
+>   - `br-snowy-dawn-ahbgmqhr` (before B4) and `br-dawn-scene-ahdunopo` (before B2), both until 2026-10-26;
+>   - `br-cold-bread-ah1hlohl` (before B3) and `br-twilight-wildflower-ah68mp0p` (before status and scope), both until 2026-10-25;
+>   - the Lab archive `br-icy-darkness-aho1v83p`: B4 is certified; the operator chose to keep it until it expires on its own, on 2026-11-10.
+>
+> This header supersedes older deployment rows below.
+
+> **2026-10-12 ~15:20Z — B2 RECOVERY CODES AND RECOVERY-ONLY SESSION: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`).
+> - `main` is `fe34cf7` (PR #46, merged pinned on `db9f740`). Production = **`dpl_CiB2VuvFtru15AxNJfa5NfDF8q2F` @ `fe34cf7`**; rollback = `dpl_8YEyT71Z1o3CUfb8qSCTZ9V1dr6o` @ `8aec711`.
+> - **23 migrations** in Production; the last one, `20261012090000_recovery_codes_b2`, was applied 07:03:35–46Z. Rollback script: `docs/operations/B2-RECOVERY-CODES-ROLLBACK.sql`.
+> - First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS → B2 PASS**; next is **B4**, design only, before any code.
+> - Sessions resolve only through `luxia_session_resolve`. `getSession` accepts FULL sessions only; a RECOVERY session (15 minutes) is read only by the B2 allow-list: passkey enrolment of its own account and `/recovery`.
+> - R6 ran on the dedicated test organization `luxia-cert-b2-r6`, now **SUSPENDED** (15:18:29Z, B3 primitive, nothing deleted). Its final closure belongs to B4. Legrand Tech and the Lab were unchanged throughout.
+> - Not independently observed in Production: the browser refusal of `/dashboard` and `/api/me/sessions` during the recovery session. It is covered by CI and the clone certification, and no security failure was observed.
+> - Neon backups:
+>   - `br-dawn-scene-ahdunopo` (before B2, until 2026-10-26);
+>   - `br-cold-bread-ah1hlohl` (before B3) and `br-twilight-wildflower-ah68mp0p` (before status and scope), both until 2026-10-25;
+>   - the Lab archive `br-icy-darkness-aho1v83p`, kept until B4 is certified.
+>
+> This header supersedes older deployment rows below.
+
+> **2026-10-11 ~20:45Z — B3 ORGANIZATION LIFECYCLE ENFORCEMENT: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B3-RELEASE-2026-10-11.md`).
+> - `main` is `8aec711` (PR #43). Production = **`dpl_8YEyT71Z1o3CUfb8qSCTZ9V1dr6o` @ `8aec711`**; rollback = `dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`.
+> - **22 migrations** in Production; the last one, `20261011200000_session_resolve_subject_account`, was applied 20:28:54–29:04Z.
+> - First Admin / Break-glass v1 status:
+>   - **B1 PASS**;
+>   - **migration `Organization.status` + `Session.scope` PASS**;
+>   - **B3 PASS**;
+>   - next is **B2**, design first.
+> - Sessions resolve only through `luxia_session_resolve`. It refuses a non-ACTIVE organization, subject or identity account, and accepts FULL sessions only until B2.
+> - Neon backups:
+>   - `br-cold-bread-ah1hlohl` (before B3) and `br-twilight-wildflower-ah68mp0p` (before status and scope), both until 2026-10-25;
+>   - the Lab archive `br-icy-darkness-aho1v83p`, kept until B4 is certified.
+>
+> This header supersedes older deployment rows below.
+
+> **2026-10-11 ~17:20Z — MIGRATION `Organization.status` + `Session.scope`: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-RELEASE-2026-10-11.md`).
+> - `main` is `4e98edf` (PR #41). **21 migrations** in Production; the last one, `20261011180000_organization_status_session_scope`, was applied 17:16:44–57Z.
+> - The application is unchanged: `dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`, with rollback `dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ`.
+> - Both organizations are ACTIVE and every session is FULL.
+> - The database enforces:
+>   - status changes only by the operator role, under the governance lock;
+>   - CLOSED is final;
+>   - sessions are append-only;
+>   - SUSPENDED and CLOSED resolve nothing.
+> - Backup branch `br-twilight-wildflower-ah68mp0p` expires 2026-10-25. The rollback script is lossless while no status is in use.
+> - **Binding for B4:** Prisma 5.20 does not report a failed COMMIT. End every transition with `SET CONSTRAINTS ALL IMMEDIATE` and re-read the state.
+> - The Lab archive `br-icy-darkness-aho1v83p` is kept until B4 is certified.
+>
+> This header supersedes older deployment rows below.
+
+> **2026-10-11 ~16:00Z — FIRST ADMIN / BREAK-GLASS V1, B1 LAST-ADMINISTRATOR GUARD: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B1-RELEASE-2026-10-11.md`).
+> - `main` is `ebb4f46` (PR #38, merged pinned on `2d61ee6`). Production = **`dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`**; rollback = `dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ` @ `5e8c887`.
+> - No migration: Production still has the **20** repository migrations applied.
+> - No change may take a tenant from at least one durable administrator to none (`LAST_ADMINISTRATOR_PROTECTED`). Legrand Tech has 1 durable administrator. The neutralized Lab has 0 and is not frozen.
+> - Proven in Production by a rolled-back `app_user` transaction, with nothing changed.
+> - Neon archive branch `br-icy-darkness-aho1v83p` (the Lab's state before neutralization) is kept until B4 is certified, then deleted.
+>
+> This header supersedes older deployment rows below.
+
+> **2026-10-11 ~14:20Z — CUSTOMER SELF-ONBOARDING V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/CUSTOMER-SELF-ONBOARDING-V1-MULTI-ORG-CERTIFICATION-2026-10-11.md`).
+> - `main` is `5e8c887` (PR #35, finding F1 fixed: passkey sign-in never lists credential IDs). Production = **`dpl_Ao1hwzYREFMHVMqZotEHkQ67QAyJ` @ `5e8c887`**; rollback = `dpl_7ZzzEA3DbQdAACKZP4f9V947gkad` @ `6f9de76`.
+> - Two organizations exist: `legrand-tech` (active) and `luxia-certification-lab`. The Lab was **neutralized** by a provisional break-glass operator action: no session, accounts disabled, passkeys revoked, domain released. Its history is kept.
+> - Recorded in the report: D1 (slug deviation, no security impact) and I1 (same-value update of Legrand's identity, only `updatedAt` changed).
+>
+> This header supersedes older deployment rows below.
+
+> **2026-10-11 ~09:55Z — CUSTOMER SELF-ONBOARDING V1 RELEASED; LEGRAND TECH VALIDATED** (`docs/certification/CUSTOMER-SELF-ONBOARDING-V1-RELEASE-2026-10-11.md`).
+> - `main` is `6f9de76` (merge of PR #32, CI run 38094537834 PASS).
+> - **20 migrations** applied in Production. The latest, `20261011000000_customer_self_onboarding_v1`, was applied at 01:25:12Z. The business digest of the 45 tables is identical before and after, and Legrand Tech is now `legrand-tech`.
+> - Production deployment: `dpl_7ZzzEA3DbQdAACKZP4f9V947gkad` @ `6f9de76`. Rollback deployment: `dpl_EDZXLTXRrHDbBbVGqcEhCTF3SnpW` @ `2d7ec62`. Database backup branch: `br-plain-union-ah2o23ll`, which expires 2026-10-25.
+> - The second organization and the cross-tenant certification in Production are **not done yet** and need a separate approval.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-10 21:1xZ — SECURITY JOURNAL V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/SECURITY-JOURNAL-V1-PRODUCTION-2026-10-10.md`). Production = `dpl_EDZXLTXRrHDbBbVGqcEhCTF3SnpW` @ `2d7ec62`. Also shipped since the dashboard certification: sober UI and readable copy (#25, #26), canonical audit journal and legacy roles out of navigation (#27). This header supersedes older deployment rows below.
 
 > **2026-10-10 17:2xZ — DASHBOARD V1 — PRODUCTION CERTIFICATION: PASS** (`docs/certification/DASHBOARD-V1-PRODUCTION-2026-10-10.md`). Production = `dpl_48xvYWVVJUiZg1k9A53tyD7yf7tu` @ `5c71df8`. This header supersedes the deployment rows in section 1.

@@ -1,6 +1,7 @@
 import { Prisma, ResourceScopeKind, ResourceType } from "@prisma/client";
 import type { AuthContext } from "../auth/authorization-engine";
 import { CanonicalAdminError } from "../admin/canonical-administration";
+import { preserveLastAdministrator } from "../admin/last-administrator";
 import { withTenantDb } from "../db/scoped-client";
 import { evaluateResourceAccess } from "./authorization";
 import { enforceSoD, SoDDeniedError } from "./sod";
@@ -109,9 +110,13 @@ export function revokeEntitlement(auth: AuthContext, id: string, changeId: strin
   return operation(auth, changeId, "RESOURCE.ENTITLEMENT.REVOKE", "resources.manage", async tx => {
     const row = await tx.entitlement.findFirst({ where: { ...context(auth), id, resourceScopeId: { not: null } } });
     if (!row) return notFound();
-    const value = await tx.entitlement.update({ where: { organizationId_tenantId_id: { ...context(auth), id } }, data: { active: false } });
-    const assignments = await tx.assignment.findMany({ where: { ...context(auth), entitlementId: id, status: "ACTIVE" }, select: { id: true } });
-    await tx.assignment.updateMany({ where: { ...context(auth), entitlementId: id, status: "ACTIVE" }, data: { status: "REVOKED" } });
+    // B1 (defense in depth): only resource-scoped entitlements reach here, never assignments.manage.
+    const { value, assignments } = await preserveLastAdministrator(tx, auth, async () => {
+      const value = await tx.entitlement.update({ where: { organizationId_tenantId_id: { ...context(auth), id } }, data: { active: false } });
+      const assignments = await tx.assignment.findMany({ where: { ...context(auth), entitlementId: id, status: "ACTIVE" }, select: { id: true } });
+      await tx.assignment.updateMany({ where: { ...context(auth), entitlementId: id, status: "ACTIVE" }, data: { status: "REVOKED" } });
+      return { value, assignments };
+    });
     return { value, metadata: { entitlementId: id }, assignmentIds: assignments.map(row => row.id) };
   });
 }
@@ -146,7 +151,8 @@ export function revokeAssignment(auth: AuthContext, id: string, changeId: string
     const row = await tx.assignment.findFirst({ where: { ...context(auth), id, entitlement: { resourceScopeId: { not: null } } } });
     if (!row) return notFound();
     if (row.subjectId === auth.subjectId) throw new CanonicalAdminError("SELF_REVOKE_FORBIDDEN", 403);
-    const value = await tx.assignment.update({ where: { organizationId_tenantId_id: { ...context(auth), id } }, data: { status: "REVOKED" } });
+    const value = await preserveLastAdministrator(tx, auth, () =>
+      tx.assignment.update({ where: { organizationId_tenantId_id: { ...context(auth), id } }, data: { status: "REVOKED" } }));
     return { value, assignmentIds: [id], targetSubjectId: row.subjectId, metadata: { entitlementId: row.entitlementId } };
   });
 }
@@ -168,7 +174,8 @@ export function updateAssignment(auth: AuthContext, id: string, input: { entitle
       await enforceSoD(tx, { ...context(auth), subjectId: row.subjectId, entitlementId, scope: entitlement.resourceScopeId!,
         assignmentOperation: row.status === "ACTIVE" ? "MODIFY" : "REACTIVATE", excludeAssignmentId: id, validFrom: now, validUntil });
     }
-    const value = await tx.assignment.update({ where: { organizationId_tenantId_id: { ...context(auth), id } }, data: { entitlementId, validUntil, status } });
+    const value = await preserveLastAdministrator(tx, auth, () =>
+      tx.assignment.update({ where: { organizationId_tenantId_id: { ...context(auth), id } }, data: { entitlementId, validUntil, status } }));
     return { value, assignmentIds: [id], targetSubjectId: row.subjectId, metadata: { entitlementId, status } };
   });
 }

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { rawPrisma } from "../db/raw-prisma";
 import { withTenantDb } from "../db/scoped-client";
+import { lockOrganizationActive } from "../organizations/lifecycle";
 import * as crypto from "crypto";
 
 export type SessionContext = {
@@ -11,11 +12,24 @@ export type SessionContext = {
 };
 
 export class SessionCreationDeniedError extends Error {
-  constructor(public readonly reason: "IDENTITY_ACCOUNT_DISABLED" | "SUBJECT_NOT_ACTIVE") {
+  constructor(public readonly reason: "IDENTITY_ACCOUNT_DISABLED" | "SUBJECT_NOT_ACTIVE" | "ORGANIZATION_NOT_ACTIVE") {
     super(reason);
     this.name = "SessionCreationDeniedError";
   }
 }
+
+/** One row of luxia_session_resolve, the canonical session resolver. */
+type ResolvedSession = {
+  id: string;
+  organizationId: string;
+  tenantId: string;
+  subjectId: string;
+  identityAccountId: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  lastSeenAt: Date | null;
+  scope: "FULL" | "RECOVERY";
+};
 
 export class SessionStore {
   /**
@@ -33,6 +47,11 @@ export class SessionStore {
     const session = await withTenantDb(
       { organizationId: ctx.organizationId, tenantId: ctx.tenantId },
       async (tx) => {
+        // B3: the organization row is share-locked first; a SUSPENDED or CLOSED organization gets no
+        // session, and a status change waits until this transaction ends.
+        if (!await lockOrganizationActive(tx, ctx.organizationId)) {
+          throw new SessionCreationDeniedError("ORGANIZATION_NOT_ACTIVE");
+        }
         const account = await tx.identityAccount.findFirst({
           where: { id: ctx.identityAccountId, subjectId: ctx.subjectId },
           include: { subject: { select: { lifecycleState: true } } },
@@ -75,39 +94,47 @@ export class SessionStore {
   static async getSession(rawToken: string) {
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     
-    // Resolve session securely bypassing RLS via DB primitive
-    const sessions = await rawPrisma.$queryRaw<Array<{
-      id: string;
-      organizationId: string;
-      tenantId: string;
-      subjectId: string;
-      identityAccountId: string;
-      expiresAt: Date;
-      revokedAt: Date | null;
-      lastSeenAt: Date | null;
-    }>>`SELECT * FROM resolve_session(${hashedToken})`;
+    // B3: the canonical resolver (database) returns nothing unless the organization and the subject
+    // are ACTIVE and the identity account is ACTIVE. Only FULL sessions are accepted here; a RECOVERY
+    // session is read only through getRecoverySession (B2 allow-list).
+    const sessions = await rawPrisma.$queryRaw<Array<ResolvedSession>>`SELECT * FROM luxia_session_resolve(${hashedToken})`;
 
     if (!sessions || sessions.length === 0) return null;
     const session = sessions[0];
     
-    if (session.revokedAt || session.expiresAt < new Date()) {
+    if (session.scope !== "FULL" || session.revokedAt || session.expiresAt < new Date()) {
       return null;
     }
 
-    // Refresh lastSeenAt only if older than 5 minutes
+    // Refresh lastSeenAt only if older than 5 minutes. Conditional: a session revoked in the
+    // meantime is frozen, and the refresh then changes nothing instead of failing the request.
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     if (!session.lastSeenAt || session.lastSeenAt < fiveMinutesAgo) {
-      // Re-enter Tenant DB with correct scope to update
-      await withTenantDb(
-        { organizationId: session.organizationId, tenantId: session.tenantId },
-        async (tx) => tx.session.update({
-          where: { id: hashedToken },
-          data: { lastSeenAt: new Date() }
-        })
-      );
+      await SessionStore.touch(session.organizationId, session.tenantId, hashedToken);
     }
 
     return session;
+  }
+
+  /**
+   * B2: a recovery-only session (scope RECOVERY), through the same canonical resolver. Only
+   * getRecoveryContext calls it (architecture test). Never refreshed: nothing extends its 15 minutes.
+   */
+  static async getRecoverySession(rawToken: string) {
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const sessions = await rawPrisma.$queryRaw<Array<ResolvedSession>>`SELECT * FROM luxia_session_resolve(${hashedToken})`;
+    const session = sessions?.[0];
+    if (!session || session.scope !== "RECOVERY" || session.revokedAt || session.expiresAt <= new Date()) return null;
+    return session;
+  }
+
+  /** Conditional lastSeenAt refresh: never touches a revoked session. Returns whether it updated. */
+  static async touch(organizationId: string, tenantId: string, hashedToken: string): Promise<boolean> {
+    const updated = await withTenantDb({ organizationId, tenantId }, (tx) => tx.session.updateMany({
+      where: { id: hashedToken, revokedAt: null },
+      data: { lastSeenAt: new Date() },
+    }));
+    return updated.count === 1;
   }
 
   /**
@@ -117,15 +144,8 @@ export class SessionStore {
   static async revokeByToken(rawToken: string, options: { signOutAudit?: boolean } = {}) {
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     
-    // Resolve first using primitive
-    const sessions = await rawPrisma.$queryRaw<Array<{
-      id: string;
-      organizationId: string;
-      tenantId: string;
-      subjectId: string;
-      identityAccountId: string;
-      revokedAt: Date | null;
-    }>>`SELECT * FROM resolve_session(${hashedToken})`;
+    // Resolve first through the canonical resolver (any scope: sign-out is always allowed).
+    const sessions = await rawPrisma.$queryRaw<Array<ResolvedSession>>`SELECT * FROM luxia_session_resolve(${hashedToken})`;
 
     if (!sessions || sessions.length === 0) return null;
     const sessionBootstrap = sessions[0];
@@ -145,11 +165,11 @@ export class SessionStore {
         }
       });
 
-      if (session && !session.revokedAt) {
-        await tx.session.update({
-          where: { id: hashedToken },
-          data: { revokedAt: new Date() }
-        });
+      // Conditional: two concurrent sign-outs revoke once and record one event; the second is a no-op.
+      const revoked = session && !session.revokedAt
+        ? (await tx.session.updateMany({ where: { id: hashedToken, revokedAt: null }, data: { revokedAt: new Date() } })).count
+        : 0;
+      if (session && revoked === 1) {
         // Security Journal v1 (W4): sign-out recorded atomically with the revocation, once.
         if (options.signOutAudit) {
           await tx.canonicalAdminAuditEvent.create({ data: {

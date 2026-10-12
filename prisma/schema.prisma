@@ -110,9 +110,21 @@ enum ProviderType {
   CUSTOM
 }
 
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
 model Organization {
   id        String   @id @default(uuid())
   name      String
+  /// Customer Self-Onboarding v1: unique, normalized login identifier; immutable (trigger).
+  slug      String   @unique @default(dbgenerated("('org-'::text || substr(md5(((gen_random_uuid())::text || (clock_timestamp())::text)), 1, 16))"))
+  /// First Admin / Break-glass v1: changed only by the operator procedure, under the governance lock (database guard).
+  status    OrganizationStatus @default(ACTIVE)
+  /// Set by the database on each status change; never by the application.
+  statusChangedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -140,6 +152,9 @@ model Organization {
   providerIdentityCollisions     ProviderIdentityCollision[]
   canonicalAdminAuditEvents      CanonicalAdminAuditEvent[]
   providerConnectionTenantScopes ProviderConnectionTenantScope[]
+  domains                        OrganizationDomain[]
+  invitations                    Invitation[]
+  signupCode                     SignupCode?
 }
 
 model Tenant {
@@ -174,6 +189,8 @@ model Tenant {
   providerIdentityCollisions ProviderIdentityCollision[]
   canonicalAdminAuditEvents  CanonicalAdminAuditEvent[]
   providerConnectionScopes   ProviderConnectionTenantScope[]
+  domains                    OrganizationDomain[]
+  invitations                Invitation[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -230,6 +247,8 @@ model Subject {
   reviewCampaignsAsReviewer AccessReviewCampaign[] @relation("ReviewCampaignReviewer")
   reviewCampaignsAsCreator AccessReviewCampaign[] @relation("ReviewCampaignCreator")
   reviewItemsAsSubject AccessReviewItem[] @relation("ReviewItemSubject")
+  invitations Invitation[] @relation("InvitationSubject")
+  invitationsSent Invitation[] @relation("InvitationInviter")
 
   @@unique([organizationId, id])
   @@unique([organizationId, tenantId, id])
@@ -918,8 +937,12 @@ model LocalRecoveryCode {
   tenantId          String
   identityAccountId String
   codeHash          String
+  /// B2: one generation of 10 codes; a new batch revokes the unused codes of earlier ones.
+  batchId           String
   expiresAt         DateTime?
   usedAt            DateTime?
+  /// B2: set once (NULL to a timestamp) by a new batch or "revoke all"; a used or revoked code is frozen.
+  revokedAt         DateTime?
   createdAt         DateTime  @default(now())
 
   organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -1053,6 +1076,11 @@ model LegacyUserBridge {
 // SESSION MANAGEMENT (PHASE 3 - COMMIT A)
 // ----------------------------------------------------------------------
 
+enum SessionScope {
+  FULL
+  RECOVERY
+}
+
 model Session {
   id                String @id
   organizationId    String
@@ -1060,6 +1088,8 @@ model Session {
   subjectId         String
   identityAccountId String
   recoveryEpoch     BigInt @default(0)
+  /// FULL, or RECOVERY (recovery-only, 15 minutes at most). Immutable (database guard).
+  scope             SessionScope @default(FULL)
 
   expiresAt  DateTime
   revokedAt  DateTime?
@@ -1361,4 +1391,119 @@ model AuthorizationShadowObservation {
 
   @@index([organizationId, tenantId, createdAt])
   @@index([status, createdAt])
+}
+
+// Customer Self-Onboarding v1
+
+enum SignupCodeStatus {
+  ISSUED
+  RESERVED
+  CONSUMED
+  REVOKED
+  EXPIRED
+}
+
+/// Single-use beta signup code. Only its SHA-256 is stored. Forced RLS with no app_user policy:
+/// reachable only through SECURITY DEFINER functions (reserve / pending / consume).
+model SignupCode {
+  id                   String           @id @default(uuid())
+  codeHash             String           @unique
+  status               SignupCodeStatus @default(ISSUED)
+  expiresAt            DateTime
+  issuedBy             String
+  note                 String?
+  reservedAt           DateTime?
+  pendingChallengeHash String?
+  pendingExpiresAt     DateTime?
+  pendingPayload       Json?
+  consumedAt           DateTime?
+  organizationId       String?          @unique
+  revokedAt            DateTime?
+  revokedBy            String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+}
+
+enum OrganizationDomainStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  LOST
+}
+
+/// SQL adds forced RLS, a format check and a partial unique index on verified domains (global).
+model OrganizationDomain {
+  id                 String                   @id @default(uuid())
+  organizationId     String
+  tenantId           String
+  domain             String
+  status             OrganizationDomainStatus @default(PENDING)
+  challengeHash      String
+  challengeExpiresAt DateTime
+  verifiedAt         DateTime?
+  lastCheckedAt      DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@unique([organizationId, domain])
+  @@index([organizationId, tenantId])
+}
+
+enum InvitationRole {
+  MEMBER
+  ADMIN
+}
+
+/// Opaque link token, stored as SHA-256 only. Forced RLS; the invitee reaches it only through
+/// luxia_invitation_resolve(token hash). Tenant, subject and role are immutable (trigger).
+model Invitation {
+  id                   String         @id @default(uuid())
+  organizationId       String
+  tenantId             String
+  subjectId            String
+  tokenHash            String         @unique
+  role                 InvitationRole
+  invitedBySubjectId   String
+  /// B4 (D3): the break-glass journal event ("break-glass:<plan digest>") that issued an emergency
+  /// administrator invitation. Only the operator role can set it; NULL for product invitations.
+  issuedByOperatorChangeId String?
+  /// Set by the database (trigger): createdAt + 7 days, or + 24 hours for an operator invitation. Client values are ignored.
+  expiresAt            DateTime       @default(dbgenerated("(CURRENT_TIMESTAMP + '7 days'::interval)"))
+  acceptedAt           DateTime?
+  revokedAt            DateTime?
+  pendingChallengeHash String?
+  pendingExpiresAt     DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  tenant       Tenant       @relation(fields: [organizationId, tenantId], references: [organizationId, id], onDelete: Restrict)
+  subject      Subject      @relation("InvitationSubject", fields: [organizationId, tenantId, subjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+  invitedBy    Subject      @relation("InvitationInviter", fields: [organizationId, tenantId, invitedBySubjectId], references: [organizationId, tenantId, id], onDelete: Restrict)
+
+  @@unique([organizationId, tenantId, id])
+  @@index([organizationId, tenantId, subjectId])
+}
+
+/// Rate limiting buckets. keyHash = SHA-256(pepper, scope, client key hash); no raw client data.
+/// Forced RLS with no app_user policy: reachable only through luxia_rate_limit_hit().
+model RateLimitBucket {
+  keyHash     String
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@id([keyHash, windowStart])
+  @@index([windowStart])
+}
+
+/// Single-row pepper for rate-limit key hashing; never readable by app_user.
+model RateLimitConfig {
+  id     Int    @id @default(1)
+  pepper String
 }

@@ -11,7 +11,9 @@ export const sessionRef = (storedId: string) =>
   createHash("sha256").update(`luxia-session-ref:${storedId}`, "utf8").digest("base64url").slice(0, 22);
 
 export type MySession = Readonly<{ ref: string; createdAt: string; lastSeenAt: string | null; expiresAt: string;
-  providerType: string; current: boolean }>;
+  providerType: string; current: boolean;
+  /** "RECOVERY": a 15-minute recovery-code session, good only for adding a passkey (B2); shown as such (B5). */
+  scope: "FULL" | "RECOVERY" }>;
 export type MyAuthenticator = Readonly<{ type: string; status: string; enrolledAt: string; lastUsedAt: string | null; hardwareBound: boolean }>;
 
 const scopeOf = (auth: AuthContext) => ({ organizationId: auth.organizationId, tenantId: auth.tenantId });
@@ -24,7 +26,7 @@ async function requireActiveSelf(tx: Parameters<Parameters<typeof withTenantDb>[
 async function activeOwnSessions(tx: Parameters<Parameters<typeof withTenantDb>[1]>[0], auth: AuthContext, now: Date) {
   return tx.session.findMany({ where: { ...scopeOf(auth), subjectId: auth.subjectId, revokedAt: null, expiresAt: { gt: now } },
     orderBy: { createdAt: "desc" }, take: 200,
-    select: { id: true, createdAt: true, lastSeenAt: true, expiresAt: true, identityAccount: { select: { providerConnection: { select: { providerType: true } } } } } });
+    select: { id: true, createdAt: true, lastSeenAt: true, expiresAt: true, scope: true, identityAccount: { select: { providerConnection: { select: { providerType: true } } } } } });
 }
 
 export async function listMySessions(auth: AuthContext, now = new Date()): Promise<MySession[]> {
@@ -32,7 +34,7 @@ export async function listMySessions(auth: AuthContext, now = new Date()): Promi
     await requireActiveSelf(tx, auth);
     return (await activeOwnSessions(tx, auth, now)).map(s => ({ ref: sessionRef(s.id), createdAt: s.createdAt.toISOString(),
       lastSeenAt: s.lastSeenAt?.toISOString() ?? null, expiresAt: s.expiresAt.toISOString(),
-      providerType: s.identityAccount.providerConnection.providerType, current: s.id === auth.sessionId }));
+      providerType: s.identityAccount.providerConnection.providerType, current: s.id === auth.sessionId, scope: s.scope }));
   });
 }
 

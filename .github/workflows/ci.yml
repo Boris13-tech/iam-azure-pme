@@ -91,10 +91,23 @@ jobs:
         GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
         -- app_user is created after migrations in this ephemeral CI database.
         GRANT EXECUTE ON FUNCTION public.luxia_sod_scope_contains(TEXT,TEXT,TEXT,TEXT) TO app_user;
+        -- Customer Self-Onboarding v1: same grants as the migration gives app_user in Production.
+        GRANT EXECUTE ON FUNCTION public.luxia_rate_limit_hit(TEXT,TEXT,INTEGER,INTEGER) TO app_user;
+        GRANT EXECUTE ON FUNCTION public.luxia_signup_reserve(TEXT,TEXT,JSONB,INTEGER) TO app_user;
+        GRANT EXECUTE ON FUNCTION public.luxia_signup_consume(TEXT,TEXT) TO app_user;
+        GRANT EXECUTE ON FUNCTION public.luxia_invitation_resolve(TEXT) TO app_user;
+        GRANT EXECUTE ON FUNCTION public.luxia_login_decoy(TEXT) TO app_user;
+        -- First Admin / Break-glass v1: same grants as the migration gives app_user in Production.
+        GRANT EXECUTE ON FUNCTION public.luxia_organization_lock_active(TEXT) TO app_user;
+        GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
         GRANT CONNECT ON DATABASE luxia_db TO app_user;
         GRANT USAGE ON SCHEMA public TO app_user;
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
         GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
+        -- Mirror the Production grants of Customer Self-Onboarding v1 (migration DO block).
+        REVOKE ALL ON "SignupCode", "RateLimitBucket", "RateLimitConfig" FROM app_user;
+        REVOKE ALL ON "OrganizationDomain", "Invitation" FROM app_user;
+        GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;
         EOF
 
         PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"

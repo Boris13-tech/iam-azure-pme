@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 # Raw local certification test reports (written by scripts/certification/run-resources-diagnostic.ps1).
 # Never commit them; publish only reviewed non-secret summaries.
 docs/certification/operator-*-results.json
+
+# B4 operator break-glass evidence (local, never committed)
+.break-glass-evidence/

@@ -67,14 +67,15 @@ describe("SessionStore Security", () => {
   });
 
   it("should return null for an expired session", async () => {
-    const { rawToken, session } = await SessionStore.createSession({
-      organizationId: orgId, tenantId, subjectId, identityAccountId
-    });
-
-    // Manually expire the session in DB using adminPrisma to bypass RLS for test setup
-    await adminPrisma.session.update({
-      where: { id: session.id as string },
-      data: { expiresAt: new Date(Date.now() - 1000) }
+    // Sessions are append-only (expiresAt is immutable), so the expired session is created expired,
+    // directly in DB with adminPrisma, under the hash of a known browser token.
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    await adminPrisma.session.create({
+      data: {
+        id: crypto.createHash("sha256").update(rawToken).digest("hex"),
+        organizationId: orgId, tenantId, subjectId, identityAccountId,
+        expiresAt: new Date(Date.now() - 1000)
+      }
     });
 
     const retrieved = await SessionStore.getSession(rawToken);

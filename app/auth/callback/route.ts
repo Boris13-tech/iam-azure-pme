@@ -119,6 +119,8 @@ export async function GET(request: Request) {
       if (error instanceof SessionCreationDeniedError) {
         // W2: refusal for a known identity is recorded; the refusal stands whatever happens.
         await recordRejectedSignIn(entraSignInEvidence(signInIdentity, "REJECTED", error.reason));
+        // B3: the organization status is never revealed; same generic return as an unknown organization.
+        if (error.reason === "ORGANIZATION_NOT_ACTIVE") return NextResponse.redirect(new URL("/login?error=signin", request.url), 303);
         return NextResponse.json({ error: error.reason }, { status: 403 });
       }
       throw error;

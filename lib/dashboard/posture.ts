@@ -13,6 +13,7 @@ import {
   type PostureResponse, type SectionId, type Widget, type WidgetId,
 } from "./posture-contract";
 import { POSTURE_QUERIES, Since, Unavailable, type PostureQueries } from "./posture-queries";
+import { ONBOARDING_CHECKLIST_PERMISSION } from "../onboarding/checklist";
 
 export const POSTURE_AUDIT_OPERATION = "DASHBOARD.POSTURE.READ";
 const STATEMENT_TIMEOUT_MS = 5_000;
@@ -85,5 +86,8 @@ export async function loadIdentitySecurityPosture(auth: AuthContext, options: Po
   const sections = Object.fromEntries(SECTION_ORDER.map(s => [s, widgets.filter(w => WIDGETS[w.id].section === s)])) as Record<SectionId, Widget[]>;
   const attention = widgets.flatMap(w => { const count = attentionCount(w);
     return count && count > 0 ? [{ id: w.id, count, section: WIDGETS[w.id].section as SectionId }] : []; });
-  return { contractVersion: 1, asOf: now.toISOString(), organization, tenant, sections, attention };
+  // B5: the overview requests the onboarding checklist only when its API will accept the viewer, so
+  // members never cause a denied read. The API still checks the right itself.
+  const viewer = { onboardingChecklist: held.has(ONBOARDING_CHECKLIST_PERMISSION) };
+  return { contractVersion: 1, asOf: now.toISOString(), organization, tenant, viewer, sections, attention };
 }

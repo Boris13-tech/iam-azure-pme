@@ -106,7 +106,9 @@ describe("Canonical Administration v1", () => {
       subject: {
         findFirst: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "ACTIVE" }),
         update: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "SUSPENDED" }),
+        count: vi.fn().mockResolvedValue(2),
       },
+      $queryRaw: vi.fn().mockResolvedValue([]), $executeRaw: vi.fn().mockResolvedValue(0),
       session: { updateMany: sessionUpdate },
       assignment: { updateMany: assignmentUpdate },
     } as never));
@@ -139,7 +141,9 @@ describe("Canonical Administration v1", () => {
       subject: {
         findFirst: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "ACTIVE" }),
         update: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "RETIRED" }),
+        count: vi.fn().mockResolvedValue(2),
       },
+      $queryRaw: vi.fn().mockResolvedValue([]), $executeRaw: vi.fn().mockResolvedValue(0),
       session: { updateMany: sessionUpdate },
       assignment: { updateMany: assignmentUpdate },
     } as never));
@@ -159,6 +163,7 @@ describe("Canonical Administration v1", () => {
         findFirst: vi.fn().mockResolvedValue({ id: "subject-1", lifecycleState: "RETIRED" }),
         update: vi.fn(),
       },
+      $queryRaw: vi.fn().mockResolvedValue([]),
     } as never));
     await expect(updateSubject(auth, "subject-1", { lifecycleState: "ACTIVE" }, "change-reactivate"))
       .rejects.toMatchObject({ code: "INVALID_SUBJECT_LIFECYCLE_TRANSITION:RETIRED:ACTIVE", httpStatus: 409 });
@@ -170,6 +175,7 @@ describe("Canonical Administration v1", () => {
     vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
       canonicalAdminAuditEvent: { findUnique: vi.fn().mockResolvedValue(null), create: auditCreate },
       subject: { findFirst: vi.fn().mockResolvedValue(null), update },
+      $queryRaw: vi.fn().mockResolvedValue([]),
     } as never));
 
     await expect(updateSubject(auth, "subject-in-other-tenant", { name: "No" }, "change-x"))
@@ -189,6 +195,8 @@ describe("Canonical Administration v1", () => {
         update: accountUpdate,
       },
       session: { updateMany: sessionUpdate },
+      subject: { count: vi.fn().mockResolvedValue(2) },
+      $queryRaw: vi.fn().mockResolvedValue([]), $executeRaw: vi.fn().mockResolvedValue(0),
     } as never));
 
     await disableIdentityAccount(auth, "ia-1", "disable-ia-1");
@@ -204,6 +212,34 @@ describe("Canonical Administration v1", () => {
       operation: "IDENTITY_ACCOUNT.DISABLE",
       targetSubjectId: "subject-1",
       metadata: { identityAccountId: "ia-1", sessionsRevoked: 2 },
+    }) });
+  });
+
+  it("refuses to suspend the last administrator, rolls back to the savepoint and audits the refusal", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const auditCreate = vi.fn().mockResolvedValue({ id: "event-denied" });
+    const sessionUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
+      canonicalAdminAuditEvent: { findUnique: vi.fn().mockResolvedValue(null), create: auditCreate },
+      subject: {
+        findFirst: vi.fn().mockResolvedValue({ id: "admin-1", lifecycleState: "ACTIVE" }),
+        update: vi.fn().mockResolvedValue({ id: "admin-1", lifecycleState: "SUSPENDED" }),
+        count: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(0),
+      },
+      session: { updateMany: sessionUpdate },
+      $queryRaw: vi.fn().mockResolvedValue([]), $executeRaw: executeRaw,
+    } as never));
+
+    await expect(updateSubject(auth, "admin-1", { lifecycleState: "SUSPENDED" }, "change-last-admin"))
+      .rejects.toMatchObject({ code: "LAST_ADMINISTRATOR_PROTECTED", httpStatus: 409 });
+
+    expect(executeRaw.mock.calls.map(([strings]) => (strings as string[]).join("?"))).toEqual([
+      "SAVEPOINT luxia_last_administrator", "ROLLBACK TO SAVEPOINT luxia_last_administrator",
+    ]);
+    expect(auditCreate).toHaveBeenCalledTimes(1);
+    expect(auditCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
+      operation: "SUBJECT.UPDATE.DENIED", result: "DENIED", targetSubjectId: "admin-1", changeId: "change-last-admin",
+      metadata: { reasonCode: "LAST_ADMINISTRATOR_PROTECTED" },
     }) });
   });
 
@@ -246,6 +282,8 @@ describe("Canonical Administration v1", () => {
         }),
       },
       session: { create: sessionCreate },
+      // B3: the organization row is locked first; ACTIVE here, so the account check decides.
+      $queryRaw: vi.fn().mockResolvedValue([{ status: "ACTIVE" }]),
     } as never));
 
     await expect(SessionStore.createSession({
@@ -254,6 +292,22 @@ describe("Canonical Administration v1", () => {
       subjectId: "subject-1",
       identityAccountId: "identity-1",
     })).rejects.toBeInstanceOf(SessionCreationDeniedError);
+    expect(sessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("cannot create a session for an organization that is not ACTIVE (B3)", async () => {
+    const accountRead = vi.fn();
+    const sessionCreate = vi.fn();
+    vi.mocked(withTenantDb).mockImplementationOnce(async (_scope, work) => work({
+      identityAccount: { findFirst: accountRead },
+      session: { create: sessionCreate },
+      $queryRaw: vi.fn().mockResolvedValue([{ status: "SUSPENDED" }]),
+    } as never));
+
+    await expect(SessionStore.createSession({
+      organizationId: auth.organizationId, tenantId: auth.tenantId, subjectId: "subject-1", identityAccountId: "identity-1",
+    })).rejects.toMatchObject({ name: "SessionCreationDeniedError", reason: "ORGANIZATION_NOT_ACTIVE" });
+    expect(accountRead).not.toHaveBeenCalled();
     expect(sessionCreate).not.toHaveBeenCalled();
   });
 });
