@@ -60,9 +60,12 @@ describe("B4 operator break-glass architecture", () => {
     const fn = body(read(SERVICE), "applyBreakGlass");
     const order = ["refuse(\"PLAN_EXPIRED\"", "validateInput(raw", "IRREVERSIBLE_CONFIRMATION_REQUIRED", "lockTenantGovernance(tx", "FOR UPDATE",
       "computePlan(tx, input, options)", "digest !== options.confirm", "ensureOperatorSubject(tx, plan)", "perform(tx, plan",
-      "canonicalAdminAuditEvent.create(", "SET CONSTRAINTS ALL IMMEDIATE", "readCommitted(db, applied.plan)"].map((part) => fn.indexOf(part));
+      "SELECT (now() AT TIME ZONE 'UTC')::timestamp(3) AS at", "canonicalAdminAuditEvent.create(", "SET CONSTRAINTS ALL IMMEDIATE",
+      "readCommitted(db, applied.plan)"].map((part) => fn.indexOf(part));
     expect(order.every((index) => index > -1), JSON.stringify(order)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // The journal time comes from the database transaction (same clock as statusChangedAt), never from Prisma's client default.
+    expect(fn).toContain("metadata: eventMetadata(plan, digest, rest.effects), occurredAt,");
     expect(fn).toContain("const changeId = `break-glass:${digest}`");
     expect(fn).toContain(`refuse("ALREADY_APPLIED"`);
     // D2: account disabling goes through the last-administrator guard variant, never around it.

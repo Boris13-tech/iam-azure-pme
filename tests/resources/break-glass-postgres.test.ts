@@ -8,6 +8,7 @@ import { resolveLoginOrganization } from "../../lib/auth/organization-login";
 import { countDurableAdministrators, durableAdministratorWhere } from "../../lib/admin/last-administrator";
 import { beginAcceptance, completeAcceptance } from "../../lib/onboarding/invitations";
 import { applyBreakGlass, planBreakGlass, type BreakGlassAction, type DnsCheck } from "../../lib/operators/break-glass";
+import { transitionOrganization } from "../../lib/organizations/lifecycle";
 import { softwarePasskey } from "../helpers/software-passkey";
 
 // First Admin / Break-glass v1, B4: the operator procedure on PostgreSQL. The command runs as the owner
@@ -90,6 +91,11 @@ describe.runIf(enabled)("B4 operator break-glass procedure (owner command, app_u
     const [event] = await events(org);
     expect(event).toMatchObject({ operation: "BREAK_GLASS.ORGANIZATION.SUSPEND", result: "SUCCESS", changeId: `break-glass:${digest}`,
       metadata: { planDigest: digest, reference: { type: "LUXIA_INCIDENT", id: "INC-1" }, before: { openSessions: 2 } } });
+    // The event carries the database time of the change, the very instant of statusChangedAt, so a later
+    // plan reads this status change as journaled.
+    const changed = await owner.organization.findUniqueOrThrow({ where: { id: org.organizationId } });
+    expect(event.occurredAt.getTime()).toBe(changed.statusChangedAt!.getTime());
+    expect((await planBreakGlass(owner, request(org, "REVOKE_SESSIONS", { type: "LUXIA_INCIDENT", id: "INC-1B" }), options(org))).plan.unjournaledStatusChange).toBeNull();
     // The operator: a disabled SERVICE subject, with no account, assignment or session.
     const operator = await owner.subject.findUniqueOrThrow({ where: { id: event.actorSubjectId }, include: { identities: true, Assignment: true } });
     expect(operator).toMatchObject({ type: "SERVICE", name: "Opérateur LUXIA (break-glass)", lifecycleState: "DISABLED", identities: [], Assignment: [] });
@@ -239,12 +245,17 @@ describe.runIf(enabled)("B4 operator break-glass procedure (owner command, app_u
     await owner.organizationDomain.create({ data: { ...scope(org), domain, status: "VERIFIED", verifiedAt: new Date(), challengeHash: sha(randomUUID()),
       challengeExpiresAt: new Date(Date.now() + 86_400_000) } });
     const ref = certification(org);
-    await run(org, request(org, "SUSPEND_ORGANIZATION", ref));
-    await run(org, request(org, "REVOKE_SESSIONS", ref));
-    await run(org, request(org, "DISABLE_ACCOUNT", ref, { identityAccountId: org.founder.accountId }), { irreversible: org.slug });
-    await run(org, request(org, "DISABLE_ACCOUNT", ref, { identityAccountId: member.accountId }), { irreversible: org.slug });
-    await run(org, request(org, "RELEASE_DOMAIN", ref, { domain }));
-    const { result } = await run(org, request(org, "CLOSE_ORGANIZATION", ref), { irreversible: org.slug });
+    const steps = [
+      await run(org, request(org, "SUSPEND_ORGANIZATION", ref)),
+      await run(org, request(org, "REVOKE_SESSIONS", ref)),
+      await run(org, request(org, "DISABLE_ACCOUNT", ref, { identityAccountId: org.founder.accountId }), { irreversible: org.slug }),
+      await run(org, request(org, "DISABLE_ACCOUNT", ref, { identityAccountId: member.accountId }), { irreversible: org.slug }),
+      await run(org, request(org, "RELEASE_DOMAIN", ref, { domain })),
+      await run(org, request(org, "CLOSE_ORGANIZATION", ref), { irreversible: org.slug }),
+    ];
+    // Every status change here was made by the procedure: no plan sees an unjournaled one.
+    expect(steps.map(({ plan }) => plan.unjournaledStatusChange)).toEqual([null, null, null, null, null, null]);
+    const { result } = steps[5];
     expect(result.committed).toMatchObject({ verified: true, observed: { status: "CLOSED", openSessions: 0, activeAccounts: 0, activeLocalIdentities: 0,
       activePasskeys: 0, heldDomains: 0, durableAdministrators: 0 } });
     expect(await owner.organizationDomain.findFirstOrThrow({ where: { organizationId: org.organizationId, domain } })).toMatchObject({ status: "LOST" });
@@ -255,4 +266,20 @@ describe.runIf(enabled)("B4 operator break-glass procedure (owner command, app_u
     expect(await owner.subject.count({ where: { ...scope(org), type: "SERVICE" } })).toBe(1);
     expect(await resolveLoginOrganization(org.slug)).toBeNull();
   }, 120_000);
+
+  it("journal time: a status change made outside the procedure is flagged, then recorded by the closing event, at the database time", async () => {
+    // The luxia-cert-b2-r6 case: SUSPENDED by the B3 primitive (no journal event), then CLOSED by the procedure.
+    const org = await organization();
+    await owner.$transaction((tx) => transitionOrganization(tx, org.organizationId, "SUSPENDED"));
+    const suspended = (await owner.organization.findUniqueOrThrow({ where: { id: org.organizationId } })).statusChangedAt!;
+    const { plan, result } = await run(org, request(org, "CLOSE_ORGANIZATION", certification(org)), { irreversible: org.slug });
+    expect(plan.unjournaledStatusChange).toEqual({ status: "SUSPENDED", at: suspended.toISOString() });
+    expect(result.committed.verified).toBe(true);
+    const [event] = await events(org);
+    expect(event.metadata).toMatchObject({ unjournaledStatusChange: { status: "SUSPENDED", at: suspended.toISOString() } });
+    const closed = await owner.organization.findUniqueOrThrow({ where: { id: org.organizationId } });
+    expect(closed.status).toBe("CLOSED");
+    expect(event.occurredAt.getTime()).toBe(closed.statusChangedAt!.getTime());
+    expect(Math.abs(event.occurredAt.getTime() - Date.now())).toBeLessThan(60_000); // UTC, no time zone shift
+  }, 60_000);
 });

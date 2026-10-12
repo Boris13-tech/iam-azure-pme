@@ -202,7 +202,7 @@ Design approved on 2026-10-12 (D1 to D7, Q1): `FIRST-ADMIN-BREAK-GLASS-V1-B4-OPE
   - the counts, including the durable administrators and those who can still sign in;
   - the target;
   - the operator subject;
-  - any earlier status change that was not journaled;
+  - any earlier status change that was not journaled (a status change with no later `BREAK_GLASS.ORGANIZATION.*` event; the event time is the database transaction time, the same as `statusChangedAt`);
   - for `RELEASE_DOMAIN`, the DNS answer of two public resolvers.
 - It refuses what the rules refuse:
   - status preconditions;

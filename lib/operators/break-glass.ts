@@ -495,10 +495,14 @@ export async function applyBreakGlass(db: PrismaClient, raw: unknown, options: A
     const changeId = `break-glass:${digest}`;
     const done = await perform(tx, plan, operatorSubjectId, changeId, now);
     const { token, ...rest } = done as { effects: Record<string, Json>; targetSubjectId?: string; token?: string };
+    // The event time is the database transaction time, the instant and clock of the status trigger's
+    // statusChangedAt, never the operator machine's clock (Prisma's default): a status change made by
+    // this procedure then reads as journaled in every later plan (unjournaledStatusChange).
+    const [{ at: occurredAt }] = await tx.$queryRaw<Array<{ at: Date }>>`SELECT (now() AT TIME ZONE 'UTC')::timestamp(3) AS at`;
     // D6: one plan applies at most once; the unique changeId of the journal refuses a replay.
     await tx.canonicalAdminAuditEvent.create({ data: {
       organizationId: plan.organization.id, tenantId: plan.tenantId, actorSubjectId: operatorSubjectId, targetSubjectId: rest.targetSubjectId ?? null,
-      operation: JOURNAL_OPERATION[plan.input.action], result: "SUCCESS", changeId, metadata: eventMetadata(plan, digest, rest.effects),
+      operation: JOURNAL_OPERATION[plan.input.action], result: "SUCCESS", changeId, metadata: eventMetadata(plan, digest, rest.effects), occurredAt,
     } });
     await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
     return { plan, digest, changeId, effects: rest.effects, token };
