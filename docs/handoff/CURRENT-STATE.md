@@ -1,5 +1,19 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-12 ~15:20Z — B2 RECOVERY CODES AND RECOVERY-ONLY SESSION: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`).
+> - `main` is `fe34cf7` (PR #46, merged pinned on `db9f740`). Production = **`dpl_CiB2VuvFtru15AxNJfa5NfDF8q2F` @ `fe34cf7`**; rollback = `dpl_8YEyT71Z1o3CUfb8qSCTZ9V1dr6o` @ `8aec711`.
+> - **23 migrations** in Production; the last one, `20261012090000_recovery_codes_b2`, was applied 07:03:35–46Z. Rollback script: `docs/operations/B2-RECOVERY-CODES-ROLLBACK.sql`.
+> - First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS → B2 PASS**; next is **B4**, design only, before any code.
+> - Sessions resolve only through `luxia_session_resolve`. `getSession` accepts FULL sessions only; a RECOVERY session (15 minutes) is read only by the B2 allow-list: passkey enrolment of its own account and `/recovery`.
+> - R6 ran on the dedicated test organization `luxia-cert-b2-r6`, now **SUSPENDED** (15:18:29Z, B3 primitive, nothing deleted). Its final closure belongs to B4. Legrand Tech and the Lab were unchanged throughout.
+> - Not independently observed in Production: the browser refusal of `/dashboard` and `/api/me/sessions` during the recovery session. It is covered by CI and the clone certification, and no security failure was observed.
+> - Neon backups:
+>   - `br-dawn-scene-ahdunopo` (before B2, until 2026-10-26);
+>   - `br-cold-bread-ah1hlohl` (before B3) and `br-twilight-wildflower-ah68mp0p` (before status and scope), both until 2026-10-25;
+>   - the Lab archive `br-icy-darkness-aho1v83p`, kept until B4 is certified.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-11 ~20:45Z — B3 ORGANIZATION LIFECYCLE ENFORCEMENT: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B3-RELEASE-2026-10-11.md`).
 > - `main` is `8aec711` (PR #43). Production = **`dpl_8YEyT71Z1o3CUfb8qSCTZ9V1dr6o` @ `8aec711`**; rollback = `dpl_2QzBdDXtXAGSL49SYXoGd1vRbCrD` @ `ebb4f46`.
 > - **22 migrations** in Production; the last one, `20261011200000_session_resolve_subject_account`, was applied 20:28:54–29:04Z.

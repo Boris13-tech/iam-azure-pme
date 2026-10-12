@@ -12,20 +12,29 @@ Read `docs/handoff/CURRENT-STATE.md` first.
 - 2026-10-11: **B1 last-administrator guard: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B1-RELEASE-2026-10-11.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1.md`).
 - 2026-10-11: **Migration `Organization.status` + `Session.scope`: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-RELEASE-2026-10-11.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-DESIGN.md`).
 - 2026-10-11: **B3 organization lifecycle enforcement: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B3-RELEASE-2026-10-11.md`, notes in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1.md`).
+- 2026-10-12: **B2 recovery codes and recovery-only session: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-B2-RECOVERY-DESIGN.md`). R6 ran on the test organization `luxia-cert-b2-r6`, now SUSPENDED.
 
-First Admin / Break-glass v1 status: **B1 = PASS**; **migration `Organization.status` + `Session.scope` = PASS**; **B3 = PASS**; **next = B2**.
+First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS → B2 PASS → next = B4**.
 
 ## Next objective: First Admin / Break-glass v1, in the order approved by the operator
 
-1. **B2, next**: personal recovery codes and the `recovery-only` session (15 minutes, own passkey enrolment only). Write the design first (docs only), with no code before the operator approves it.
-2. **B4**: closed-action operator procedure with dry run, digest and confirmation. Then replay the Lab neutralization on a clone of the archive branch `br-icy-darkness-aho1v83p`, and delete that branch once B4 is certified.
-3. **B5**: visibility: durable second administrator, recovery codes created, French labels for operator actions.
+1. **B4, next, design only (docs), with no code before the operator approves it.** It covers:
+   - the closed-action operator break-glass procedure: dry run, plan digest, confirmation and journal event;
+   - final closure (CLOSED);
+   - the replay of the Lab neutralization on a clone of the archive branch `br-icy-darkness-aho1v83p`, which is deleted once B4 is certified;
+   - the future closure of `luxia-cert-b2-r6`, which is SUSPENDED since the B2 R6 ceremony.
+2. **B5**: visibility:
+   - durable second administrator;
+   - recovery codes created;
+   - French labels for operator actions and for `RECOVERY.*` and `RECOVERY_CODES.*`;
+   - a recovery session shown as such (not « Clé d'accès ») in « Mes sessions ».
 
 ## Small follow-ups (each needs its own approval)
 
 - **Unused function:** drop `luxia_login_decoy` (migration).
 - **Journal labels:** add French labels for `BREAK_GLASS.*` (part of B5).
 - **Checklist visibility:** show the onboarding checklist only to administrators, to avoid `ONBOARDING.CHECKLIST.READ.DENIED` noise for members.
+- **Authentication navigation:** the « Authentification » link needs `providers.read`, so members reach their recovery codes only through the R5 notice or the URL. A small separate UX PR if needed (operator decision, 2026-10-12).
 
 ## Then (operator roadmap)
 
