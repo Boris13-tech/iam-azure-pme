@@ -9,7 +9,7 @@
 > - Neon backups:
 >   - `br-snowy-dawn-ahbgmqhr` (before B4) and `br-dawn-scene-ahdunopo` (before B2), both until 2026-10-26;
 >   - `br-cold-bread-ah1hlohl` (before B3) and `br-twilight-wildflower-ah68mp0p` (before status and scope), both until 2026-10-25;
->   - the Lab archive `br-icy-darkness-aho1v83p`: B4 is certified, so it is deleted on the operator's confirmation.
+>   - the Lab archive `br-icy-darkness-aho1v83p`: B4 is certified; the operator chose to keep it until it expires on its own, on 2026-11-10.
 >
 > This header supersedes older deployment rows below.
 

@@ -184,11 +184,10 @@ Production has 24 migrations, none failed. Nothing was deleted.
   - `br-snowy-dawn-ahbgmqhr` (before B4, until 2026-10-26);
   - `br-dawn-scene-ahdunopo` (before B2, until 2026-10-26);
   - `br-cold-bread-ah1hlohl` (before B3) and `br-twilight-wildflower-ah68mp0p` (before status and scope), both until 2026-10-25;
-  - the Lab archive `br-icy-darkness-aho1v83p` (until 2026-11-10). B4 is now certified; it is deleted only when the operator confirms.
+  - the Lab archive `br-icy-darkness-aho1v83p`. B4 is now certified, and the operator chose to keep it until it expires on its own, on 2026-11-10. It is not deleted before.
 
 **FIRST ADMIN / BREAK-GLASS V1, B4 OPERATOR BREAK-GLASS PROCEDURE: PRODUCTION RELEASE PASS**
 
 ## Next
 
-- **Deletion of the Lab archive** `br-icy-darkness-aho1v83p`, on the operator's confirmation.
-- **B5, visibility and posture**, design first.
+**B5, visibility and posture**, design first.

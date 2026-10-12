@@ -19,8 +19,7 @@ First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS �
 
 ## Next objective: First Admin / Break-glass v1, in the order approved by the operator
 
-1. **Lab archive:** delete `br-icy-darkness-aho1v83p`, on the operator's confirmation (B4 is certified).
-2. **B5, next, design first**: visibility and posture:
+1. **B5, next, design first**: visibility and posture:
    - durable second administrator;
    - recovery codes created;
    - French labels for operator actions and for `RECOVERY.*` and `RECOVERY_CODES.*`;
