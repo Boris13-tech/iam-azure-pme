@@ -1470,7 +1470,10 @@ model Invitation {
   tokenHash            String         @unique
   role                 InvitationRole
   invitedBySubjectId   String
-  /// Set by the database (trigger): createdAt + 7 days. Client values are ignored.
+  /// B4 (D3): the break-glass journal event ("break-glass:<plan digest>") that issued an emergency
+  /// administrator invitation. Only the operator role can set it; NULL for product invitations.
+  issuedByOperatorChangeId String?
+  /// Set by the database (trigger): createdAt + 7 days, or + 24 hours for an operator invitation. Client values are ignored.
   expiresAt            DateTime       @default(dbgenerated("(CURRENT_TIMESTAMP + '7 days'::interval)"))
   acceptedAt           DateTime?
   revokedAt            DateTime?

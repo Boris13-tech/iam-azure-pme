@@ -146,10 +146,20 @@ export async function completeAcceptance(input: { token: unknown; principalName:
       if (!connectionId) throw new InvitationError("INVITATION_INVALID", 403);
       await createPasskeyIdentity(tx, scope, { subjectId: subject.id, connectionId, principalName, passkey, rpId: origin.rpId, origin: origin.origin, actorSubjectId: subject.id });
       if (row.role === "ADMIN") {
-        // The authority is the inviter's: it must still hold assignments.manage when the link is used.
-        try { await requireNative(tx, { ...scope, subjectId: row.invitedBySubjectId }, "assignments.manage"); }
-        catch { throw new InvitationError("INVITATION_INVALID", 403); }
-        await grantAdministrator(tx, scope, { subjectId: subject.id, actorSubjectId: row.invitedBySubjectId, changePrefix: `invitation:${row.id}`, metadata: { invitationId: row.id } });
+        if (row.issuedByOperatorChangeId) {
+          // B4 (D3): an emergency invitation from the operator break-glass. Its authority is that approved
+          // break-glass event alone, never the inviter's rights: the operator holds none. The database guard
+          // checks the same event at acceptance.
+          const event = await tx.canonicalAdminAuditEvent.findFirst({ where: { ...scope, changeId: row.issuedByOperatorChangeId,
+            operation: "BREAK_GLASS.RECOVERY_INVITATION.ISSUE", result: "SUCCESS" }, select: { metadata: true } });
+          if ((event?.metadata as { invitationId?: unknown } | null | undefined)?.invitationId !== row.id) throw new InvitationError("INVITATION_INVALID", 403);
+        } else {
+          // The authority is the inviter's: it must still hold assignments.manage when the link is used.
+          try { await requireNative(tx, { ...scope, subjectId: row.invitedBySubjectId }, "assignments.manage"); }
+          catch { throw new InvitationError("INVITATION_INVALID", 403); }
+        }
+        await grantAdministrator(tx, scope, { subjectId: subject.id, actorSubjectId: row.invitedBySubjectId, changePrefix: `invitation:${row.id}`,
+          metadata: row.issuedByOperatorChangeId ? { invitationId: row.id, operatorChangeId: row.issuedByOperatorChangeId } : { invitationId: row.id } });
       }
       await tx.canonicalAdminAuditEvent.create({ data: { ...scope, actorSubjectId: subject.id, targetSubjectId: subject.id, operation: "INVITATION.ACCEPT",
         changeId: `invitation:${row.id}:accept`, result: "SUCCESS", metadata: { invitationId: row.id, role: row.role } } });
