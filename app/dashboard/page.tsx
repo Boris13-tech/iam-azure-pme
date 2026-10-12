@@ -99,7 +99,7 @@ const TERMS: Record<string, string> = {
   MICROSOFT_ENTRA: "Microsoft Entra ID", LUXIA_LOCAL: "Compte local LUXIA", LDAP: "LDAP", ACTIVE_DIRECTORY: "Active Directory", SAMBA_AD: "Samba AD",
   AWS: "AWS", GOOGLE_WORKSPACE: "Google Workspace", GITHUB: "GitHub", CUSTOM: "Autre",
   VERIFIED: "Réussies", REJECTED: "Refusées", VERIFIED_PHISHING_RESISTANT: "dont résistantes à l’hameçonnage",
-  FEDERATED_OIDC: "Microsoft Entra ID", PASSKEY: "Clé d’accès", SECURITY_KEY: "Clé de sécurité", TOTP: "Code à usage unique",
+  FEDERATED_OIDC: "Microsoft Entra ID", PASSKEY: "Clé d’accès", SECURITY_KEY: "Clé de sécurité", TOTP: "Code à usage unique", RECOVERY_CODE: "Code de récupération",
   LEGACY_ROLE: "Ancien rôle", DIRECT: "Attribution directe", PROVIDER: "Fournisseur", POLICY: "Politique", SYSTEM: "Système",
   TIME_BOUND: "Limités dans le temps", PERMANENT: "Permanents",
   APPLICATION: "Applications", API: "API", DATASET: "Jeux de données", DATABASE: "Bases de données", REPOSITORY: "Dépôts de code",
@@ -187,7 +187,7 @@ export default function DashboardPage() {
     <RecoveryNoticeLink />
     {failed ? <p role="alert" className="posture-alert">Impossible de charger les données. Réessayez dans quelques instants.</p>
       : !data ? <p role="status" className="posture-muted">Chargement...</p> : <>
-      <OnboardingChecklist />
+      {data.viewer.onboardingChecklist && <OnboardingChecklist />}
       <section className="luxia-panel posture-attention" aria-label="À traiter">
         <header><h2><AlertTriangle size={18} aria-hidden /> À traiter</h2></header>
         {data.attention.length === 0

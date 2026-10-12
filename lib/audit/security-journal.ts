@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { withTenantDb } from "../db/scoped-client";
+import { RECOVERY_ASSURANCE_PROFILE, signInMethodKey } from "../auth/recovery-evidence";
 
 export type JournalKind = "SIGN_IN" | "ADMIN";
 export type JournalEntry = Readonly<{
@@ -14,8 +15,9 @@ export type JournalEntry = Readonly<{
   actorName: string | null; targetName: string | null;
   /** Sign-in only. */
   method?: string; providerType?: string | null;
-  /** Sign-in only. Never claims MFA: Entra is "PROVIDER_ATTESTED" (decision S1). */
-  assurance?: "PROVIDER_ATTESTED" | "PHISHING_RESISTANT" | "STANDARD";
+  /** Sign-in only. Never claims MFA: Entra is "PROVIDER_ATTESTED" (decision S1). A recovery-code sign-in is
+   *  "RECOVERY_CODE": low assurance, single use, not phishing-resistant (B2, B5). */
+  assurance?: "PROVIDER_ATTESTED" | "PHISHING_RESISTANT" | "STANDARD" | "RECOVERY_CODE";
   reasonCode?: string;
 }>;
 export type JournalPage = Readonly<{ entries: readonly JournalEntry[]; nextCursor: string | null }>;
@@ -65,15 +67,16 @@ export async function listSecurityJournal(auth: { organizationId: string; tenant
     const signIns = kind === "admin" ? [] : await tx.authenticationEvidence.findMany({
       where: { ...scope, ...after("SIGN_IN", cursor) } as Prisma.AuthenticationEvidenceWhereInput,
       orderBy: [{ occurredAt: "desc" }, { id: "desc" }], take: limit + 1,
-      select: { id: true, method: true, outcome: true, occurredAt: true, phishingResistant: true, reasonCode: true,
+      select: { id: true, method: true, outcome: true, occurredAt: true, phishingResistant: true, reasonCode: true, assuranceProfile: true,
         subject: { select: { name: true } }, providerConnection: { select: { providerType: true } } } });
     const merged: JournalEntry[] = [
       ...admin.map(e => ({ id: e.id, kind: "ADMIN" as const, occurredAt: e.occurredAt.toISOString(), action: e.operation, result: e.result,
         actorName: e.actor?.name ?? null, targetName: e.target?.name ?? null })),
       ...signIns.map(e => ({ id: e.id, kind: "SIGN_IN" as const, occurredAt: e.occurredAt.toISOString(), action: "SIGN_IN",
         result: e.outcome === "VERIFIED" ? "SUCCESS" as const : "DENIED" as const, actorName: e.subject?.name ?? null, targetName: null,
-        method: e.method, providerType: e.providerConnection?.providerType ?? null,
-        assurance: e.method === "FEDERATED_OIDC" ? "PROVIDER_ATTESTED" as const : e.phishingResistant ? "PHISHING_RESISTANT" as const : "STANDARD" as const,
+        method: signInMethodKey(e), providerType: e.providerConnection?.providerType ?? null,
+        assurance: e.method === "FEDERATED_OIDC" ? "PROVIDER_ATTESTED" as const : e.phishingResistant ? "PHISHING_RESISTANT" as const
+          : e.assuranceProfile === RECOVERY_ASSURANCE_PROFILE ? "RECOVERY_CODE" as const : "STANDARD" as const,
         ...(e.outcome === "REJECTED" ? { reasonCode: e.reasonCode } : {}) })),
     ].sort(compareEntries);
     const entries = merged.slice(0, limit);

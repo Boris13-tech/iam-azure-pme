@@ -40,9 +40,9 @@ describe("Domains, invitations and checklist contract", () => {
     }
   });
 
-  it("step 7: the checklist is facts only (booleans), never a score", () => {
+  it("step 7: the checklist is facts only (true, false, or null when an item does not apply), never a score", () => {
     const lib = readFileSync("lib/onboarding/checklist.ts", "utf8");
-    expect(lib).toContain("const items: Record<ChecklistItem, boolean> = {");
+    expect(lib).toContain("const items: Record<ChecklistItem, boolean | null> = {");
     const code = (source: string) => source.replace(/\/\/.*$/gm, "");
     expect(code(lib)).not.toMatch(/score|percent|%/i);
     expect(code(readFileSync("app/dashboard/onboarding-checklist.tsx", "utf8"))).not.toMatch(/score|%/i);
