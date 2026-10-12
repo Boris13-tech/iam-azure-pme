@@ -12,18 +12,14 @@ Read `docs/handoff/CURRENT-STATE.md` first.
 - 2026-10-11: **B1 last-administrator guard: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B1-RELEASE-2026-10-11.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1.md`).
 - 2026-10-11: **Migration `Organization.status` + `Session.scope`: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-RELEASE-2026-10-11.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-MIGRATION-DESIGN.md`).
 - 2026-10-11: **B3 organization lifecycle enforcement: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B3-RELEASE-2026-10-11.md`, notes in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1.md`).
-- 2026-10-12: **B2 recovery codes and recovery-only session: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-B2-RECOVERY-DESIGN.md`). R6 ran on the test organization `luxia-cert-b2-r6`, now SUSPENDED.
+- 2026-10-12: **B2 recovery codes and recovery-only session: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-B2-RECOVERY-DESIGN.md`). R6 ran on the test organization `luxia-cert-b2-r6`, later CLOSED by B4.
+- 2026-10-12: **B4 operator break-glass procedure: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B4-RELEASE-2026-10-12.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-B4-OPERATOR-DESIGN.md`). The Lab and `luxia-cert-b2-r6` are CLOSED through the procedure; the journal-time fix (PR #50) is merged.
 
-First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS → B2 PASS → next = B4**.
+First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS → B2 PASS → B4 PASS → next = B5**.
 
 ## Next objective: First Admin / Break-glass v1, in the order approved by the operator
 
-1. **B4, next, design only (docs), with no code before the operator approves it.** It covers:
-   - the closed-action operator break-glass procedure: dry run, plan digest, confirmation and journal event;
-   - final closure (CLOSED);
-   - the replay of the Lab neutralization on a clone of the archive branch `br-icy-darkness-aho1v83p`, which is deleted once B4 is certified;
-   - the future closure of `luxia-cert-b2-r6`, which is SUSPENDED since the B2 R6 ceremony.
-2. **B5**: visibility:
+1. **B5, next, design first**: visibility and posture:
    - durable second administrator;
    - recovery codes created;
    - French labels for operator actions and for `RECOVERY.*` and `RECOVERY_CODES.*`;
