@@ -1,5 +1,16 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-12 ~20:40Z — B5 VISIBILITY: PRODUCTION RELEASE PASS. FIRST ADMIN / BREAK-GLASS V1 IS COMPLETE** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B5-RELEASE-2026-10-12.md`).
+> - `main` is `ec9ee2e` (PR #52). Production = **`dpl_9DAyHFHgKa15csWqna97ZueymNxR` @ `ec9ee2e`**; rollback = `dpl_3Jm2usCcwnM4JZndgAU9A7ngkfnT` @ `2414ec6`. 24 migrations, unchanged by B5.
+> - Released under the low-risk Production rule the operator confirmed on 2026-10-12 (reversible, full CI, known rollback, no data or security change). Destructive or trust-model changes still need the operator.
+> - Open P1 findings, with plans:
+>   - the audit journal and the sign-in evidence can be rewritten by the application role (`docs/architecture/LUXIA-OPERATOR-TRANSPARENCY.md`);
+>   - there is no backup outside the Neon project, history is 6 hours, and no restore was ever tested (`docs/operations/BACKUP-RESTORE-PLAN.md`);
+>   - Free and Hobby plans in US regions, no observability, no privacy basis (`docs/product/ENTERPRISE-READINESS.md`).
+> - Time convention and convergence plan: `docs/architecture/LUXIA-TIME-CONVENTION.md`.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-12 ~19:35Z — B4 OPERATOR BREAK-GLASS PROCEDURE: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B4-RELEASE-2026-10-12.md`).
 > - `main` is `41d7220` (PR #50, journal-time fix, after PR #49 `2414ec6`). Production = **`dpl_3Jm2usCcwnM4JZndgAU9A7ngkfnT` @ `2414ec6`**; rollback = `dpl_CiB2VuvFtru15AxNJfa5NfDF8q2F` @ `fe34cf7`. PR #50 changes only the operator module, which the application never imports, so it is not deployed.
 > - **24 migrations** in Production; the last one, `20261012180000_break_glass_operator_invitation`, was applied 18:52:31–40Z. Rollback script: `docs/operations/B4-BREAK-GLASS-ROLLBACK.sql`.
