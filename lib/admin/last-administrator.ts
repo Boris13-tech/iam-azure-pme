@@ -62,3 +62,17 @@ export async function preserveLastAdministrator<T>(tx: Prisma.TransactionClient,
   await tx.$executeRaw`RELEASE SAVEPOINT luxia_last_administrator`;
   return value;
 }
+
+/**
+ * B4, decision D2: the operator break-glass may disable the last durable administrator only in an
+ * organization that is already SUSPENDED (it no longer operates). The status is read here, under the
+ * governance lock and a share lock on the organization row, never taken from the caller. In any other
+ * status this is exactly preserveLastAdministrator.
+ */
+export async function preserveLastAdministratorUnlessSuspended<T>(tx: Prisma.TransactionClient, scope: Scope, change: () => Promise<T>): Promise<T> {
+  await lockTenantGovernance(tx, scope);
+  const [organization] = await tx.$queryRaw<Array<{ status: string }>>`
+    SELECT "status"::text AS status FROM "Organization" WHERE "id" = ${scope.organizationId} FOR SHARE`;
+  if (organization?.status === "SUSPENDED") return change();
+  return preserveLastAdministrator(tx, scope, change);
+}

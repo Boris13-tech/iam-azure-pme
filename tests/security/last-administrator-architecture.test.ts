@@ -10,7 +10,9 @@ import { GOVERNANCE_ADMIN_V2 } from "../../lib/resources/admin-bundle";
 const root = join(__dirname, "../..");
 const WRITER = /\.(assignment|identityAccount|subject|entitlement)\.(update|updateMany|upsert|delete|deleteMany)\(/g;
 const ASSIGNMENT_WRITER = /\.assignment\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/;
-const GUARD_CALLS = ["preserveLastAdministrator(", "guardLastAdministrator("];
+// B4 (D2): preserveLastAdministratorUnlessSuspended is preserveLastAdministrator, except in an organization
+// already SUSPENDED, whose status it reads itself under the lock.
+const GUARD_CALLS = ["preserveLastAdministrator(", "guardLastAdministrator(", "preserveLastAdministratorUnlessSuspended("];
 
 /** Index of the parenthesis closing the one at `open`, skipping strings and comments. */
 function closing(source: string, open: number): number {

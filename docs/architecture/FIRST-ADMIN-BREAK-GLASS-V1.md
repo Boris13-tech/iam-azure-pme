@@ -178,3 +178,63 @@ The cookie is cleared, and the person signs in with the new passkey. The remaini
 - `tests/security/recovery-architecture.test.ts`: allow-list, type separation, lock order, no permission or B4 logic, rollback order;
 - `tests/security/recovery-codes.test.ts`;
 - the B3 lock-order map and the function privilege gate, extended.
+
+## B4, the operator break-glass procedure
+
+Design approved on 2026-10-12 (D1 to D7, Q1): `FIRST-ADMIN-BREAK-GLASS-V1-B4-OPERATOR-DESIGN.md`. Runbook: `docs/operations/B4-BREAK-GLASS-RUNBOOK.md`.
+
+**Code.**
+- `lib/operators/break-glass.ts` holds the closed list, the authority matrix, the plan and the apply logic.
+- `scripts/operators/break-glass.ts` is the operator command. It runs as the owner, on the direct endpoint, with a BYPASSRLS role.
+- No route, page or other library reaches the module (architecture test).
+
+**Inputs.**
+- `validateInput` accepts only the known fields. It checks the action against the reference type (D7, Q1):
+  - `LUXIA_CERTIFICATION`: only on the fixed list of certification organizations;
+  - `VERIFIED_CUSTOMER_REQUEST`: only the actions listed in `requestedActions`;
+  - `legrand-tech`: only its own verified request.
+- A verified request needs two distinct methods and the SHA-256 of the document (D1).
+- Each action takes exactly its own target.
+
+**Plan.**
+- `computePlan` reads:
+  - the organization and its status;
+  - the counts, including the durable administrators and those who can still sign in;
+  - the target;
+  - the operator subject;
+  - any earlier status change that was not journaled;
+  - for `RELEASE_DOMAIN`, the DNS answer of two public resolvers.
+- It refuses what the rules refuse:
+  - status preconditions;
+  - D2 (last administrator outside SUSPENDED);
+  - D3 (an administrator who can still sign in);
+  - a TXT record still present.
+- The plan is canonical JSON. Its SHA-256 is the digest, and it expires after 15 minutes (D5).
+
+**Apply.** One owner transaction, in this order:
+1. governance locks of every tenant, then the organization row lock (`FOR UPDATE`);
+2. the plan recomputed from the same inputs, refused unless the digest matches (invariant: no widening of authority);
+3. the disabled `SERVICE` operator subject, created on first use;
+4. the action:
+   - status changes go through the B3 `transitionOrganization`;
+   - `DISABLE_ACCOUNT` goes through `preserveLastAdministratorUnlessSuspended`, which is the B1 guard except in an organization already SUSPENDED (D2);
+5. the `BREAK_GLASS.*` journal event, with `changeId = break-glass:<digest>`; the unique index refuses a replay (D6);
+6. `SET CONSTRAINTS ALL IMMEDIATE`;
+7. a committed re-read compared with the expected result (P1).
+
+**Recovery invitation (D3).** Migration `20261012180000_break_glass_operator_invitation`, expand only. Rollback: `docs/operations/B4-BREAK-GLASS-ROLLBACK.sql`.
+- `Invitation.issuedByOperatorChangeId`, the break-glass event, set for an ADMIN invitation only.
+- The invitation guard:
+  - only a BYPASSRLS role can set the column;
+  - the database fixes the lifetime at 24 hours;
+  - the column is immutable;
+  - acceptance requires the break-glass event that names this invitation.
+- The state CHECK allows 24 hours for operator invitations, and 7 days otherwise.
+- Acceptance grants the administrator bundle on the event's authority alone; the operator holds nothing. The token is printed once and stored nowhere.
+
+**Tests:**
+- `tests/resources/break-glass-postgres.test.ts`: every action, refusals, replay, D2, D3 with a real acceptance, the race, and the Lab sequence;
+- `tests/security/break-glass.test.ts`: matrix, inputs, digest;
+- `tests/security/break-glass-architecture.test.ts`;
+- the B1 and B3 architecture maps, extended;
+- the PGlite drill of the migration and its rollback.

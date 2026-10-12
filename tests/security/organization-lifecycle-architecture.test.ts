@@ -36,6 +36,8 @@ const LOCKED: Record<string, string[]> = {
   // B2: recovery sign-in creates a RECOVERY session; recovery enrolment ends it (the other B2 writers
   // are checked in recovery-architecture.test.ts).
   "lib/auth/recovery.ts": ["recoverySignIn", "completeRecoveryEnrollment"],
+  // B4: the operator's emergency administrator invitation (D3) requires an ACTIVE organization.
+  "lib/operators/break-glass.ts": ["issueRecoveryInvitation"],
 };
 
 describe("B3 organization lifecycle enforcement architecture", () => {
@@ -96,8 +98,9 @@ describe("B3 organization lifecycle enforcement architecture", () => {
     expect(transition.indexOf(`UPDATE "Organization"`)).toBeLessThan(transition.indexOf(`UPDATE "Session"`));
     expect(transition).toContain(`if (to !== "ACTIVE")`); // reactivation revokes nothing and resurrects nothing
     expect(transition.trimEnd().indexOf("SET CONSTRAINTS ALL IMMEDIATE")).toBeGreaterThan(transition.indexOf(`UPDATE "OrganizationDomain"`));
+    // B4 wraps it: the operator break-glass procedure is the only caller (and it is not a route).
     const importers = runtime.filter(({ file, source }) => file !== "lib/organizations/lifecycle.ts" && /transitionOrganization/.test(source));
-    expect(importers.map(({ file }) => file)).toEqual([]);
+    expect(importers.map(({ file }) => file)).toEqual(["lib/operators/break-glass.ts"]);
   });
 
   it("the B3 migration only extends the canonical resolver, and its rollback restores the previous body", () => {
