@@ -20,7 +20,7 @@ First Admin / Break-glass v1 status: **B1, migration, B3, B2, B4, B5: all PASS i
 
 ## Priorities (operator order of 2026-10-12, refined with the post-B5 evidence)
 
-1. **P1, audit integrity first (T0):** the journal and the sign-in evidence become append-only for application and ordinary operator roles. That means a database guard and the grants revoked from `app_user`. It is not cryptographic immutability, which belongs to Trust Ledger. It is small and protective, and it is the prerequisite of every transparency promise. See `docs/architecture/LUXIA-OPERATOR-TRANSPARENCY.md`.
+1. **Done, PRODUCTION VERIFIED 2026-10-13: T0 audit integrity.** The journal and the sign-in evidence are append-only for application and ordinary operator roles (`docs/certification/T0-AUDIT-APPEND-ONLY-RELEASE-2026-10-13.md`). It is not cryptographic immutability, which belongs to Trust Ledger.
 2. **P1, backup and restore:** follow `docs/operations/BACKUP-RESTORE-PLAN.md`:
    - an independent, encrypted backup in EU object storage;
    - Drill B from that backup;

@@ -1,0 +1,128 @@
+# Independent backups: architecture, provider choice and key management
+
+Status: **DESIGNED** (2026-10-13), from the operator decisions of the same day:
+- EU object storage, outside Neon and ideally outside the same account and failure domain;
+- versioning or object lock;
+- hash checks;
+- a LUXIA-controlled key.
+
+It implements E1 of `docs/product/ENTERPRISE-READINESS.md` and section 4 of `docs/operations/BACKUP-RESTORE-PLAN.md`.
+
+## 1. Chain
+
+1. **Consistent export:** `pg_dump --format=custom` of the Production database, which runs in one snapshot transaction. It is read by a **dedicated read-only backup role**, because forced RLS requires BYPASSRLS to see every tenant.
+2. **Compression:** pg_dump's own.
+3. **Encryption:** `age`, with LUXIA's backup **public key**. The machine that runs the backup never holds the private key, so it can write backups but never read them.
+4. **Hashes:** SHA-256 of the clear dump and of the encrypted file.
+5. **Manifest:** time, duration, database size, migration count, business digest (the same digest the releases use), both hashes, key id. No secret.
+6. **Upload:** to an EU bucket with versioning and **object lock in compliance mode**.
+7. **Check:** re-download and compare the encrypted file's hash; on failure, an alert.
+8. **Retention:** set by the lock and a lifecycle rule (section 4).
+9. **Restore drill** (operator side, with the private key):
+   1. download;
+   2. check the hash;
+   3. decrypt;
+   4. `pg_restore` into a blank PostgreSQL 17;
+   5. migrations, digest, application, sign-in, IAM and audit checks;
+   6. measure RTO, RPO, backup and restore durations, backup size, cost, manual steps and failure points.
+
+**Where the job runs:** a scheduled GitHub Actions workflow, once a day. It is outside Neon and outside the storage provider, it is logged, and it can alert on failure. **Its secrets:**
+- the backup role's connection string;
+- a storage key **restricted to writing objects in that one bucket** (no delete, no lock change);
+
+The age public key is not a secret.
+
+## 2. Provider comparison
+
+Dump size today is a few MB: the whole database is about 38 MB. Cost is therefore driven by minimum fees, not by volume. Sources are listed at the end. Where only third-party figures were found, they are marked ASSUMPTION.
+
+| | **Scaleway** (FR) | **OVHcloud** (FR) | **Hetzner** (DE) | Backblaze B2 EU | Cloudflare R2 EU | AWS S3 eu-central-1 |
+|---|---|---|---|---|---|---|
+| EU region | Paris (Standard Multi-AZ, 3 zones), Amsterdam, Warsaw | Several EU regions, Paris 3-AZ (ASSUMPTION for the exact list) | Falkenstein, Nuremberg, Helsinki | Amsterdam (an account is tied to one region) | EU jurisdiction per bucket | Frankfurt |
+| Company law | EU | EU | EU | US (CLOUD Act exposure) | US | US |
+| Same failure domain as Neon? | No | No | No | No | No | **Yes**: Neon runs on AWS |
+| S3 API | Yes | Yes | Yes | Yes | Yes (own lock API) | Native |
+| Versioning | Yes | Yes | Yes (official page) | Yes | No classic versioning (ASSUMPTION) | Yes |
+| Object lock | **Yes, compliance and governance** (official docs) | **Yes, WORM** (official docs) | Yes (official page) | Yes | Bucket locks | Yes |
+| Encryption at rest | Yes (plus ours) | Yes (plus ours) | Yes (plus ours) | Yes | Yes | Yes |
+| Storage price | €0.01606/GB-month Multi-AZ, €0.00803 One Zone, Glacier €0.00254 (official, Paris) | About €0.007–0.008/GB-month (ASSUMPTION, third party) | €6.49/month minimum including 1 TB (ASSUMPTION, third party) | About $0.007/GB-month (ASSUMPTION) | About $0.015/GB-month (ASSUMPTION) | About $0.0245/GB-month (ASSUMPTION) |
+| Egress | 75 GB free each month, then €0.01/GB (official) | Sources disagree (ASSUMPTION) | 1 TB included (ASSUMPTION) | Free up to 3× stored (ASSUMPTION) | Free | Paid |
+| Maturity for backups | Mature; S3 and lock for years | Mature | Object storage is recent; incidents reported mid-2026 (ASSUMPTION, third party) | Mature | Mature | Reference |
+| Lock-in | Low (S3, standard tools) | Low | Low | Low | Medium (lock API differs) | Low |
+| Cost at today's size | **< €0.10/month** | < €0.10/month (ASSUMPTION) | €6.49/month (minimum) | < $0.10/month | < $0.10/month | < $0.10/month |
+
+## 3. Recommendation
+
+**Scaleway Object Storage, Paris, Standard Multi-AZ, with a bucket created with object lock (compliance mode) and versioning.**
+
+Why:
+- EU company and law;
+- three zones within the region;
+- a different provider and failure domain from Neon (AWS);
+- compliance-mode lock documented officially: even the account owner cannot delete or shorten a locked version;
+- S3 tools, so the provider can be changed by configuration only;
+- predictable price, near zero at our size.
+
+Paris also keeps the backups apart from the target Production region (Frankfurt), while staying in the EU.
+
+Why not the others:
+- **OVHcloud** is a solid second choice, kept as the alternative if Scaleway fails a test;
+- **Hetzner** has a fixed minimum that is pointless at our size, and its object storage is younger;
+- **Backblaze, R2 and AWS** are US companies, and AWS is the same failure domain as Neon.
+
+**Before use, to be proven on a test bucket:** a locked version can neither be deleted nor overwritten, even by the account owner, during its lock.
+
+## 4. Retention
+
+| Backup | Kept | Lock |
+|---|---|---|
+| Daily | 30 days | compliance, 30 days |
+| Monthly (the first of each month) | 12 months | compliance, 12 months |
+
+A lifecycle rule removes versions after the lock expires.
+
+Personal data deleted in Production stays in backups until they expire. The retention policy and the privacy documents must say so (`docs/legal/`).
+
+## 5. Key management, adapted to our stage
+
+- **Algorithm:** `age` X25519, public-key encryption. It is simple and audited. No HSM now.
+- **Two key pairs:**
+  - the backup key (data);
+  - a separate storage credential (access). They are never the same thing.
+- **Public key:** in the repository and in the workflow. It is not a secret, and it can only encrypt.
+- **Private key:**
+  - generated offline by the operator;
+  - never committed, never in a backup, never in a log, never in CI;
+  - kept in **two places under LUXIA control**: the operator's password manager, and an offline copy (printed, or a hardware token) in a separate place;
+  - used only for restore drills and real restores.
+- **Identification:** each manifest records the key id (a fingerprint of the public key). After a rotation, old backups stay readable with the old key, kept until they expire.
+- **Rotation:**
+  - every year;
+  - at once if the key may be exposed;
+  - when the person holding it changes.
+- **Later:**
+  - a cloud key manager (for example Scaleway Key Manager) or an HSM, when a customer or certification asks for it;
+  - split custody (two people needed to restore) when LUXIA has more than one operator.
+
+## 6. Steps and who decides
+
+| Step | Owner |
+|---|---|
+| Create the storage account and bucket, and accept its terms (a spend, near zero) | **Operator** |
+| Generate the age key pair offline; give the public key | **Operator** (human, the private key never reaches Claude) |
+| Create the read-only backup role in Production (a new credential with read access to all data) | **Operator approval** (new credential, data exposure) |
+| Store the two secrets in GitHub Actions | Operator, or Claude with the operator's approval |
+| Backup workflow, manifest, check, alert, drill script | Claude (code, tests, docs) |
+| First real backup, then Drill B | Claude, then the report |
+
+## Sources
+
+- [Scaleway Object Storage pricing](https://www.scaleway.com/en/pricing/storage/)
+- [Scaleway, how to use object lock](https://www.scaleway.com/en/docs/object-storage/how-to/use-object-lock/)
+- [OVHcloud, managing object immutability with Object Lock](https://docs.ovhcloud.com/en/guides/storage-and-backup/object-storage/s3-managing-object-lock)
+- [Hetzner Object Storage](https://www.hetzner.com/storage/object-storage/)
+- [Backblaze cloud storage data regions](https://www.backblaze.com/docs/cloud-storage-data-regions)
+- [Cloudflare R2 bucket locks](https://codex-container-api-docs.previews.developers.cloudflare.com/r2/buckets/bucket-locks/index.md)
+- Third-party price comparisons, used only where marked ASSUMPTION:
+  - [Sliplane, cheap object storage in Europe](https://sliplane.io/blog/cheap-object-storage-providers-europe), which states a stake in the comparison;
+  - [Infratally, S3 alternatives](https://infratally.com/articles/s3-alternatives-object-storage/).
