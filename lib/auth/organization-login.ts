@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { rawPrisma } from "../db/raw-prisma";
+import type { ProviderType } from "@prisma/client";
 import { withTenantDb } from "../db/scoped-client";
+import { FEDERATED_SIGN_IN_PROVIDER_TYPES } from "../provider-adapters/federation";
 
 // Customer Self-Onboarding v1, requirements 2, 14 and 15. The server resolves the organization,
 // tenant and sign-in connection from the organization identifier (slug) itself. Nothing about the
@@ -30,12 +32,21 @@ export function normalizePrincipalName(input: unknown): string | null {
   return value.length >= 1 && value.length <= 254 ? value : null;
 }
 
+export type LoginConnection = Readonly<{ id: string; providerType: ProviderType }>;
+
 export type LoginOrganization = {
   organizationId: string;
   tenantId: string;
-  entraConnectionId: string | null;
   localConnectionId: string | null;
+  /** Connections of the federated provider types this tenant can sign in through. */
+  federation: ReadonlyArray<LoginConnection>;
 };
+
+/** The organization's single connection of one federated type, or null when it has none or several (fail closed). */
+export function singleFederationConnection(organization: LoginOrganization, providerType: ProviderType): string | null {
+  const matches = organization.federation.filter((item) => item.providerType === providerType);
+  return matches.length === 1 ? matches[0].id : null;
+}
 
 export async function resolveLoginOrganization(slug: string): Promise<LoginOrganization | null> {
   const organization = await rawPrisma.organization.findUnique({ where: { slug }, select: { id: true, status: true } });
@@ -49,16 +60,17 @@ export async function resolveLoginOrganization(slug: string): Promise<LoginOrgan
   const connections = await withTenantDb(scope, (tx) => tx.providerConnection.findMany({
     where: {
       organizationId: organization.id,
-      providerType: { in: ["MICROSOFT_ENTRA", "LUXIA_LOCAL"] },
+      providerType: { in: ["LUXIA_LOCAL", ...FEDERATED_SIGN_IN_PROVIDER_TYPES] },
       tenantScopes: { some: { organizationId: organization.id, tenantId: scope.tenantId } },
     },
     select: { id: true, providerType: true },
   }));
-  const only = (type: string) => {
-    const matches = connections.filter((item) => item.providerType === type);
-    return matches.length === 1 ? matches[0].id : null;
+  const local = connections.filter((item) => item.providerType === "LUXIA_LOCAL");
+  return {
+    ...scope,
+    localConnectionId: local.length === 1 ? local[0].id : null,
+    federation: connections.filter((item) => item.providerType !== "LUXIA_LOCAL"),
   };
-  return { ...scope, entraConnectionId: only("MICROSOFT_ENTRA"), localConnectionId: only("LUXIA_LOCAL") };
 }
 
 /**
