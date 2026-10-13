@@ -8,7 +8,7 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 | Part | Where | Notes |
 |---|---|---|
 | Backup role | `luxia_backup` in Production (`scripts/backup/luxia-backup-role.sql`) | SELECT only, read-only by default, BYPASSRLS (required, see the architecture), 3 connections at most. Rollback: `docs/operations/BACKUP-ROLE-ROLLBACK.sql` |
-| Job | `.github/workflows/backup.yml`, every 2 hours (`23 */2 * * *` UTC) and on demand | Runs `scripts/backup/backup.mjs` in the GitHub environment `production-backup` (secrets released to `main` only). Public log: no count, no secret |
+| Job | `.github/workflows/backup.yml`, started every hour at :53 UTC by the Azure Logic App `luxia-backup-dispatcher`, on demand, and by the GitHub schedule `23 * * * *` if GitHub ever honours it | Runs `scripts/backup/backup.mjs` in the GitHub environment `production-backup` (secrets released to `main` only). Public log: no count, no secret |
 | Storage | Azure subscription of the operator, resource group `luxia-backup-rg`, account `luxiabackupfrd325`, container `prod-backups`, region France Central | Zone-redundant (3 zones). Versioning. Version-level immutability, 30 days. Blob and container soft delete, 14 days. Management lock `luxia-backup-no-delete` on the group |
 | Writer credential | Secret `LUXIA_BACKUP_CONTAINER_URL` | Container SAS bound to the stored access policy `bw-202610-r2`: create and read only (no overwrite, no delete, no list). Expires 2027-10-13 |
 | Database credential | Secret `LUXIA_BACKUP_DATABASE_URL` | `luxia_backup` on the direct endpoint (an exported snapshot cannot live behind the pooler) |
@@ -22,17 +22,93 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 
 **Scope:** every schema except the declared platform schemas (`neon_auth`, the Neon Auth feature, unused by LUXIA). Any other schema stops the backup.
 
-## 2. Watching it
+## 2. Watching it, and catching up
 
-- A failed run fails the workflow. GitHub e-mails the account that last changed the schedule.
-- **GitHub does not guarantee scheduled runs.** The first one (2026-10-13 18:23Z) never started.
-- Until an outside alert exists (first item of the Ops/Monitoring block), the operator checks weekly that the latest backup is less than 5 hours old. Command, after `az login`:
+**What can go wrong:**
+- **GitHub's scheduler has never run this workflow:** 0 scheduled runs since the repository was created; 18:23, 20:23 and 21:23 were missed on 2026-10-13. The hourly trigger is therefore in Azure (line 1). The GitHub schedule stays only as a spare.
+- GitHub also disables scheduled workflows in a public repository after 60 days without activity.
+- A job can fail: its database credential, its storage credential, or Neon can be down.
+
+**Three lines of defence:**
+
+| # | Mechanism | Covers | Outside GitHub |
+|---|---|---|---|
+| 1 | **Hourly trigger from Azure.** The Logic App `luxia-backup-dispatcher` starts `backup.yml` every hour at minute 53 UTC. A failed run is caught up by the next one. The GitHub schedule (`23 * * * *`) is a spare | One failed run: data stays at most about 2 hours old | **Yes** (the trigger) |
+| 2 | **Azure alert `luxia-backup-freshness`**, detailed below | Two misses in a row, GitHub outages, disabled schedules, broken credentials, and a broken log pipeline | **Yes** |
+| 3 | **Catch-up by the operator** on alert (below) | Everything that lines 1 and 2 report | Partly, see 3b |
+
+**The alert (line 2):**
+- Storage write logs (diagnostic setting `luxia-backup-writes`) go to the Log Analytics workspace `luxia-backup-logs` (resource group `luxia-backup-rg`, France Central, 30 days).
+- Every 15 minutes, the scheduled query `luxia-backup-freshness` counts the backup manifests written under `prod-backups/prod/` in the last 3 hours (`PutBlob`, HTTP 201).
+- **Zero** raises a severity-1 alert. The action group `luxia-backup-alerts` e-mails both of the operator's addresses.
+- The alert resolves on its own when a backup lands, and sends a second e-mail.
+- If the log pipeline itself stops, the count is zero too: **the alert fails loudly, never silently.**
+- Delay between the last backup and the e-mail: 3 hours, plus up to 15 minutes of evaluation, plus the log ingestion delay (usually a few minutes).
+
+**Catch-up when the alert arrives (line 3).** The commands are written for Git Bash or a Linux shell.
+
+a. **GitHub works.** Start a backup by hand, then check that it succeeded:
+
+```bash
+gh workflow run backup.yml --ref main
+```
+
+   Or use the "Run workflow" button on the *Independent backup* workflow page.
+
+b. **GitHub Actions does not work.** Back up from the operator's workstation with the owner role.
+   - The dump stays read-only and is encrypted to the same public key. The private key is not needed.
+   - You need: the PostgreSQL 17 client, `age`, Azure access, and the Production owner connection string.
+   - Prepare a short upload credential (create and read, one hour):
+
+```bash
+az storage container generate-sas --account-name luxiabackupfrd325 --auth-mode key -n prod-backups --permissions rc --expiry <now + 1 h> --https-only -o tsv
+```
+
+   Then run the backup:
+
+```bash
+LUXIA_BACKUP_DATABASE_URL=<owner, direct endpoint> LUXIA_BACKUP_EMERGENCY_ROLE=neondb_owner LUXIA_BACKUP_CONTAINER_URL="https://luxiabackupfrd325.blob.core.windows.net/prod-backups?<token>" node scripts/backup/backup.mjs
+```
+
+   - Never inside GitHub Actions: the script refuses the owner role there.
+   - The manifest records `"emergency": true`.
+
+**Checking by hand** (after `az login`):
 
 ```bash
 az storage blob list --account-name luxiabackupfrd325 --auth-mode key -c prod-backups --prefix prod/ --query "max_by([?ends_with(name,'manifest.json')], &properties.creationTime).{name:name,at:properties.creationTime}" -o table
 ```
 
-- GitHub disables scheduled workflows in a public repository after 60 days without activity. Any commit resets the counter. Monitoring must also alert on this.
+**What the RPO is, honestly:**
+- About 1 hour normally.
+- About 2 hours when one run fails (line 1, automatic).
+- Beyond that it depends on a human: the alert fires 3 hours after the last backup. The RPO is then 3 hours, plus detection (about 30 minutes), plus the operator's reaction time.
+- **No hard maximum RPO is guaranteed.** That needs someone on call (E7), and a second watcher outside Azure: today the trigger and the alert share the same Azure subscription.
+
+**The hourly trigger (line 1):**
+- The Logic App `luxia-backup-dispatcher` (resource group `luxia-backup-rg`) has a system identity that may only read secrets of the Key Vault `luxia-bkp-kv-284e`.
+- Every hour it reads the secret `github-backup-dispatch-token`: a fine-grained GitHub token for this repository only, with **Actions: read and write** only, expiring 2027-10-13. It then calls GitHub's API to start `backup.yml` on `main`.
+- Inputs and outputs are hidden from its run history.
+- **Enabling the Logic App runs it once immediately.**
+- The token cannot run Production on its own: the GitHub environment `Production` only accepts `main`, requires the operator's approval, and admins cannot bypass it (E17, 2026-10-13).
+
+**Rotating the dispatch token** (before 2027-10-13, or at once if it may have leaked):
+1. create a new fine-grained token with the same settings;
+2. paste it as a new version of the secret `github-backup-dispatch-token` in the Azure portal (Key Vault, Secrets);
+3. revoke the old token in GitHub;
+4. run the Logic App once and check that a backup starts.
+
+**Testing the alert path (monthly, and after any change to the action group):**
+1. Enable the rule `luxia-backup-freshness-drill`. It counts only markers under `prod-backups/drill/`, so it fires within 5 minutes.
+2. Check that both addresses receive "Fired".
+3. Write a marker `prod-backups/drill/<date>/<time>/manifest.json` (one-off create-only credential). The alert resolves about 15 minutes later.
+4. Check that both addresses receive "Resolved".
+5. **Disable the drill rule.** Otherwise it fires again one hour after the marker.
+
+**E-mail recipients must be verified.**
+- Azure Monitor sends nothing to an e-mail address whose status is `VerificationPending`. Only the API version `2026-03-01-preview` shows that status; the others show "Enabled".
+- Verification links expire quickly, and the API has no resend operation.
+- **Verify from the Azure portal:** open the action group, edit it, save it again, and click the links at once.
 
 ## 3. Restoring after losing the database
 
@@ -142,9 +218,10 @@ gh secret set LUXIA_BACKUP_DATABASE_URL --env production-backup < <new file>
 
 ## 7. Cost
 
-At today's size (encrypted dump under 1 MB, 12 backups a day kept 30 days, about 360 versions, under 200 MB):
+At today's size (encrypted dump under 1 MB, 24 backups a day kept 30 days, about 720 backups, under 400 MB):
 - storage and operations: **well under €0.10 a month**;
 - GitHub Actions minutes: free (public repository);
-- Neon compute woken 12 times a day: about 8 CU-hours a month. In October the project used about 22 CU-hours a month in total, against 100 in the Free plan.
+- Neon compute woken 24 times a day: about 15 CU-hours a month. In October the project used about 22 CU-hours a month in total, against 100 in the Free plan.
+- Freshness alert: Log Analytics (a few MB of logs a month) and one log alert rule evaluated every 15 minutes, about €1.50 a month.
 
 The authorized ceiling is €10 a month (operator decision, 2026-10-13).

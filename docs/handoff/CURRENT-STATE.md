@@ -1,5 +1,16 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-13 ~22:55Z — E4 BACKUP FRESHNESS: PRODUCTION PASS** (`docs/certification/E4-BACKUP-FRESHNESS-ALERT-2026-10-13.md`).
+> - **GitHub's scheduler had never run this repository's schedules** (0 runs ever).
+> - **Hourly trigger, now in Azure:** the Logic App `luxia-backup-dispatcher` starts `backup.yml` at :53 UTC, with a GitHub token held in Key Vault `luxia-bkp-kv-284e` (this repository only, Actions read and write only, expires 2027-10-13). First automatic run: 22:53Z, backup verified.
+> - **Freshness alert outside GitHub:** `luxia-backup-freshness` fires after 3 hours without a backup. Both of the operator's addresses are verified. Fired and Resolved were received on both, and the automatic resolution was observed.
+> - The drill rule `luxia-backup-freshness-drill` stays **disabled** between drills.
+> - **E17 fixed:** GitHub environment `Production` = `main` only, the operator as required reviewer, no admin bypass. **Production workflows now wait for the operator's approval.**
+> - **RPO:** about 1 hour normally; about 2 hours automatically after one failure; beyond that, the alert and the operator. **No hard maximum is guaranteed:** no on-call, and the trigger and the alert share one Azure subscription.
+> - **Next:** PR #12, the Sovereign Provider & Federation Layer, design first.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-13 ~13:15Z — E1 INDEPENDENT BACKUP AND DRILL B: PRODUCTION PASS** (`docs/certification/E1-BACKUP-RESTORE-DRILL-B-2026-10-13.md`).
 > - `main` is `2999b0d` (PR #57).
 > - **Backups:**
