@@ -1,5 +1,16 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-13 ~07:30Z — T0 AUDIT INTEGRITY: PRODUCTION VERIFIED** (`docs/certification/T0-AUDIT-APPEND-ONLY-RELEASE-2026-10-13.md`).
+> - `main` is `4d33a87` (PR #54). **25 migrations** in Production; the last one, `20261013090000_audit_append_only`, was applied 07:28:30–41Z. Rollback: `docs/operations/T0-AUDIT-APPEND-ONLY-ROLLBACK.sql`, rehearsed.
+> - `CanonicalAdminAuditEvent` and `AuthenticationEvidence` are append-only for `app_user` (INSERT and SELECT only) and for every ordinary statement of the owner role. Real attempts were refused in Production. This is not cryptographic immutability.
+> - The application is unchanged: `dpl_9DAyHFHgKa15csWqna97ZueymNxR` @ `ec9ee2e`.
+> - Designed, waiting for the operator's spending decision:
+>   - independent backups (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`, Scaleway Paris recommended);
+>   - EU hosting and costs (`docs/operations/HOSTING-EU-AND-COSTS.md`).
+> - Notification contract: `docs/architecture/NOTIFICATION-CONTRACT.md`.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-12 ~20:40Z — B5 VISIBILITY: PRODUCTION RELEASE PASS. FIRST ADMIN / BREAK-GLASS V1 IS COMPLETE** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B5-RELEASE-2026-10-12.md`).
 > - `main` is `ec9ee2e` (PR #52). Production = **`dpl_9DAyHFHgKa15csWqna97ZueymNxR` @ `ec9ee2e`**; rollback = `dpl_3Jm2usCcwnM4JZndgAU9A7ngkfnT` @ `2414ec6`. 24 migrations, unchanged by B5.
 > - Released under the low-risk Production rule the operator confirmed on 2026-10-12 (reversible, full CI, known rollback, no data or security change). Destructive or trust-model changes still need the operator.

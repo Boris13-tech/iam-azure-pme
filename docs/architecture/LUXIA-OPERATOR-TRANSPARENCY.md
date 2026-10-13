@@ -65,7 +65,7 @@ For every LUXIA intervention on the organization:
 
 | Phase | What | Where | Priority |
 |---|---|---|---|
-| T0 | **Append-only journal and sign-in evidence** (modification forbidden to application and ordinary operator roles): a database guard on UPDATE, DELETE and TRUNCATE for every row, and those grants revoked from `app_user`. No runtime code needs them. Not cryptographic immutability | Identity (migration) | **P1**, prerequisite |
+| T0 | **Done, PRODUCTION VERIFIED 2026-10-13** (`docs/certification/T0-AUDIT-APPEND-ONLY-RELEASE-2026-10-13.md`). **Append-only journal and sign-in evidence** (modification forbidden to application and ordinary operator roles): a database guard on UPDATE, DELETE and TRUNCATE for every row, and those grants revoked from `app_user`. No runtime code needs them. Not cryptographic immutability | Identity (migration) | **P1**, prerequisite |
 | T1 | « Interventions de LUXIA » for administrators: the `BREAK_GLASS.*` events with the provable fields of section 2 only. Pre-B4 events are marked as such | Identity (view) | P2 |
 | T2 | Trust Ledger v0: per-tenant chain over the operator events (canonical payload, previous hash, event hash), verification, proof export. This is the first step that may be described as verifiable | Trust Ledger | P2 |
 | T3 | Customer checkpoints (the head hash given to the administrators) and a notice to administrators at each intervention. There is no e-mail or notification channel yet | Trust Ledger + notification | P3 |
