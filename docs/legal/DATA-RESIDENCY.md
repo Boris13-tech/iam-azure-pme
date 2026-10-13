@@ -9,7 +9,7 @@
 | Production database (all customer data) | United States, US East (Neon on AWS `us-east-1`) |
 | Database branches used as rollback points | Same project, same region |
 | Application and its server functions | United States, US East (Vercel `iad1`) |
-| Independent backups | **None yet** |
+| Independent backups (since 2026-10-13) | **European Union, France Central (Paris)**, Microsoft Azure, three zones. Encrypted before they leave the backup job; only LUXIA holds the key |
 
 The current environment serves development and a small number of known organizations. It is not a commercial offer.
 
@@ -19,7 +19,7 @@ The current environment serves development and a small number of known organizat
 |---|---|
 | Production database | European Union, **Frankfurt** (Neon `aws-eu-central-1`), unless a technical or commercial reason says otherwise |
 | Application functions | European Union, Frankfurt (Vercel `fra1`) |
-| Independent encrypted backups | European Union, Paris (recommended: Scaleway), with a provider different from the database's |
+| Independent encrypted backups | European Union, Paris: in place (Azure, a provider different from the database's). A second copy under EU company law (Scaleway) is recommended |
 
 The move is a rehearsed platform operation (`docs/operations/HOSTING-EU-AND-COSTS.md`, section 4). The US project stays ready for a rollback until the move is proven.
 

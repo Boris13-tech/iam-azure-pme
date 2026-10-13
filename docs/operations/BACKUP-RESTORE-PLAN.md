@@ -50,9 +50,9 @@ Classes:
 
 | # | Finding | Evidence | Why it matters |
 |---|---|---|---|
-| F1 | **No independent backup.** Every backup is a branch of the same project, in the same account, provider and region, sharing storage with `main` | Inventory | The loss of the project or the account, an account compromise or a provider incident loses every backup at once. Today we **cannot** prove that LUXIA comes back after losing the database |
+| F1 | **RESOLVED 2026-10-13** (`docs/certification/E1-BACKUP-RESTORE-DRILL-B-2026-10-13.md`). Was: **no independent backup.** Every backup is a branch of the same project, in the same account, provider and region, sharing storage with `main` | Inventory | The loss of the project or the account, an account compromise or a provider incident loses every backup at once. Today we **cannot** prove that LUXIA comes back after losing the database |
 | F2 | Point-in-time restore covers only 6 hours | `history_retention_seconds` | Corruption noticed after 6 hours can only go back to the latest rollback point. Data loss could be days |
-| F3 | No restore has ever been tested end to end (restore, then the application running on it) | No drill on record | RTO and RPO are unknown |
+| F3 | **RESOLVED for the database 2026-10-13** (Drill B; the switch of the application is not yet rehearsed). Was: no restore had ever been tested end to end (restore, then the application running on it) | No drill on record | RTO and RPO are unknown |
 | F4 | The branch quota is full | 10/10 | Clone rehearsals, our main safety practice before migrations, are blocked. Branch-per-change does not scale |
 | F5 | Free and Hobby plans, US regions | Inventory | Commercial and legal, not only technical: no service commitment, data residency in the US. ASSUMPTION to confirm: Vercel's terms reserve Hobby for non-commercial use |
 | F6 | Backups hold the same personal data as Production | Copies of `main` | Retention must fit the privacy policy: deleted data survives in backups until they expire |
@@ -81,7 +81,7 @@ Classes:
 
 - **Needs one free branch slot.** `br-misty-scene-ahhdjk9z` expires on its own on **2026-10-15 03:37Z**. The drill can run then, with no deletion.
 
-**Drill B, losing the Neon project** (the real disaster case), as decided on 2026-10-13. It starts from an **independent backup** and proves the whole chain:
+**Drill B, losing the Neon project** (the real disaster case), as decided on 2026-10-13. **Done on 2026-10-13: PASS** (`docs/certification/E1-BACKUP-RESTORE-DRILL-B-2026-10-13.md`). The blank environment was an empty Neon project in Frankfurt, in a separate Neon organization; Docker was not used. It starts from an **independent backup** and proves the whole chain:
 1. a blank environment;
 2. restore;
 3. schema and migrations;

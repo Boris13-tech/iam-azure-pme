@@ -8,7 +8,8 @@
 |---|---|---|---|---|
 | **Neon** | Managed PostgreSQL database (Production and its branch backups) | All customer data (section 3 of `PRIVACY-POLICY.md`) | US East (`aws-us-east-1`, on AWS) | Free plan today. Target: a project in Frankfurt (`aws-eu-central-1`) on a paid plan before a commercial beta (`docs/operations/HOSTING-EU-AND-COSTS.md`) |
 | **Vercel** | Hosting of the web application and its server functions | Customer data in transit through the application; request logs kept by Vercel **[TO BE CONFIRMED: content and retention of Vercel logs]** | US East (`iad1`) | Hobby plan today, which Vercel reserves for personal, non-commercial use. Pro plan and the Frankfurt functions region before a commercial beta |
-| **GitHub** | Source code, continuous integration | **None.** CI uses synthetic test data in a database that is destroyed after each run | US | The operator's GitHub account |
+| **Microsoft Azure** (Blob Storage) | Independent backups of the database, every 6 hours, kept 30 days | **Encrypted files only.** They are encrypted before they leave the backup job, with a key that only LUXIA holds; Microsoft never has the key | France Central (Paris), EU, 3 zones | Since 2026-10-13, the operator's own Azure subscription. Deletion refused during the retention period (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`) |
+| **GitHub** | Source code, continuous integration, and the backup job (GitHub Actions) | CI: **none**, synthetic test data in a database destroyed after each run. Backup job: the database passes through the job's temporary machine **only to be encrypted**; only ciphertext is written to disk, and the machine is discarded after each run | US | The operator's GitHub account |
 
 ## Used only by organizations that choose them
 
@@ -27,7 +28,7 @@
 
 | Subprocessor | For | Location | Status |
 |---|---|---|---|
-| Scaleway | Encrypted independent backups (object storage with lock). Only the encrypted file is stored; the key stays with LUXIA | Paris, EU | Recommended, waiting for the operator's decision (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`) |
+| Scaleway | A second copy of the encrypted backups, under EU company law | Paris, EU | Recommended later (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`) |
 | An e-mail or notification provider | Invitations, security notices | EU preferred | Not chosen (`docs/architecture/NOTIFICATION-CONTRACT.md`) |
 | A monitoring provider | Availability and error alerts | EU preferred | Not chosen |
 

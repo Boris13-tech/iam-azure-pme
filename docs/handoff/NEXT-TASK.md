@@ -21,10 +21,13 @@ First Admin / Break-glass v1 status: **B1, migration, B3, B2, B4, B5: all PASS i
 ## Priorities (operator order of 2026-10-12, refined with the post-B5 evidence)
 
 1. **Done, PRODUCTION VERIFIED 2026-10-13: T0 audit integrity.** The journal and the sign-in evidence are append-only for application and ordinary operator roles (`docs/certification/T0-AUDIT-APPEND-ONLY-RELEASE-2026-10-13.md`). It is not cryptographic immutability, which belongs to Trust Ledger.
-2. **P1, backup and restore:** follow `docs/operations/BACKUP-RESTORE-PLAN.md`:
-   - an independent, encrypted backup in EU object storage;
-   - Drill B from that backup;
-   - Drill A when a branch slot frees on 2026-10-15.
+2. **Done, PRODUCTION PASS 2026-10-13: E1 backup and restore** (`docs/certification/E1-BACKUP-RESTORE-DRILL-B-2026-10-13.md`):
+   - an encrypted backup every 6 hours in EU object storage;
+   - Drill B identical, RPO 2 min 7 s, 81 s.
+
+   Still to do:
+   - **operator:** key custody, and the immutability lock;
+   - **Claude:** rehearse the switch of the application; Drill A when a branch slot frees on 2026-10-15; a backup freshness alert in the Ops block.
 3. **P1, minimum observability:** HTTP availability, server errors, latency, database availability, abnormal authentication failures, backup failures, quota saturation, critical security events, and an alert channel.
 4. **P1 before a commercial beta:**
    - EU hosting (Frankfurt by default), as a rehearsed platform migration;
@@ -42,11 +45,31 @@ Operator decisions of 2026-10-13 and the readiness gate (`UNKNOWN`, `DESIGNED`, 
 - **Authentication navigation:** the « Authentification » link needs `providers.read`, so members reach their recovery codes only through the R5 notice or the URL.
 - **B4 rows written with the workstation clock** (`REVOKE_SESSIONS`, `DISABLE_ACCOUNT`): phase 1 of the time convention.
 
-## Then
+## Then (commercial order, operator decision of 2026-10-13)
 
-1. **PR #12 Providers Management** (very stale), only after the P1 items, unless a customer depends on it.
-2. Support and escalation, billing and licensing, customer and API documentation, a demo environment.
-3. Private Beta, then GA.
+**E1 Backup/Restore (done) → PR #12 Sovereign Providers → Ops/Monitoring → Legal final review → pilot offer → 3 to 5 customers → Billing, SLA, pentest → GA.**
+
+1. **PR #12, rewritten as the LUXIA Sovereign Provider & Federation Layer.** It is never merged as it stands.
+   - **Principles:**
+     - LUXIA is the authority; a provider only proves an identity;
+     - provider-neutral core, with a generic OIDC contract first; Entra and Google are adapters;
+     - LUXIA_LOCAL stays first-class;
+     - no permission is imported implicitly;
+     - tenant-scoped connections;
+     - secrets by reference only;
+     - every provider action is journaled;
+     - fail closed;
+     - disabling a provider never removes a Subject;
+     - no regression of B1 to B5, T0 or RLS.
+   - **Steps:**
+     1. compare the 46 old files with `main`;
+     2. classify each as reusable, to rewrite, or obsolete;
+     3. **design document before any code**;
+     4. certification plan for Entra, generic OIDC and LUXIA_LOCAL;
+     5. no merge and no Production before a rehearsal and approval.
+2. Ops/Monitoring.
+3. Support and escalation, billing and licensing, customer and API documentation, a demo environment.
+4. Private beta, then GA.
 
 ## Rules
 
@@ -60,4 +83,4 @@ Operator decisions of 2026-10-13 and the readiness gate (`UNKNOWN`, `DESIGNED`, 
   - new data exposure;
   - major product decisions;
   - spending.
-- Any change to PR #12 needs approval.
+- PR #12: the old branch is never merged as it stands. Its rewrite starts with a design document, and needs approval before any merge or Production step.

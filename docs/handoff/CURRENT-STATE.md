@@ -1,5 +1,27 @@
 # LUXIA Identity — CURRENT STATE
 
+> **2026-10-13 ~13:15Z — E1 INDEPENDENT BACKUP AND DRILL B: PRODUCTION PASS** (`docs/certification/E1-BACKUP-RESTORE-DRILL-B-2026-10-13.md`).
+> - `main` is `2999b0d` (PR #57).
+> - **Backups:**
+>   - encrypted, every 6 hours (`.github/workflows/backup.yml`), to Azure Blob Storage in France Central;
+>   - protected against deletion for 30 days;
+>   - age key `age-x25519:686d7b74344c34c5`, the backup job holds the public key only.
+> - **Production role `luxia_backup`**, created 2026-10-13 12:51Z:
+>   - SELECT only, read-only by default;
+>   - BYPASSRLS, proven required;
+>   - rollback: `docs/operations/BACKUP-ROLE-ROLLBACK.sql`.
+> - **Drill B**, from the first real backup (13:09:23Z) into an empty Neon project in Frankfurt:
+>   - identical, table by table and object by object;
+>   - **RPO 2 min 7 s, 81 s to a verified database**;
+>   - the switch of the application is not yet rehearsed.
+> - The application and the 25 migrations are unchanged. Runbook: `docs/operations/BACKUP-RUNBOOK.md`.
+> - **Waiting for the operator:**
+>   - **key custody (P1)**: the password manager plus an encrypted recovery copy, then delete the workstation copy;
+>   - locking the immutability policy (irreversible).
+> - **Next (operator order of 2026-10-13):** PR #12 rewritten as the LUXIA Sovereign Provider & Federation Layer, design first; then Ops/Monitoring.
+>
+> This header supersedes older deployment rows below.
+
 > **2026-10-13 ~07:30Z — T0 AUDIT INTEGRITY: PRODUCTION VERIFIED** (`docs/certification/T0-AUDIT-APPEND-ONLY-RELEASE-2026-10-13.md`).
 > - `main` is `4d33a87` (PR #54). **25 migrations** in Production; the last one, `20261013090000_audit_append_only`, was applied 07:28:30–41Z. Rollback: `docs/operations/T0-AUDIT-APPEND-ONLY-ROLLBACK.sql`, rehearsed.
 > - `CanonicalAdminAuditEvent` and `AuthenticationEvidence` are append-only for `app_user` (INSERT and SELECT only) and for every ordinary statement of the owner role. Real attempts were refused in Production. This is not cryptographic immutability.
