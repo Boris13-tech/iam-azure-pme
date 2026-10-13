@@ -48,6 +48,11 @@ describe("Independent backup architecture", () => {
     expect(backup).toMatch(/--snapshot=\$\{hold\.snapshot\}/);
     expect(backup).toMatch(/takeInventory\(env, hold\.snapshot\)/);
     expect(backup).toMatch(/if \(bypassrls !== "t"\) fail/);
+    // The workstation emergency path (owner role standing in for luxia_backup) is refused inside GitHub Actions, and
+    // the workflow never sets it.
+    expect(backup).toContain(`const emergencyRole = process.env.GITHUB_ACTIONS === "true" ? null : process.env.LUXIA_BACKUP_EMERGENCY_ROLE || null;`);
+    expect(backup).toMatch(/if \(user !== "luxia_backup" && user !== emergencyRole\) fail/);
+    expect(workflow).not.toContain("LUXIA_BACKUP_EMERGENCY_ROLE");
     expect(backup).toMatch(/bin\("pg_dump"\), \["--format=custom"/);
     expect(backup).not.toMatch(/bin\("pg_dump"\), \[[^\]]*enable-row-security/);
     expect(read("scripts/backup/inventory.mjs")).toMatch(/SET LOCAL row_security = off;/);

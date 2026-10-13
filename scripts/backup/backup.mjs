@@ -41,7 +41,11 @@ if (ageVersion.error || ageVersion.status !== 0) fail("age is not available");
 const env = pgEnv(databaseUrl, "luxia-backup");
 const [user, bypassrls, serverVersionNum] = psql(env, "SELECT current_user, r.rolbypassrls, current_setting('server_version_num') FROM pg_roles r WHERE r.rolname = current_user;")
   .stdout.trim().split("|");
-if (user !== "luxia_backup") fail(`connected as ${user}, expected luxia_backup`);
+// Emergency catch-up when GitHub cannot run the job (docs/operations/BACKUP-RUNBOOK.md, section 2): from the
+// operator's workstation only, the owner role named in LUXIA_BACKUP_EMERGENCY_ROLE may stand in for luxia_backup.
+// The dump stays read-only and is encrypted to the same public key. Never accepted inside GitHub Actions.
+const emergencyRole = process.env.GITHUB_ACTIONS === "true" ? null : process.env.LUXIA_BACKUP_EMERGENCY_ROLE || null;
+if (user !== "luxia_backup" && user !== emergencyRole) fail(`connected as ${user}, expected luxia_backup`);
 // Without BYPASSRLS a dump either stops on the first tenant table or, with --enable-row-security, silently
 // exports none of their rows. A backup that holds part of the tenants is worse than none.
 if (bypassrls !== "t") fail("luxia_backup lacks BYPASSRLS: the dump would not hold every tenant");
@@ -110,7 +114,8 @@ const manifest = {
   source: { serverVersionNum: Number(serverVersionNum), migrations: inventory.meta.migrations, lastMigration: inventory.meta.lastMigration, tables: summary.tables },
   excludedSchemas,
   tools: { pgDump: pgDump.version, age: ageVersion.stdout.trim() },
-  run: { repository: process.env.GITHUB_REPOSITORY || null, commit: process.env.GITHUB_SHA || null, runId: process.env.GITHUB_RUN_ID || null },
+  run: { repository: process.env.GITHUB_REPOSITORY || null, commit: process.env.GITHUB_SHA || null, runId: process.env.GITHUB_RUN_ID || null,
+    role: user, emergency: user !== "luxia_backup" },
   timings, files: files.map(({ contentType, ...file }) => file),
 };
 writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2));
