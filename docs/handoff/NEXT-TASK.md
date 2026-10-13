@@ -31,7 +31,7 @@ First Admin / Break-glass v1 status: **B1, migration, B3, B2, B4, B5: all PASS i
      - **P1:** an outside alert when a backup is missing, because GitHub dropped the first scheduled run;
      - rehearse the switch of the application;
      - Drill A when a branch slot frees on 2026-10-15.
-3. **P1, minimum observability:** HTTP availability, server errors, latency, database availability, abnormal authentication failures, backup failures, quota saturation, critical security events, and an alert channel.
+3. **Backup freshness done, PRODUCTION PASS 2026-10-13** (`docs/certification/E4-BACKUP-FRESHNESS-ALERT-2026-10-13.md`): an hourly trigger from Azure, and an alert outside GitHub. **Still P1, the rest of minimum observability:** HTTP availability, server errors, latency, database availability, abnormal authentication failures, backup failures, quota saturation, critical security events, and an alert channel.
 4. **P1 before a commercial beta:**
    - EU hosting (Frankfurt by default), as a rehearsed platform migration;
    - the legal drafts (`DRAFT — LEGAL REVIEW REQUIRED`).

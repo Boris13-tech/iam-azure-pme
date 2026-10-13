@@ -6,9 +6,9 @@ name: Independent backup
 # repository): the script prints no row count, no connection detail and no secret.
 on:
   schedule:
-    # Every hour. GitHub may delay or drop a scheduled run (the first one, 2026-10-13 18:23Z, never started): the next
-    # hour catches up on its own. If no complete backup lands for 3 hours, an Azure alert outside GitHub e-mails the
-    # operator (scheduled query luxia-backup-freshness; runbook docs/operations/BACKUP-RUNBOOK.md, section 2).
+    # The hourly trigger is the Azure Logic App luxia-backup-dispatcher (workflow_dispatch at :53 UTC): GitHub's
+    # scheduler has never run this repository's schedules. This schedule is only a spare. If no complete backup lands
+    # for 3 hours, an Azure alert e-mails the operator (runbook docs/operations/BACKUP-RUNBOOK.md, section 2).
     - cron: '23 * * * *'
   workflow_dispatch:
 
