@@ -1,6 +1,8 @@
 # LUXIA Sovereign Provider & Federation Layer: design (rewrite of PR #12)
 
-Status: **DESIGN DRAFT, for the operator's approval.** No code, no migration and no Production change before the decisions in section 9 are approved and each phase is rehearsed.
+Status: **APPROVED by the operator on 2026-10-13** (decisions in section 9).
+- No migration and no Production change before each phase is rehearsed and passes its gate.
+- F1 may start.
 
 Origin: operator decision of 2026-10-13.
 - PR #12 joins the critical path to commercial launch. It is **never merged as it stands**: it is rewritten on today's `main`.
@@ -280,6 +282,15 @@ Each migration follows the house rule:
 | The scope of a generic IdP is very large (vendor differences) | Strict OIDC only (code + PKCE, a signed ID token). Implicit and hybrid flows are refused. Each vendor proven by certification, not assumed |
 
 ## 9. Decisions for the operator
+
+**Decided on 2026-10-13, confirmed directly:**
+- D1: approved;
+- D2: Google as plain OIDC, plus a temporary self-hosted Keycloak in the EU;
+- D3: QUARANTINE revokes the sessions of the connection, after a dry run that counts them;
+- D5: close PR #12 and keep its branch.
+
+D4 and D6 follow the recommendations below.
+
 
 | # | Decision | Recommendation |
 |---|---|---|
