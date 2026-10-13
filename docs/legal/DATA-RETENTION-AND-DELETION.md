@@ -15,7 +15,7 @@
 | People, accounts, passkeys | Until disabled, retired or revoked by an administrator; records kept | No hard deletion in the product |
 | A closed organization (status CLOSED) | Everything is kept; sign-in is impossible | No; customer deletion is out of scope of v1 |
 | Database rollback points (Neon branches) | 14 days after a certified release (target policy); 6-hour point-in-time history | Yes, by expiry |
-| Independent backups (since 2026-10-13) | Every 6 hours, encrypted; each version protected against deletion for 30 days. Expired versions are not removed automatically yet | Not yet: a lifecycle rule comes with the periods agreed with counsel |
+| Independent backups (since 2026-10-13) | Every 2 hours, encrypted; each version protected against deletion for 30 days. Expired versions are not removed automatically yet | Not yet: a lifecycle rule comes with the periods agreed with counsel |
 
 **Conclusion:** today LUXIA keeps nearly everything with no limit. That is not acceptable for a commercial service. It must be fixed before the beta (section 2), and the privacy policy must not promise otherwise in the meantime.
 
