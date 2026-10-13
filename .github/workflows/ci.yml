@@ -75,45 +75,8 @@ jobs:
 
     - name: Bootstrap RLS runtime role
       run: |
-        cat << 'EOF' > bootstrap.sql
-        DO
-        $do$
-        BEGIN
-           IF NOT EXISTS (
-              SELECT FROM pg_catalog.pg_roles
-              WHERE rolname = 'app_user') THEN
-              CREATE ROLE app_user LOGIN PASSWORD 'app_password'
-                NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-           END IF;
-        END
-        $do$;
-
-        GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
-        -- app_user is created after migrations in this ephemeral CI database.
-        GRANT EXECUTE ON FUNCTION public.luxia_sod_scope_contains(TEXT,TEXT,TEXT,TEXT) TO app_user;
-        -- Customer Self-Onboarding v1: same grants as the migration gives app_user in Production.
-        GRANT EXECUTE ON FUNCTION public.luxia_rate_limit_hit(TEXT,TEXT,INTEGER,INTEGER) TO app_user;
-        GRANT EXECUTE ON FUNCTION public.luxia_signup_reserve(TEXT,TEXT,JSONB,INTEGER) TO app_user;
-        GRANT EXECUTE ON FUNCTION public.luxia_signup_consume(TEXT,TEXT) TO app_user;
-        GRANT EXECUTE ON FUNCTION public.luxia_invitation_resolve(TEXT) TO app_user;
-        GRANT EXECUTE ON FUNCTION public.luxia_login_decoy(TEXT) TO app_user;
-        -- First Admin / Break-glass v1: same grants as the migration gives app_user in Production.
-        GRANT EXECUTE ON FUNCTION public.luxia_organization_lock_active(TEXT) TO app_user;
-        GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
-        GRANT CONNECT ON DATABASE luxia_db TO app_user;
-        GRANT USAGE ON SCHEMA public TO app_user;
-        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
-        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
-        -- Mirror the Production grants of Customer Self-Onboarding v1 (migration DO block).
-        REVOKE ALL ON "SignupCode", "RateLimitBucket", "RateLimitConfig" FROM app_user;
-        REVOKE ALL ON "OrganizationDomain", "Invitation" FROM app_user;
-        GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;
-        -- T0: the journal and the sign-in evidence are append-only (same as the migration gives app_user in Production).
-        REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEvidence" FROM app_user;
-        EOF
-
         PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
-        psql -v ON_ERROR_STOP=1 "$PSQL_URL" -f bootstrap.sql
+        psql -v ON_ERROR_STOP=1 "$PSQL_URL" -f scripts/ci/bootstrap-app-user.sql
 
     - name: Run Security Tests
       run: npm run test:security
@@ -142,6 +105,92 @@ jobs:
       run: npx tsx scripts/generate-cutover-report.ts
       env:
         DATABASE_URL: ${{ env.DATABASE_URL }}
+
+  # Independent backup (docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md), proven end to end on every change:
+  # the backup role reads everything and writes nothing; a backup restores into a blank database identical, table
+  # by table and object by object; and the application's PostgreSQL suites pass on the restored database.
+  backup-restore-roundtrip:
+    runs-on: ubuntu-24.04
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: prisma
+          POSTGRES_PASSWORD: prisma_password
+          POSTGRES_DB: luxia_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prisma -d luxia_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public
+      DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      LUXIA_RESOURCE_RLS: 'true'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci --legacy-peer-deps
+
+    - name: Install the PostgreSQL 17 client and age (as the backup workflow does)
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y -q postgresql-common age
+        sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+        sudo apt-get install -y -q postgresql-client-17
+        echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
+
+    - name: Migrate and bootstrap the runtime role
+      run: |
+        npx prisma migrate deploy
+        "$PG_BIN/psql" -v ON_ERROR_STOP=1 "${DATABASE_MIGRATION_URL%%\?*}" -f scripts/ci/bootstrap-app-user.sql
+      env:
+        DATABASE_URL: ${{ env.DATABASE_MIGRATION_URL }}
+
+    - name: Fill the database with many tenants (the PostgreSQL suites leave their fixtures)
+      run: npm run test:resources
+
+    - name: Create the backup role exactly as in Production
+      run: |
+        "$PG_BIN/psql" -v ON_ERROR_STOP=1 "${DATABASE_MIGRATION_URL%%\?*}" -f scripts/backup/luxia-backup-role.sql
+        LUXIA_OWNER_DATABASE_URL="${DATABASE_MIGRATION_URL%%\?*}" node scripts/backup/set-backup-password.mjs "$RUNNER_TEMP/backup.url"
+
+    - name: The backup role reads every tenant and can change nothing
+      run: LUXIA_BACKUP_DATABASE_URL="$(cat "$RUNNER_TEMP/backup.url")" npx vitest run tests/backup
+
+    - name: Back up with a throwaway key (encryption with the public key only)
+      run: |
+        age-keygen -o "$RUNNER_TEMP/ci.agekey" 2>/dev/null
+        age-keygen -y "$RUNNER_TEMP/ci.agekey" > "$RUNNER_TEMP/ci-recipient.txt"
+        LUXIA_BACKUP_DATABASE_URL="$(cat "$RUNNER_TEMP/backup.url")" LUXIA_BACKUP_RECIPIENT_FILE="$RUNNER_TEMP/ci-recipient.txt" \
+          node scripts/backup/backup.mjs --out "$RUNNER_TEMP/backup"
+
+    - name: Restore into a blank database and compare with the backup's inventory
+      run: |
+        "$PG_BIN/psql" -v ON_ERROR_STOP=1 "${DATABASE_MIGRATION_URL%%\?*}" -c "CREATE DATABASE luxia_restored"
+        LUXIA_RESTORE_TARGET_URL=postgresql://prisma:prisma_password@localhost:5432/luxia_restored \
+          node scripts/backup/restore.mjs --from-dir "$RUNNER_TEMP/backup" --identity "$RUNNER_TEMP/ci.agekey" --report "$RUNNER_TEMP/restore-report.json"
+
+    - name: The application's PostgreSQL suites pass on the restored database
+      run: |
+        npm run test:resources
+        npm run test:security
+      env:
+        DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored?schema=public
+        DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored?schema=public
 
   production-activation:
     if: "github.event_name == 'push' && github.event.head_commit.message == 'ops: execute production activation gate'"
