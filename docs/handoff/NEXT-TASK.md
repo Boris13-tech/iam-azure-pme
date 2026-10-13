@@ -14,40 +14,50 @@ Read `docs/handoff/CURRENT-STATE.md` first.
 - 2026-10-11: **B3 organization lifecycle enforcement: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B3-RELEASE-2026-10-11.md`, notes in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1.md`).
 - 2026-10-12: **B2 recovery codes and recovery-only session: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-B2-RECOVERY-DESIGN.md`). R6 ran on the test organization `luxia-cert-b2-r6`, later CLOSED by B4.
 - 2026-10-12: **B4 operator break-glass procedure: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B4-RELEASE-2026-10-12.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-B4-OPERATOR-DESIGN.md`). The Lab and `luxia-cert-b2-r6` are CLOSED through the procedure; the journal-time fix (PR #50) is merged.
+- 2026-10-12: **B5 visibility for the customer: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B5-RELEASE-2026-10-12.md`). **First Admin / Break-glass v1 is complete.**
 
-First Admin / Break-glass v1 status: **B1 PASS → migration PASS → B3 PASS → B2 PASS → B4 PASS → next = B5**.
+First Admin / Break-glass v1 status: **B1, migration, B3, B2, B4, B5: all PASS in Production.**
 
-## Next objective: First Admin / Break-glass v1, in the order approved by the operator
+## Priorities (operator order of 2026-10-12, refined with the post-B5 evidence)
 
-1. **B5, next, design first**: visibility and posture:
-   - durable second administrator;
-   - recovery codes created;
-   - French labels for operator actions and for `RECOVERY.*` and `RECOVERY_CODES.*`;
-   - a recovery session shown as such (not « Clé d'accès ») in « Mes sessions ».
+1. **P1, audit integrity first (T0):** the journal and the sign-in evidence become append-only for application and ordinary operator roles. That means a database guard and the grants revoked from `app_user`. It is not cryptographic immutability, which belongs to Trust Ledger. It is small and protective, and it is the prerequisite of every transparency promise. See `docs/architecture/LUXIA-OPERATOR-TRANSPARENCY.md`.
+2. **P1, backup and restore:** follow `docs/operations/BACKUP-RESTORE-PLAN.md`:
+   - an independent, encrypted backup in EU object storage;
+   - Drill B from that backup;
+   - Drill A when a branch slot frees on 2026-10-15.
+3. **P1, minimum observability:** HTTP availability, server errors, latency, database availability, abnormal authentication failures, backup failures, quota saturation, critical security events, and an alert channel.
+4. **P1 before a commercial beta:**
+   - EU hosting (Frankfurt by default), as a rehearsed platform migration;
+   - the legal drafts (`DRAFT — LEGAL REVIEW REQUIRED`).
+5. **P2:**
+   - time convention phases 1 and 2;
+   - the provider-neutral notification contract (`Notification → Channel Adapter`);
+   - « Interventions de LUXIA » (T1), then Trust Ledger v0 (T2).
 
-## Small follow-ups (each needs its own approval)
+Operator decisions of 2026-10-13 and the readiness gate (`UNKNOWN`, `DESIGNED`, `IMPLEMENTED`, `VERIFIED`, `PRODUCTION VERIFIED`): `docs/product/ENTERPRISE-READINESS.md`.
 
-- **Unused function:** drop `luxia_login_decoy` (migration).
-- **Journal labels:** add French labels for `BREAK_GLASS.*` (part of B5).
-- **Checklist visibility:** show the onboarding checklist only to administrators, to avoid `ONBOARDING.CHECKLIST.READ.DENIED` noise for members.
-- **Authentication navigation:** the « Authentification » link needs `providers.read`, so members reach their recovery codes only through the R5 notice or the URL. A small separate UX PR if needed (operator decision, 2026-10-12).
+## Small follow-ups
 
-## Then (operator roadmap)
+- **Unused function:** drop `luxia_login_decoy`. It is a migration with a DROP, so it needs operator approval.
+- **Authentication navigation:** the « Authentification » link needs `providers.read`, so members reach their recovery codes only through the R5 notice or the URL.
+- **B4 rows written with the workstation clock** (`REVOKE_SESSIONS`, `DISABLE_ACCOUNT`): phase 1 of the time convention.
 
-1. **PR #12 Providers Management.** It is very stale: realign it on `main`, resolve the conflicts, check that it works with multi-organization and self-onboarding, then certify real providers again.
-2. Enterprise topics:
-   - observability;
-   - backup and restore with RTO/RPO;
-   - support and escalation;
-   - billing and licensing;
-   - privacy, DPA and GDPR;
-   - security incident response;
-   - customer and API documentation;
-   - a demo environment.
+## Then
+
+1. **PR #12 Providers Management** (very stale), only after the P1 items, unless a customer depends on it.
+2. Support and escalation, billing and licensing, customer and API documentation, a demo environment.
 3. Private Beta, then GA.
 
-## Forbidden
+## Rules
 
-- Production grants or business-data mutation outside an approved ceremony.
-- Merge, deploy, env or migration changes without explicit human approval.
-- Any change to PR12 without approval.
+- Low-risk Production changes follow the rule the operator confirmed on 2026-10-12. Conditions: reversible, full CI PASS, known rollback, no data or secret touched, no protection lowered, no trust model changed. Flow: analysis, decision, merge, deployment, verification, rollback if needed, report.
+- Operator approval stays required for:
+  - deletion;
+  - destructive or hard-to-reverse migrations;
+  - changes to the IAM, Trust or Policy model;
+  - lowering a protection;
+  - secrets and trust roots;
+  - new data exposure;
+  - major product decisions;
+  - spending.
+- Any change to PR #12 needs approval.
