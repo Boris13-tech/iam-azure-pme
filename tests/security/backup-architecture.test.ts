@@ -51,6 +51,10 @@ describe("Independent backup architecture", () => {
     expect(backup).toMatch(/bin\("pg_dump"\), \["--format=custom"/);
     expect(backup).not.toMatch(/bin\("pg_dump"\), \[[^\]]*enable-row-security/);
     expect(read("scripts/backup/inventory.mjs")).toMatch(/SET LOCAL row_security = off;/);
+    // Only declared platform schemas stay out (Neon Auth, unused by LUXIA); any other schema stops the backup.
+    expect(read("scripts/backup/inventory.mjs")).toContain(`export const PLATFORM_SCHEMAS = ["neon_auth"];`);
+    expect(backup).toMatch(/if \(unknownSchemas\.length\) fail\(/);
+    expect(backup).toMatch(/excludedSchemas\.map\(name => `--exclude-schema=\$\{name\}`\)/);
     // The log is public: one summary line, without connection details or counts per table, and no error message
     // quotes a connection string.
     expect(backup.match(/console\.log\(/g)).toHaveLength(1);

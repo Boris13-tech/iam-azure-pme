@@ -15,7 +15,7 @@ import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { takeInventory, summarize } from "./inventory.mjs";
+import { PLATFORM_SCHEMAS, summarize, takeInventory } from "./inventory.mjs";
 import { bin, fail, holdSnapshot, pgEnv, psql, toolMajor } from "./pg.mjs";
 
 const started = Date.now();
@@ -46,6 +46,12 @@ if (user !== "luxia_backup") fail(`connected as ${user}, expected luxia_backup`)
 // exports none of their rows. A backup that holds part of the tenants is worse than none.
 if (bypassrls !== "t") fail("luxia_backup lacks BYPASSRLS: the dump would not hold every tenant");
 if (pgDump.major < Math.floor(Number(serverVersionNum) / 10000)) fail(`pg_dump ${pgDump.major} is older than the server`);
+// Scope: everything except the declared platform schemas. An unknown schema stops the backup.
+const schemas = psql(env, "SELECT nspname FROM pg_namespace WHERE nspname NOT IN ('pg_catalog','information_schema','public') AND nspname !~ '^pg_(toast|temp)' ORDER BY 1;")
+  .stdout.split("\n").map(line => line.trim()).filter(Boolean);
+const unknownSchemas = schemas.filter(name => !PLATFORM_SCHEMAS.includes(name));
+if (unknownSchemas.length) fail(`schema(s) ${unknownSchemas.join(", ")} would be left out: grant them to luxia_backup or declare them as platform schemas`);
+const excludedSchemas = schemas.filter(name => PLATFORM_SCHEMAS.includes(name));
 
 // 3. One snapshot for the inventory and the dump.
 const hold = await holdSnapshot(env);
@@ -64,7 +70,8 @@ function hashing(target) {
 mark = Date.now();
 const clear = { hash: createHash("sha256"), bytes: 0 };
 const sealed = { hash: createHash("sha256"), bytes: 0 };
-const dump = spawn(bin("pg_dump"), ["--format=custom", "--compress=6", `--snapshot=${hold.snapshot}`, "--no-password", "--lock-wait-timeout=60000"],
+const dump = spawn(bin("pg_dump"), ["--format=custom", "--compress=6", `--snapshot=${hold.snapshot}`, "--no-password", "--lock-wait-timeout=60000",
+  ...excludedSchemas.map(name => `--exclude-schema=${name}`)],
   { env, stdio: ["ignore", "pipe", "pipe"] });
 const age = spawn(process.env.AGE_BIN || "age", ["--encrypt", "-r", recipient], { stdio: ["pipe", "pipe", "pipe"] });
 let dumpErr = ""; let ageErr = "";
@@ -101,6 +108,7 @@ const manifest = {
   format: "luxia-backup/1", id, path, keyId, recipient,
   snapshotAt: hold.snapshotAt, startedAt: new Date(started).toISOString(), finishedAt: new Date().toISOString(),
   source: { serverVersionNum: Number(serverVersionNum), migrations: inventory.meta.migrations, lastMigration: inventory.meta.lastMigration, tables: summary.tables },
+  excludedSchemas,
   tools: { pgDump: pgDump.version, age: ageVersion.stdout.trim() },
   run: { repository: process.env.GITHUB_REPOSITORY || null, commit: process.env.GITHUB_SHA || null, runId: process.env.GITHUB_RUN_ID || null },
   timings, files: files.map(({ contentType, ...file }) => file),

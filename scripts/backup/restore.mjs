@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { compareInventories, summarize, takeInventory } from "./inventory.mjs";
+import { USER_SCHEMAS, compareInventories, summarize, takeInventory } from "./inventory.mjs";
 import { bin, fail, pgEnv, psql } from "./pg.mjs";
 
 const decisionAt = new Date();
@@ -83,7 +83,7 @@ if (recorded.id !== manifest.id) fail("the inventory belongs to another backup")
 const env = pgEnv(target, "luxia-restore");
 await step("preflight", async () => {
   const [objects, serverVersionNum] = psql(env, `SELECT count(*), current_setting('server_version_num') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relkind IN ('r','p','v','m','S','f') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_(toast|temp)';`).stdout.trim().split("|");
+    WHERE c.relkind IN ('r','p','v','m','S','f') AND ${USER_SCHEMAS};`).stdout.trim().split("|");
   if (objects !== "0") fail(`the target is not blank (${objects} relations): refusing to restore over it`);
   if (Math.floor(Number(serverVersionNum) / 10000) < Math.floor(recorded.meta.serverVersionNum / 10000)) fail("the target server is older than the source");
 });

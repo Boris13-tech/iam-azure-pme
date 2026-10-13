@@ -4,7 +4,11 @@
 // It holds no personal data in clear: rows appear only as hashes, and it is stored encrypted next to the dump.
 import { jsonLines, psql } from "./pg.mjs";
 
-const USER_SCHEMAS = "n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_(toast|temp)'";
+// Schemas of the database platform, not of LUXIA, left out of the backup on purpose. On Neon, neon_auth is the
+// Neon Auth feature: enabled on the Production project, never used by LUXIA (0 user, 0 session, 2026-10-13).
+// backup.mjs fails on any other schema it does not know, so a LUXIA schema can never be skipped silently.
+export const PLATFORM_SCHEMAS = ["neon_auth"];
+export const USER_SCHEMAS = `n.nspname NOT IN ('pg_catalog','information_schema',${PLATFORM_SCHEMAS.map(s => `'${s}'`).join(",")}) AND n.nspname !~ '^pg_(toast|temp)'`;
 const ACL = (column, kind, owner) => `coalesce((SELECT string_agg(g, ',' ORDER BY g COLLATE "C") FROM (SELECT
   CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '*' ELSE '' END AS g
   FROM aclexplode(coalesce(${column}, acldefault(${kind}, ${owner}))) a) z), '')`;
@@ -53,7 +57,7 @@ const CATALOG = {
   extensions: `SELECT e.extname || ' ' || e.extversion FROM pg_extension e`,
   defaultPrivileges: `SELECT concat_ws(' ', pg_get_userbyid(d.defaclrole), coalesce(n.nspname, '*'), 'type=' || d.defaclobjtype::text,
       'acl=' || coalesce((SELECT string_agg(g, ',' ORDER BY g COLLATE "C") FROM (SELECT pg_get_userbyid(x.grantee) || ':' || x.privilege_type AS g FROM aclexplode(d.defaclacl) x) z), ''))
-    FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace`,
+    FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace WHERE n.oid IS NULL OR (${USER_SCHEMAS})`,
   // Security attributes of every role the schema refers to. Login, password, connection limit and settings
   // belong to the environment and are set at cutover, so they are recorded below but not compared.
   roleAttributes: `SELECT concat_ws(' ', r.rolname, 'super=' || r.rolsuper, 'bypassrls=' || r.rolbypassrls, 'createrole=' || r.rolcreaterole,
@@ -66,9 +70,9 @@ const REFERENCED_ROLES = `WITH referenced_roles(role) AS (
   UNION SELECT a.grantee FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a WHERE ${USER_SCHEMAS}
   UNION SELECT p.proowner FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE ${USER_SCHEMAS}
   UNION SELECT a.grantee FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, aclexplode(p.proacl) a WHERE ${USER_SCHEMAS}
-  UNION SELECT unnest(pol.polroles) FROM pg_policy pol
-  UNION SELECT d.defaclrole FROM pg_default_acl d
-  UNION SELECT a.grantee FROM pg_default_acl d, aclexplode(d.defaclacl) a
+  UNION SELECT unnest(pol.polroles) FROM pg_policy pol JOIN pg_class c ON c.oid = pol.polrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE ${USER_SCHEMAS}
+  UNION SELECT d.defaclrole FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace WHERE n.oid IS NULL OR (${USER_SCHEMAS})
+  UNION SELECT a.grantee FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace, aclexplode(d.defaclacl) a WHERE n.oid IS NULL OR (${USER_SCHEMAS})
   UNION SELECT n.nspowner FROM pg_namespace n WHERE ${USER_SCHEMAS}
 )`;
 
