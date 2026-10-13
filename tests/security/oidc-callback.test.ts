@@ -1,4 +1,5 @@
 import { adminPrisma } from "../helpers/admin-prisma";
+import { purgeTestOrganization } from "../helpers/purge-test-organization";
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { GET } from "../../app/auth/callback/route";
 import { NextRequest } from "next/server";
@@ -61,14 +62,17 @@ describe("OIDC Callback Security", () => {
 
   afterAll(async () => {
     await rawPrisma.authTransaction.deleteMany({});
-    // Security Journal v1: sign-in evidence now references the identity account.
-    await adminPrisma.authenticationEvidence.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.organization.deleteMany({ where: { id: orgId } });
+    // Security Journal v1: sign-in evidence now references the identity account. T0: evidence is
+    // append-only, so the test organization is purged through the test-database-only helper.
+    await purgeTestOrganization(async (tx) => {
+      await tx.authenticationEvidence.deleteMany({ where: { organizationId: orgId } });
+      await tx.session.deleteMany({ where: { organizationId: orgId } });
+      await tx.identityAccount.deleteMany({ where: { organizationId: orgId } });
+      await tx.subject.deleteMany({ where: { organizationId: orgId } });
+      await tx.tenant.deleteMany({ where: { organizationId: orgId } });
+      await tx.providerConnection.deleteMany({ where: { organizationId: orgId } });
+      await tx.organization.deleteMany({ where: { id: orgId } });
+    });
   });
 
   it("should reject if no cookies found (no state)", async () => {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTenantDb } from "../../lib/db/scoped-client";
 import { adminPrisma } from "../helpers/admin-prisma";
+import { purgeTestOrganization } from "../helpers/purge-test-organization";
 
 describe("Phase 6D authentication evidence RLS", () => {
   const org = randomUUID(), tenantA = randomUUID(), tenantB = randomUUID(), provider = randomUUID();
@@ -21,12 +22,15 @@ describe("Phase 6D authentication evidence RLS", () => {
     await adminPrisma.authenticationEvidence.createMany({ data: [evidence(tenantA, subjectA, accountA, "op-a"), evidence(tenantB, subjectB, accountB, "op-b")] });
   });
   afterAll(async () => {
-    await adminPrisma.authenticationEvidence.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.identityAccount.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.subject.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.tenant.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.organization.deleteMany({ where: { id: org } });
+    // T0: evidence is append-only, so the test organization is purged through the test-database-only helper.
+    await purgeTestOrganization(async (tx) => {
+      await tx.authenticationEvidence.deleteMany({ where: { organizationId: org } });
+      await tx.identityAccount.deleteMany({ where: { organizationId: org } });
+      await tx.subject.deleteMany({ where: { organizationId: org } });
+      await tx.providerConnection.deleteMany({ where: { organizationId: org } });
+      await tx.tenant.deleteMany({ where: { organizationId: org } });
+      await tx.organization.deleteMany({ where: { id: org } });
+    });
   });
 
   it("exposes only evidence in the active tenant", async () => {

@@ -205,6 +205,12 @@ jobs:
           GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
           GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
           GRANT EXECUTE ON FUNCTION public.luxia_organization_lock_active(TEXT) TO app_user;
+          -- Re-apply the narrower grants of later migrations, which the broad grant above would widen again
+          -- (same mirror as the CI bootstrap): Customer Self-Onboarding v1, and T0 (append-only audit trail).
+          REVOKE ALL ON "SignupCode", "RateLimitBucket", "RateLimitConfig" FROM app_user;
+          REVOKE ALL ON "OrganizationDomain", "Invitation" FROM app_user;
+          GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;
+          REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEvidence" FROM app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
