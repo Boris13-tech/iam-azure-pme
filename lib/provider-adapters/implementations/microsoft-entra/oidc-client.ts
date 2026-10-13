@@ -1,9 +1,9 @@
-import * as client from "openid-client";
 import {
   ProviderAdapterError,
   type ProviderOperationContext,
   type SecretResolver,
 } from "../..";
+import { OpenIdClientOidcGateway, type OidcClientConfig, type OidcProfile, type OidcVerifiedClaims } from "../oidc";
 import type {
   MicrosoftEntraAuthorizationResult,
   MicrosoftEntraConnectionConfig,
@@ -32,36 +32,38 @@ export interface MicrosoftEntraOidcGateway {
   ): Promise<string | null>;
 }
 
-export class OpenIdClientMicrosoftEntraGateway
-  implements MicrosoftEntraOidcGateway
-{
-  constructor(private readonly secrets: SecretResolver) {}
+/** Microsoft Entra as a profile of the generic OIDC core: a per-directory issuer and `oid` as the stable subject. */
+export const MICROSOFT_ENTRA_OIDC_PROFILE: OidcProfile = { displayName: "Microsoft Entra", subjectClaim: "oid" };
+
+/** The tenant-specific v2.0 issuer. The `common` and `organizations` endpoints are never used. */
+export function microsoftEntraIssuer(directoryTenantId: string): string {
+  return `https://login.microsoftonline.com/${directoryTenantId}/v2.0`;
+}
+
+export function microsoftEntraClaims(verified: OidcVerifiedClaims): MicrosoftEntraVerifiedClaims {
+  const claims = verified.claims;
+  return {
+    oid: verified.subject,
+    tid: typeof claims.tid === "string" ? claims.tid : "",
+    iss: verified.issuer,
+    email: stringClaim(claims.email),
+    preferredUsername: stringClaim(claims.preferred_username),
+    name: stringClaim(claims.name),
+  };
+}
+
+export class OpenIdClientMicrosoftEntraGateway implements MicrosoftEntraOidcGateway {
+  private readonly oidc: OpenIdClientOidcGateway;
+
+  constructor(secrets: SecretResolver) {
+    this.oidc = new OpenIdClientOidcGateway(secrets);
+  }
 
   async begin(
     context: ProviderOperationContext,
     config: MicrosoftEntraConnectionConfig,
   ): Promise<MicrosoftEntraAuthorizationResult> {
-    return this.withConfig(context, config, async (oidcConfig) => {
-      const codeVerifier = client.randomPKCECodeVerifier();
-      const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
-      const state = client.randomState();
-      const nonce = client.randomNonce();
-      const authorizationUrl = client.buildAuthorizationUrl(oidcConfig, {
-        redirect_uri: config.redirectUri,
-        scope: "openid profile email",
-        code_challenge: codeChallenge,
-        code_challenge_method: "S256",
-        state,
-        nonce,
-      });
-      return {
-        authorizationUrl: authorizationUrl.href,
-        state,
-        nonce,
-        codeVerifier,
-        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
-      };
-    });
+    return this.oidc.begin(context, MICROSOFT_ENTRA_OIDC_PROFILE, clientConfig(context, config));
   }
 
   async complete(
@@ -74,44 +76,7 @@ export class OpenIdClientMicrosoftEntraGateway
       expectedNonce: string;
     },
   ): Promise<MicrosoftEntraVerifiedClaims> {
-    return this.withConfig(context, config, async (oidcConfig) => {
-      const tokens = await client.authorizationCodeGrant(
-        oidcConfig,
-        new URL(input.currentUrl),
-        {
-          pkceCodeVerifier: input.codeVerifier,
-          expectedState: input.expectedState,
-          expectedNonce: input.expectedNonce,
-          idTokenExpected: true,
-        },
-      );
-      const claims = tokens.claims();
-      if (!claims) {
-        throw new ProviderAdapterError({
-          code: "AUTHENTICATION_FAILED",
-          message: "No claims in Microsoft Entra token",
-          safeDetails: { reason: "NO_CLAIMS" },
-        });
-      }
-      const oid = typeof claims.oid === "string" ? claims.oid : "";
-      const tid = typeof claims.tid === "string" ? claims.tid : "";
-      const iss = typeof claims.iss === "string" ? claims.iss : "";
-      if (!oid) {
-        throw new ProviderAdapterError({
-          code: "AUTHENTICATION_FAILED",
-          message: "Missing oid in Microsoft Entra token",
-          safeDetails: { reason: "MISSING_OID" },
-        });
-      }
-      return {
-        oid,
-        tid,
-        iss,
-        email: stringClaim(claims.email),
-        preferredUsername: stringClaim(claims.preferred_username),
-        name: stringClaim(claims.name),
-      };
-    });
+    return microsoftEntraClaims(await this.oidc.complete(context, MICROSOFT_ENTRA_OIDC_PROFILE, clientConfig(context, config), input));
   }
 
   async logoutUrl(
@@ -119,53 +84,24 @@ export class OpenIdClientMicrosoftEntraGateway
     config: MicrosoftEntraConnectionConfig,
     postLogoutRedirectUri: string,
   ): Promise<string | null> {
-    return this.withConfig(context, config, async (oidcConfig) => {
-      const endpoint = oidcConfig.serverMetadata().end_session_endpoint;
-      if (!endpoint) return null;
-      const url = new URL(endpoint);
-      url.searchParams.set("post_logout_redirect_uri", postLogoutRedirectUri);
-      return url.href;
+    return this.oidc.logoutUrl(context, MICROSOFT_ENTRA_OIDC_PROFILE, clientConfig(context, config), postLogoutRedirectUri);
+  }
+}
+
+function clientConfig(context: ProviderOperationContext, config: MicrosoftEntraConnectionConfig): OidcClientConfig {
+  if (!config.oidcClientId || !config.oidcClientSecret) {
+    throw new ProviderAdapterError({
+      code: "MISCONFIGURED",
+      message: "Missing Microsoft Entra OIDC configuration",
+      safeDetails: { providerConnectionId: context.providerConnectionId },
     });
   }
-
-  private async withConfig<T>(
-    context: ProviderOperationContext,
-    config: MicrosoftEntraConnectionConfig,
-    action: (oidcConfig: client.Configuration) => Promise<T>,
-  ): Promise<T> {
-    if (!config.oidcClientId || !config.oidcClientSecret) {
-      throw new ProviderAdapterError({
-        code: "MISCONFIGURED",
-        message: "Missing Microsoft Entra OIDC configuration",
-        safeDetails: { providerConnectionId: context.providerConnectionId },
-      });
-    }
-    try {
-      return await this.secrets.withSecret(
-        context,
-        config.oidcClientSecret,
-        (lease) =>
-          lease.use(async (secretBytes) => {
-            const secret = new TextDecoder().decode(secretBytes);
-            const issuer = new URL(
-              `https://login.microsoftonline.com/${config.directoryTenantId}/v2.0`,
-            );
-            const oidcConfig = await client.discovery(
-              issuer,
-              config.oidcClientId!,
-              secret,
-            );
-            return action(oidcConfig);
-          }),
-      );
-    } catch (error) {
-      if (error instanceof ProviderAdapterError) throw error;
-      throw new ProviderAdapterError({
-        code: "AUTHENTICATION_FAILED",
-        message: "Microsoft Entra OIDC operation failed",
-      });
-    }
-  }
+  return {
+    issuer: microsoftEntraIssuer(config.directoryTenantId),
+    clientId: config.oidcClientId,
+    clientSecret: config.oidcClientSecret,
+    redirectUri: config.redirectUri,
+  };
 }
 
 function stringClaim(value: unknown): string | undefined {

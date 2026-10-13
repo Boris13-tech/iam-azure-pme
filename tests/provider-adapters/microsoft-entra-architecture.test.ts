@@ -7,28 +7,36 @@ const implementationRoot = path.join(
   root,
   "lib/provider-adapters/implementations/microsoft-entra",
 );
+// The generic OIDC core (sovereign design, F1): OpenID Connect is a standard, not a Microsoft dependency.
+const oidcCoreRoot = path.join(root, "lib/provider-adapters/implementations/oidc");
 const allowedImplementationImporters = new Set([
   "lib/auth/providers/entra.ts",
   "lib/graph.ts",
-  "lib/jwt.ts",
 ]);
 
 describe("Phase 6B Microsoft dependency boundary", () => {
-  it("confines Microsoft and OIDC SDK imports to the Entra implementation", () => {
+  it("confines Microsoft SDKs to the Entra implementation, and openid-client to the generic OIDC core", () => {
     const violations: string[] = [];
     for (const file of sourceFiles(path.join(root, "app")).concat(sourceFiles(path.join(root, "lib")))) {
       const relative = slash(path.relative(root, file));
-      const insideImplementation = file.startsWith(implementationRoot);
       for (const specifier of imports(fs.readFileSync(file, "utf8"))) {
-        if (
-          ["@azure/msal-node", "@microsoft/microsoft-graph-client", "openid-client"].includes(specifier) &&
-          !insideImplementation
-        ) {
+        if (["@azure/msal-node", "@microsoft/microsoft-graph-client"].includes(specifier) && !file.startsWith(implementationRoot))
           violations.push(`${relative} imports '${specifier}'`);
-        }
+        if (specifier === "openid-client" && !file.startsWith(oidcCoreRoot))
+          violations.push(`${relative} imports '${specifier}'`);
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  it("keeps the generic OIDC core vendor-neutral, and plain-HTTP discovery out of runtime code", () => {
+    for (const file of sourceFiles(oidcCoreRoot)) {
+      const content = fs.readFileSync(file, "utf8");
+      expect(content, slash(path.relative(root, file))).not.toMatch(/microsoft|entra|azure|google|graph|\btid\b|\boid\b/i);
+      expect(content).not.toMatch(/implementations\/(microsoft-entra|luxia-local|cloud-providers|enterprise-directory)/);
+    }
+    for (const file of sourceFiles(path.join(root, "app")).concat(sourceFiles(path.join(root, "lib"))))
+      expect(fs.readFileSync(file, "utf8"), slash(path.relative(root, file))).not.toContain("allowInsecureRequests");
   });
 
   it("allows application code to reach the Entra implementation only through compatibility facades", () => {
