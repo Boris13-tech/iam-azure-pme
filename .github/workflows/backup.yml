@@ -1,0 +1,42 @@
+name: Independent backup
+
+# Encrypted logical backup of the Production database, every 6 hours, to EU object storage that refuses deletion
+# (docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md, runbook docs/operations/BACKUP-RUNBOOK.md).
+# The job holds the backup PUBLIC key only: it can write backups, never read them. Its log is public (public
+# repository): the script prints no row count, no connection detail and no secret.
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    # Environment secrets, released to the main branch only.
+    environment: production-backup
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Install the PostgreSQL 17 client and age
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-common age
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q postgresql-client-17
+          echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
+
+      - name: Back up, encrypt, upload and read back
+        env:
+          LUXIA_BACKUP_DATABASE_URL: ${{ secrets.LUXIA_BACKUP_DATABASE_URL }}
+          LUXIA_BACKUP_CONTAINER_URL: ${{ secrets.LUXIA_BACKUP_CONTAINER_URL }}
+        run: node scripts/backup/backup.mjs

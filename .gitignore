@@ -148,3 +148,7 @@ docs/certification/operator-*-results.json
 
 # B4 operator break-glass evidence (local, never committed)
 .break-glass-evidence/
+
+# Independent backup: age private keys and local backup files (never committed)
+*.agekey
+luxia-backup-*/

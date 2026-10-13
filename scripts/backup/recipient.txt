@@ -1,0 +1,6 @@
+# LUXIA backup public key (age X25519). Not a secret: it can only encrypt.
+# keyId: age-x25519:686d7b74344c34c5 (first 16 hex characters of the SHA-256 of the key below)
+# Created 2026-10-13 with age-keygen 1.3.2 on the operator's workstation. The private key is never in Git, in CI,
+# in a backup or in a log; custody: docs/operations/BACKUP-RUNBOOK.md, section "Key custody".
+# Rotation: replace the key below; keep the old private key until every backup encrypted to it has expired.
+age1x8fv59gc6n9y8dygxm86q55v6g27ghz98gsjc5qqxfwyc0hlc9csjcxmyd

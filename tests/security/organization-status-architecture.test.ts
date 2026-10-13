@@ -69,7 +69,9 @@ describe("Organization.status / Session.scope migration architecture", () => {
   });
 
   it("grants the two runtime entry points in CI and in the Production activation gate", () => {
-    const ci = read(".github/workflows/ci.yml");
+    // The CI bootstrap lives in scripts/ci/bootstrap-app-user.sql; both CI PostgreSQL jobs run it.
+    expect(read(".github/workflows/ci.yml").match(/-f scripts\/ci\/bootstrap-app-user\.sql/g)).toHaveLength(2);
+    const ci = read("scripts/ci/bootstrap-app-user.sql");
     const gate = read(".github/workflows/production-activation-gate.yml");
     for (const fnName of ["luxia_session_resolve(TEXT)", "luxia_organization_lock_active(TEXT)"]) {
       expect(ci).toContain(`GRANT EXECUTE ON FUNCTION public.${fnName} TO app_user;`);
