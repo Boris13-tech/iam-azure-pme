@@ -184,6 +184,12 @@ jobs:
         LUXIA_RESTORE_TARGET_URL=postgresql://prisma:prisma_password@localhost:5432/luxia_restored \
           node scripts/backup/restore.mjs --from-dir "$RUNNER_TEMP/backup" --identity "$RUNNER_TEMP/ci.agekey" --report "$RUNNER_TEMP/restore-report.json"
 
+    - name: The restored database isolates every organization and keeps the journal append-only
+      run: node scripts/backup/verify-restored.mjs
+      env:
+        LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
+        LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored
+
     - name: The application's PostgreSQL suites pass on the restored database
       run: |
         npm run test:resources
