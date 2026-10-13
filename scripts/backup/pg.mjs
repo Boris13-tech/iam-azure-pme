@@ -41,7 +41,8 @@ export function psql(env, sql, { allowFailure = false } = {}) {
   const result = spawnSync(bin("psql"), ["-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1"], { env, input: sql, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   if (result.error) fail(`psql could not start: ${result.error.message}`);
   if (result.status !== 0 && !allowFailure) fail(`psql failed: ${(result.stderr || "").trim().split("\n").slice(-3).join(" | ")}`);
-  return { ok: result.status === 0, stdout: result.stdout, stderr: result.stderr };
+  // psql on Windows ends lines with CRLF: normalized so that values never carry a trailing \r.
+  return { ok: result.status === 0, stdout: result.stdout.replace(/\r\n/g, "\n"), stderr: result.stderr };
 }
 
 export function jsonLines(stdout) {
