@@ -15,7 +15,7 @@
 | People, accounts, passkeys | Until disabled, retired or revoked by an administrator; records kept | No hard deletion in the product |
 | A closed organization (status CLOSED) | Everything is kept; sign-in is impossible | No; customer deletion is out of scope of v1 |
 | Database rollback points (Neon branches) | 14 days after a certified release (target policy); 6-hour point-in-time history | Yes, by expiry |
-| Independent backups | Not in place | |
+| Independent backups (since 2026-10-13) | Every 6 hours, encrypted; each version protected against deletion for 30 days. Expired versions are not removed automatically yet | Not yet: a lifecycle rule comes with the periods agreed with counsel |
 
 **Conclusion:** today LUXIA keeps nearly everything with no limit. That is not acceptable for a commercial service. It must be fixed before the beta (section 2), and the privacy policy must not promise otherwise in the meantime.
 
@@ -29,7 +29,7 @@
 | Journal and sign-in records | **Per customer:** 1 year by default, configurable up to **[TO BE DECIDED]** years; LUXIA operator interventions kept at least as long as the customer contract plus **[TO BE DECIDED]** | Removal of whole time periods (for example monthly partitions) by a reviewed, journaled procedure, never row by row by the application. This keeps T0's rule: the application can never delete history |
 | Deleted or retired person | Name and identifiers replaced by a pseudonym after **[TO BE DECIDED]**; the journal keeps the pseudonymous identifier | Erasure request procedure (`DATA-SUBJECT-REQUESTS.md`) |
 | Closed organization | Everything deleted **[TO BE DECIDED, for example 90 days]** after closure, except what the law requires to keep; deletion recorded in the operator journal | Operator procedure, after a reversible quarantine period |
-| Independent backups | 30 daily and 12 monthly; locked against deletion during that time | Object lock and lifecycle (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`) |
+| Independent backups | 30 days (in place), and possibly 12 monthly copies **[TO BE DECIDED]**; protected against deletion during that time | Immutability and a lifecycle rule (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`) |
 
 ## 3. Tension to resolve with counsel: append-only versus erasure
 
@@ -40,7 +40,7 @@ The proposed answer:
 2. During that time, a person's identity can be **pseudonymized**. The journal refers to people by internal identifiers, and the names live in other tables, so erasing the name does not rewrite the journal.
 3. At the end of the period, whole periods are removed by a reviewed procedure.
 
-**Backups:** deleted data stays in locked backups until they expire. Counsel must confirm that this is acceptable, and how to say it.
+**Backups:** deleted data stays in the backups until they expire (30 days today; they cannot be deleted earlier, by design). Counsel must confirm that this is acceptable, and how to say it.
 
 ## Gaps to close before publication
 
