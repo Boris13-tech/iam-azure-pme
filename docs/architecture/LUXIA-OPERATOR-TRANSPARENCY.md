@@ -27,7 +27,7 @@ For every LUXIA intervention on the organization:
 | Changed something | `metadata.effects` (from/to, counts), `before` and `expected` | Action-specific counts |
 | Proof | `changeId` = `break-glass:<plan digest>`, `planDigest`, `toolVersion`, and the local evidence files of the operator | **No signed plan** |
 
-## 3. The gap that must be closed first: the record is not tamper-proof
+## 3. The gap that must be closed first: the record can be rewritten by ordinary roles
 
 **VERIFIED in Production, 2026-10-12:**
 - `CanonicalAdminAuditEvent` is protected against UPDATE and DELETE only for the `RESOURCE.ONBOARDING.*` and `RESOURCE.CAPABILITY.*` operations;
@@ -35,6 +35,10 @@ For every LUXIA intervention on the organization:
 - the owner role, the one the LUXIA operator uses, can change or delete anything, including its own `BREAK_GLASS.*` events.
 
 **No runtime code updates or deletes these rows today.** But an audit trail that the audited party can rewrite is not proof. Until this is closed, a transparency feature would give a false feeling of transparency.
+
+**Words matter.** The two steps give different guarantees, and the product must name each one exactly:
+- **After T0:** the right term is **append-only: modification forbidden to the application and to ordinary operator paths**. A privileged database owner can still rewrite history, for example by disabling the guard in a reviewed migration. T0 must not be called immutable.
+- **With Trust Ledger:** verifiable immutability (canonical payload, previous hash, event hash, checkpoint or signature). Until then, no document or sales material may claim that the journal is immutable.
 
 ## 4. Placement
 
@@ -61,9 +65,9 @@ For every LUXIA intervention on the organization:
 
 | Phase | What | Where | Priority |
 |---|---|---|---|
-| T0 | **Append-only journal and sign-in evidence:** a guard on UPDATE and DELETE for every row, and the UPDATE and DELETE grants revoked from `app_user`. No runtime code needs them | Identity (migration) | **P1**, prerequisite |
+| T0 | **Append-only journal and sign-in evidence** (modification forbidden to application and ordinary operator roles): a database guard on UPDATE, DELETE and TRUNCATE for every row, and those grants revoked from `app_user`. No runtime code needs them. Not cryptographic immutability | Identity (migration) | **P1**, prerequisite |
 | T1 | « Interventions de LUXIA » for administrators: the `BREAK_GLASS.*` events with the provable fields of section 2 only. Pre-B4 events are marked as such | Identity (view) | P2 |
-| T2 | Trust Ledger v0: per-tenant hash chain for operator events, verification, proof export | Trust Ledger | P2 |
+| T2 | Trust Ledger v0: per-tenant chain over the operator events (canonical payload, previous hash, event hash), verification, proof export. This is the first step that may be described as verifiable | Trust Ledger | P2 |
 | T3 | Customer checkpoints (the head hash given to the administrators) and a notice to administrators at each intervention. There is no e-mail or notification channel yet | Trust Ledger + notification | P3 |
 | T4 | Customer pre-approval of non-emergency interventions (plan, approval, apply, verify, record) | Policy | P3 |
 

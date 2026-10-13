@@ -81,13 +81,20 @@ Classes:
 
 - **Needs one free branch slot.** `br-misty-scene-ahhdjk9z` expires on its own on **2026-10-15 03:37Z**. The drill can run then, with no deletion.
 
-**Drill B, losing the Neon project** (the real disaster case):
-1. Make a logical dump of Production.
-2. Restore it into an empty PostgreSQL 17 outside Neon.
-3. Apply the same checks.
-4. Start the application against it, outside Production.
+**Drill B, losing the Neon project** (the real disaster case), as decided on 2026-10-13. It starts from an **independent backup** and proves the whole chain:
+1. a blank environment;
+2. restore;
+3. schema and migrations;
+4. integrity;
+5. application;
+6. authentication;
+7. IAM;
+8. audit.
 
-- **Needs an operator decision:** where Production data may be copied (a local Docker container on the operator machine, or an object store and region of choice). That copy is a new exposure of personal data. A PostgreSQL client in Docker is available on the operator machine.
+- The independent backup is: a consistent PostgreSQL export, encrypted with a LUXIA key, stored in EU object storage outside Neon, and checked by hash.
+- A local Docker PostgreSQL 17 may host the restored copy only for the time of the drill, and is destroyed afterwards. The operator's workstation is never a backup destination.
+- Measured each time: RPO, RTO, backup duration, restore duration, backup size, cost, manual steps and failure points.
+- In the long term, the drill runs automatically on a schedule.
 
 **Measures recorded for each drill:**
 - RTO: from the decision to restore until the application answers on the restored data;
@@ -119,8 +126,13 @@ Options:
 
 **Recommendation:** 1 and 2 together, with 3 as part of the independent backups. Shortening or deleting any existing branch stays an operator decision.
 
-## 8. Decisions that belong to the operator
+## 8. Decisions
 
-1. Paid plans (Neon, and Vercel for commercial use), and the regions for data and backups.
-2. Where the independent backups and the Drill B copy may live, and who holds the encryption key.
-3. Each deletion proposed in section 6.
+**Taken by the operator on 2026-10-13:**
+- the target Production region is the EU (Frankfurt by default), reached through a rehearsed migration before any commercial beta;
+- independent backups go to EU object storage, outside Neon and ideally outside the same account, with versioning or object lock, hash checks and a LUXIA-controlled key;
+- paid plans: the smallest serious commercial tier that meets an explicit requirement, with the costs documented.
+
+**Still the operator's:**
+- each spend;
+- each deletion proposed in section 6.

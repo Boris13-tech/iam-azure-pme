@@ -1,37 +1,62 @@
-# Enterprise readiness: what prevents a real company from trusting LUXIA with its identities
+# Enterprise readiness gate: what prevents a real company from trusting LUXIA with its identities
 
-Living list, started 2026-10-12 after First Admin / Break-glass v1 (B1 to B5 in Production). It separates **working** from **ready for a company**. Each item cites its evidence:
-- **VERIFIED**: observed;
-- **ASSUMPTION**: to be confirmed.
+A **gate**, not a note. Started 2026-10-12, after First Admin / Break-glass v1 (B1 to B5 in Production). It separates **working** from **ready for a company**.
 
-Priorities are P0 to P4. Updated at each release.
+**Status of each requirement:**
 
-## Blockers before a paying private beta
+| Status | Meaning |
+|---|---|
+| `UNKNOWN` | Not designed |
+| `DESIGNED` | A reviewed design exists |
+| `IMPLEMENTED` | Merged on `main` with tests |
+| `VERIFIED` | Proven by CI and a rehearsal |
+| `PRODUCTION VERIFIED` | Proven in Production with read-only evidence |
 
-| # | Blocker | Evidence | LUXIA fit | Priority |
-|---|---|---|---|---|
-| E1 | **The platform cannot prove it comes back after losing its database.** No backup outside the Neon project, 6 hours of point-in-time history, no restore ever tested | `docs/operations/BACKUP-RESTORE-PLAN.md` (VERIFIED) | Runtime / operations | **P1** |
-| E2 | **The audit trail can be rewritten.** The journal is append-only only for resource-onboarding events; the application role can update or delete the rest, and the sign-in evidence | `docs/architecture/LUXIA-OPERATOR-TRANSPARENCY.md` section 3 (VERIFIED in Production) | Identity → Trust Ledger | **P1** |
-| E3 | **Hosting plans and regions are not commercial-grade.** Neon Free, Vercel Hobby, both in the US East region; no service commitment | Inventory (VERIFIED). Hobby for non-commercial use only: ASSUMPTION, check the terms | Runtime / business | **P1** (operator decision) |
-| E4 | **No observability.** No error tracking, alerting, uptime check or status page; no logging library. LUXIA would learn about an outage from a customer | `package.json` (VERIFIED); no health route | Runtime / observability | **P1** |
-| E5 | **No privacy or legal basis.** No privacy policy, data processing agreement, retention rules or list of subprocessors (Neon, Vercel, Microsoft) | `docs/` (VERIFIED) | Business / legal | **P1** (operator) |
-| E6 | **No notification channel.** No e-mail. Invitations are links copied by hand; administrators are not told about sensitive events (operator intervention, new administrator, recovery code used) | `package.json` (VERIFIED) | Platform component | P2 |
-| E7 | **Single operator, single workstation.** Every Production operation runs from one Windows machine (runner tied to `%APPDATA%`, local Neon and Vercel sessions) | `docs/handoff/CURRENT-STATE.md` section 10 (VERIFIED) | Operations | P2 |
-| E8 | **No incident response.** No runbook beyond B4, no on-call, no way to inform customers during an incident | `docs/` (VERIFIED) | Operations | P2 |
-| E9 | **No export.** No export of identities, accesses or journal for the customer's own audits or portability | `app/api` (VERIFIED) | Identity / Trust Ledger | P2 |
-| E10 | **Never tested from outside.** No external penetration test | ASSUMPTION (none on record) | Security | P2 before GA, P3 before beta |
-| E11 | Administrators cannot revoke a person's passkey from the product (known limit S2); offboarding relies on disabling the account | `docs/handoff/CURRENT-STATE.md` (VERIFIED) | Identity | P2 |
-| E12 | Microsoft sign-ins are recorded as provider-attested: no proof of MFA, and the provider's own authentication time is not kept | `docs/architecture/LUXIA-TIME-CONVENTION.md` (VERIFIED) | Identity / Adapters | P3 |
-| E13 | Only Microsoft Entra and LUXIA passkeys: no Google, generic OIDC, SAML or SCIM | PR #12 (stale) | Adapters | P3 (expansion) |
-| E14 | Security decisions live in code, with no explicit policy | Architecture | Policy | P3 |
+A merged PR alone never makes a requirement done. Evidence is labelled VERIFIED (observed) or ASSUMPTION (to be confirmed). Priorities are P0 to P4. Updated at each release.
 
-## Already strong (keep it that way)
+## Decisions recorded (operator, 2026-10-13)
 
-- Forced row-level security per tenant; `app_user` is NOSUPERUSER and NOBYPASSRLS; certified across organizations.
-- Phishing-resistant sign-in (passkeys) with recovery codes and a recovery-only session (B2).
-- No organization can lose its last administrator (B1); organization status is enforced at sign-in and session level (B3).
-- Operator actions only through a closed, planned, digested, journaled procedure (B4), visible to the customer (B5).
-- Every release is certified in Production with read-only proofs.
+- **Region:**
+  - the default Production region for LUXIA is the European Union, Frankfurt unless a technical or commercial reason says otherwise;
+  - the current US East environment may stay during development;
+  - the move happens before any real commercial beta, as a rehearsed platform operation.
+  - In the long term, data residency becomes a property of the deployment and of the tenant, never a single-region architecture.
+- **Paid plans:** the smallest serious commercial tier that meets explicit backup, retention, monitoring and operating requirements. The costs are documented: minimum monthly, and at 10, 100 and 1,000 organizations. No upgrade without a requirement it resolves.
+- **Independent backups:**
+  - object storage in the EU, outside the Neon project and ideally outside the same account and failure domain;
+  - versioning or object lock where available;
+  - encrypted with a key LUXIA controls.
+  - The operator's workstation is not a backup destination; local Docker is allowed only for temporary, controlled restore drills.
+- **Legal basis:** drafts start now, marked `DRAFT — LEGAL REVIEW REQUIRED`. No compliance claim that has not been demonstrated.
+
+## Requirements before a paying private beta
+
+| # | Requirement (blocker today) | Evidence | LUXIA fit | Priority | Status |
+|---|---|---|---|---|---|
+| E1 | **Prove that LUXIA comes back after losing its database.** Today there is no backup outside the Neon project, history covers 6 hours, and no restore was ever tested | `docs/operations/BACKUP-RESTORE-PLAN.md` (VERIFIED) | Runtime / operations | **P1** | `DESIGNED` (inventory and policy); independent backups `UNKNOWN` |
+| E2 | **The audit trail is append-only for application and ordinary operator roles.** Today the application role can update or delete journal rows (except resource onboarding) and every sign-in evidence row | `docs/architecture/LUXIA-OPERATOR-TRANSPARENCY.md` section 3 (VERIFIED in Production) | Identity, then Trust Ledger | **P1** | `DESIGNED` (T0, next) |
+| E3 | **Commercial-grade hosting in the EU.** Today: Neon Free and Vercel Hobby, both in US East, no service commitment. ASSUMPTION: Hobby is for non-commercial use only; check the terms | Inventory (VERIFIED) | Runtime / business | **P1** | `UNKNOWN` (direction decided 2026-10-13) |
+| E4 | **Observability.** Today there is no error tracking, alerting, uptime check, status page or logging library; LUXIA would learn about an outage from a customer | `package.json` (VERIFIED) | Runtime / observability | **P1** | `UNKNOWN` |
+| E5 | **Privacy and legal basis:** privacy policy, data processing agreement, subprocessors (Neon, Vercel, Microsoft), retention and deletion, data subject requests, breach notification, data residency | `docs/` (VERIFIED, none exist) | Business / legal | **P1** | `UNKNOWN` (drafts start 2026-10-13) |
+| E6 | **Notification channel**, provider-neutral (`Notification → Channel Adapter`). Today there is no e-mail; invitations are links copied by hand; administrators are not told about sensitive events | `package.json` (VERIFIED) | Platform component | P2 | `UNKNOWN` |
+| E7 | **More than one operator and one workstation.** Today every Production operation runs from one Windows machine | `docs/handoff/CURRENT-STATE.md` section 10 (VERIFIED) | Operations | P2 | `UNKNOWN` |
+| E8 | **Incident response:** runbook, on-call, customer communication | `docs/` (VERIFIED, none exist beyond B4) | Operations | P2 | `UNKNOWN` |
+| E9 | **Export** of identities, accesses and journal, for the customer's audits and portability | `app/api` (VERIFIED, none) | Identity / Trust Ledger | P2 | `UNKNOWN` |
+| E10 | **External penetration test** | ASSUMPTION (none on record) | Security | P2 before GA, P3 before beta | `UNKNOWN` |
+| E11 | **Administrators can revoke a person's passkey** (known limit S2) | `docs/handoff/CURRENT-STATE.md` (VERIFIED) | Identity | P2 | `UNKNOWN` |
+| E12 | **Microsoft sign-ins:** proof of MFA and the provider's own authentication time | `docs/architecture/LUXIA-TIME-CONVENTION.md` (VERIFIED, both missing) | Identity / Adapters | P3 | `UNKNOWN` |
+| E13 | **More providers:** Google, generic OIDC, SAML, SCIM | PR #12 (stale, not merged) | Adapters | P3 (expansion) | `DESIGNED` (stale PR) |
+| E14 | **Explicit security policies** instead of rules in code | Architecture | Policy | P3 | `UNKNOWN` |
+
+## Already in place
+
+| Capability | Status |
+|---|---|
+| Forced row-level security per tenant; `app_user` NOSUPERUSER and NOBYPASSRLS; certified across organizations | `PRODUCTION VERIFIED` |
+| Phishing-resistant sign-in (passkeys), recovery codes and a recovery-only session (B2) | `PRODUCTION VERIFIED` |
+| No organization can lose its last administrator (B1); organization status enforced at sign-in and session level (B3) | `PRODUCTION VERIFIED` |
+| Operator actions only through a closed, planned, digested, journaled procedure (B4), labelled for the customer (B5) | `PRODUCTION VERIFIED` |
+| Every release certified in Production with read-only proofs | `PRODUCTION VERIFIED` |
 
 ## Where today's operations become ALMA primitives
 

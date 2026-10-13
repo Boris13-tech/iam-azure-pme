@@ -14,25 +14,27 @@ Read `docs/handoff/CURRENT-STATE.md` first.
 - 2026-10-11: **B3 organization lifecycle enforcement: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B3-RELEASE-2026-10-11.md`, notes in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1.md`).
 - 2026-10-12: **B2 recovery codes and recovery-only session: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B2-RELEASE-2026-10-12.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-B2-RECOVERY-DESIGN.md`). R6 ran on the test organization `luxia-cert-b2-r6`, later CLOSED by B4.
 - 2026-10-12: **B4 operator break-glass procedure: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B4-RELEASE-2026-10-12.md`, design in `docs/architecture/FIRST-ADMIN-BREAK-GLASS-V1-B4-OPERATOR-DESIGN.md`). The Lab and `luxia-cert-b2-r6` are CLOSED through the procedure; the journal-time fix (PR #50) is merged.
-
 - 2026-10-12: **B5 visibility for the customer: PRODUCTION RELEASE PASS** (`docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B5-RELEASE-2026-10-12.md`). **First Admin / Break-glass v1 is complete.**
 
 First Admin / Break-glass v1 status: **B1, migration, B3, B2, B4, B5: all PASS in Production.**
 
 ## Priorities (operator order of 2026-10-12, refined with the post-B5 evidence)
 
-1. **P1, audit integrity first (T0):** make the journal and the sign-in evidence append-only. That means a guard on UPDATE and DELETE, and the grants revoked from `app_user`. It is small and protective, and it is the prerequisite of every transparency and Trust Ledger promise. See `docs/architecture/LUXIA-OPERATOR-TRANSPARENCY.md`.
-2. **P1, backup and restore:** follow `docs/operations/BACKUP-RESTORE-PLAN.md`. Drill A runs when a branch slot frees on 2026-10-15. Drill B and the independent backups wait for the operator to decide where data may be copied.
-3. **P1, minimum observability:** error tracking, a health route, an external uptime check and an alert. Tools are chosen as adapters, without lock-in.
-4. **P2, time convention phases 1 and 2** (no migration): `docs/architecture/LUXIA-TIME-CONVENTION.md`.
-5. **P2, product trust:** « Interventions de LUXIA » (T1), then Trust Ledger v0 (T2), after T0.
+1. **P1, audit integrity first (T0):** the journal and the sign-in evidence become append-only for application and ordinary operator roles. That means a database guard and the grants revoked from `app_user`. It is not cryptographic immutability, which belongs to Trust Ledger. It is small and protective, and it is the prerequisite of every transparency promise. See `docs/architecture/LUXIA-OPERATOR-TRANSPARENCY.md`.
+2. **P1, backup and restore:** follow `docs/operations/BACKUP-RESTORE-PLAN.md`:
+   - an independent, encrypted backup in EU object storage;
+   - Drill B from that backup;
+   - Drill A when a branch slot frees on 2026-10-15.
+3. **P1, minimum observability:** HTTP availability, server errors, latency, database availability, abnormal authentication failures, backup failures, quota saturation, critical security events, and an alert channel.
+4. **P1 before a commercial beta:**
+   - EU hosting (Frankfurt by default), as a rehearsed platform migration;
+   - the legal drafts (`DRAFT — LEGAL REVIEW REQUIRED`).
+5. **P2:**
+   - time convention phases 1 and 2;
+   - the provider-neutral notification contract (`Notification → Channel Adapter`);
+   - « Interventions de LUXIA » (T1), then Trust Ledger v0 (T2).
 
-Operator decisions pending:
-- hosting plans and regions (E3);
-- privacy and legal basis (E5);
-- where independent backups may live.
-
-See `docs/product/ENTERPRISE-READINESS.md`.
+Operator decisions of 2026-10-13 and the readiness gate (`UNKNOWN`, `DESIGNED`, `IMPLEMENTED`, `VERIFIED`, `PRODUCTION VERIFIED`): `docs/product/ENTERPRISE-READINESS.md`.
 
 ## Small follow-ups
 
