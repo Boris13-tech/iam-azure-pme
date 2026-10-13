@@ -108,6 +108,8 @@ jobs:
         REVOKE ALL ON "SignupCode", "RateLimitBucket", "RateLimitConfig" FROM app_user;
         REVOKE ALL ON "OrganizationDomain", "Invitation" FROM app_user;
         GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;
+        -- T0: the journal and the sign-in evidence are append-only (same as the migration gives app_user in Production).
+        REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEvidence" FROM app_user;
         EOF
 
         PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
