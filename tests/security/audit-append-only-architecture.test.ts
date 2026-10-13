@@ -46,7 +46,9 @@ describe("T0 append-only audit trail", () => {
 
   it("the CI and Production runtime-role bootstraps never give the rights back", () => {
     const revoke = `REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEvidence" FROM app_user;`;
-    for (const workflow of [".github/workflows/ci.yml", ".github/workflows/production-activation-gate.yml"]) {
+    // CI runs its bootstrap from scripts/ci/bootstrap-app-user.sql, in both of its PostgreSQL jobs.
+    expect(read(".github/workflows/ci.yml").match(/-f scripts\/ci\/bootstrap-app-user\.sql/g)).toHaveLength(2);
+    for (const workflow of ["scripts/ci/bootstrap-app-user.sql", ".github/workflows/production-activation-gate.yml"]) {
       const text = read(workflow);
       expect(text, workflow).toContain(revoke);
       expect(text.indexOf(revoke), workflow).toBeGreaterThan(text.indexOf("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;"));
