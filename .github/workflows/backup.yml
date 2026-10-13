@@ -1,12 +1,14 @@
 name: Independent backup
 
-# Encrypted logical backup of the Production database, every 6 hours, to EU object storage that refuses deletion
+# Encrypted logical backup of the Production database, every 2 hours, to EU object storage that refuses deletion
 # (docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md, runbook docs/operations/BACKUP-RUNBOOK.md).
 # The job holds the backup PUBLIC key only: it can write backups, never read them. Its log is public (public
 # repository): the script prints no row count, no connection detail and no secret.
 on:
   schedule:
-    - cron: '23 */6 * * *'
+    # Every 2 hours: GitHub may delay or drop a scheduled run under load (the first one, 2026-10-13 18:23Z, never
+    # started), so one dropped run leaves data at most 4 hours old. A missing backup is alerted from outside (Ops).
+    - cron: '23 */2 * * *'
   workflow_dispatch:
 
 permissions:

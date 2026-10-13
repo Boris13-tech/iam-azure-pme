@@ -15,7 +15,7 @@ const SECRET_KEY_PREFIX = ["AGE", "SECRET", "KEY", "1"].join("-");
 
 describe("Independent backup architecture", () => {
   it("the backup workflow runs on a schedule or by hand only, with read-only repository access and the protected environment", () => {
-    expect(workflow).toMatch(/^on:\n  schedule:\n    - cron: '[^']+'\n  workflow_dispatch:\n\n/m);
+    expect(workflow).toMatch(/^on:\n  schedule:\n(    #.*\n)*    - cron: '[^']+'\n  workflow_dispatch:\n\n/m);
     expect(workflow).not.toMatch(/pull_request|push:/);
     expect(workflow).toMatch(/^permissions:\n  contents: read\n/m);
     expect(workflow).toMatch(/environment: production-backup/);

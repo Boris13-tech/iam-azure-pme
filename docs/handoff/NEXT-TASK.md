@@ -22,12 +22,15 @@ First Admin / Break-glass v1 status: **B1, migration, B3, B2, B4, B5: all PASS i
 
 1. **Done, PRODUCTION VERIFIED 2026-10-13: T0 audit integrity.** The journal and the sign-in evidence are append-only for application and ordinary operator roles (`docs/certification/T0-AUDIT-APPEND-ONLY-RELEASE-2026-10-13.md`). It is not cryptographic immutability, which belongs to Trust Ledger.
 2. **Done, PRODUCTION PASS 2026-10-13: E1 backup and restore** (`docs/certification/E1-BACKUP-RESTORE-DRILL-B-2026-10-13.md`):
-   - an encrypted backup every 6 hours in EU object storage;
+   - an encrypted backup every 2 hours in EU object storage, locked for 30 days;
    - Drill B identical, RPO 2 min 7 s, 81 s.
 
    Still to do:
-   - **operator:** key custody, and the immutability lock;
-   - **Claude:** rehearse the switch of the application; Drill A when a branch slot frees on 2026-10-15; a backup freshness alert in the Ops block.
+   - **done:** key custody, and the immutability lock (evening of 2026-10-13);
+   - **Claude:**
+     - **P1:** an outside alert when a backup is missing, because GitHub dropped the first scheduled run;
+     - rehearse the switch of the application;
+     - Drill A when a branch slot frees on 2026-10-15.
 3. **P1, minimum observability:** HTTP availability, server errors, latency, database availability, abnormal authentication failures, backup failures, quota saturation, critical security events, and an alert channel.
 4. **P1 before a commercial beta:**
    - EU hosting (Frankfurt by default), as a rehearsed platform migration;

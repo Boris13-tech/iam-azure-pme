@@ -3,8 +3,8 @@
 > **2026-10-13 ~13:15Z — E1 INDEPENDENT BACKUP AND DRILL B: PRODUCTION PASS** (`docs/certification/E1-BACKUP-RESTORE-DRILL-B-2026-10-13.md`).
 > - `main` is `2999b0d` (PR #57).
 > - **Backups:**
->   - encrypted, every 6 hours (`.github/workflows/backup.yml`), to Azure Blob Storage in France Central;
->   - protected against deletion for 30 days;
+>   - encrypted, every 2 hours (`.github/workflows/backup.yml`; GitHub dropped the first 6-hourly scheduled run), to Azure Blob Storage in France Central;
+>   - protected against deletion for 30 days, **locked** (compliance) since the evening of 2026-10-13;
 >   - age key `age-x25519:686d7b74344c34c5`, the backup job holds the public key only.
 > - **Production role `luxia_backup`**, created 2026-10-13 12:51Z:
 >   - SELECT only, read-only by default;
@@ -15,9 +15,11 @@
 >   - **RPO 2 min 7 s, 81 s to a verified database**;
 >   - the switch of the application is not yet rehearsed.
 > - The application and the 25 migrations are unchanged. Runbook: `docs/operations/BACKUP-RUNBOOK.md`.
-> - **Waiting for the operator:**
->   - **key custody (P1)**: the password manager plus an encrypted recovery copy, then delete the workstation copy;
->   - locking the immutability policy (irreversible).
+> - **Key custody done (evening of 2026-10-13):**
+>   - the password manager, plus an encrypted recovery copy;
+>   - the paper passphrase was tested;
+>   - the clear key was deleted from the workstation.
+> - **Next P1:** an outside alert when the latest backup is too old (dead man's switch); GitHub does not guarantee its schedules.
 > - **Next (operator order of 2026-10-13):** PR #12 rewritten as the LUXIA Sovereign Provider & Federation Layer, design first; then Ops/Monitoring.
 >
 > This header supersedes older deployment rows below.

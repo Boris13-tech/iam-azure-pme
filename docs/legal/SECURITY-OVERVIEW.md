@@ -53,7 +53,7 @@ Every measure below is in Production and was verified, unless it is marked « no
 - **In place:**
   - 6 hours of point-in-time history at the database provider;
   - rollback points taken before each release;
-  - **independent, encrypted backups every 6 hours** (since 2026-10-13), outside the database provider, in the European Union. They are encrypted before they leave the backup job, with a key that only LUXIA holds, and protected against deletion for 30 days. The backup role can read but never change data;
+  - **independent, encrypted backups every 2 hours** (since 2026-10-13), outside the database provider, in the European Union. They are encrypted before they leave the backup job, with a key that only LUXIA holds, and protected against deletion for 30 days. The backup role can read but never change data;
   - **a tested full restore:** on 2026-10-13 the database was rebuilt from such a backup into an empty environment. Every table and schema object matched; RPO 2 min 7 s, database recovered and verified in 81 s (`docs/certification/E1-BACKUP-RESTORE-DRILL-B-2026-10-13.md`).
 - **Not in place yet:** rehearsing the switch of the application to a restored database, and an automatic alert if a backup is missing.
 

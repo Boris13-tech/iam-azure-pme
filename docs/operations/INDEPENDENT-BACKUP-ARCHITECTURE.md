@@ -13,7 +13,7 @@ It implements E1 of `docs/product/ENTERPRISE-READINESS.md` and section 4 of `doc
 
 **What changed from the design during implementation (2026-10-13):**
 - **Storage:** Azure Blob Storage in France Central, not Scaleway (section 3).
-- **Frequency:** every 6 hours, not daily.
+- **Frequency:** every 2 hours, not daily. It was 6 hours until GitHub dropped the first scheduled run.
 - **Inventory:** the backup carries an encrypted inventory. It holds the row count and content hash of every table, and a schema fingerprint, all taken in the same snapshot as the dump. A restore is proven against it.
 - **Scope:** the declared platform schema `neon_auth` is left out; any other unknown schema stops the backup.
 - **Key:** the key pair was generated on the operator's workstation with `age-keygen`, not by the operator by hand. The private key was never displayed or read by Claude. Custody follows the runbook.
@@ -36,7 +36,7 @@ It implements E1 of `docs/product/ENTERPRISE-READINESS.md` and section 4 of `doc
    5. migrations, digest, application, sign-in, IAM and audit checks;
    6. measure RTO, RPO, backup and restore durations, backup size, cost, manual steps and failure points.
 
-**Where the job runs:** a scheduled GitHub Actions workflow, every 6 hours (`.github/workflows/backup.yml`). It is outside Neon and outside the storage provider, it is logged, and it can alert on failure. **Its secrets:**
+**Where the job runs:** a scheduled GitHub Actions workflow, every 2 hours (`.github/workflows/backup.yml`). GitHub may delay or drop a scheduled run, so a missing backup must be alerted from outside GitHub (Ops block). It is outside Neon and outside the storage provider, it is logged, and it can alert on failure. **Its secrets:**
 - the backup role's connection string;
 - a storage credential **restricted to creating and reading objects in that one container** (no overwrite, no delete, no list, no lock change).
 
@@ -87,7 +87,7 @@ Dump size today is a few MB: the whole database is about 38 MB. Cost is therefor
 - Microsoft (a US company) stores the backups. It **only ever sees ciphertext**: the key is LUXIA's, and the job holds the public half only. Exposure under the CLOUD Act is therefore limited to encrypted files.
 - Microsoft Azure joins the subprocessors (`docs/legal/SUBPROCESSORS.md`).
 - The subscription is shared with the operator's other projects. The deletion lock and the immutability limit what a mistake in another project can do.
-- **The immutability policy is "unlocked" today.** A determined Azure administrator could still shorten it. **Locking it (compliance mode) is irreversible** and remains the operator's decision (`docs/operations/BACKUP-RUNBOOK.md`).
+- **The immutability policy is locked** (compliance mode, 2026-10-13, operator decision). Nobody can delete a backup or shorten its 30 days, not the operator, not Microsoft, not someone who takes over the Azure account. The period can only be extended. The container cannot be deleted while protected versions exist.
 
 ## 3b. Recommendation of the design phase (kept for the record)
 
@@ -114,7 +114,7 @@ Why not the others:
 
 | Backup | Kept | Lock |
 |---|---|---|
-| Every 6 hours | 30 days | **in place:** version-level immutability, 30 days, *unlocked* (locking it is the operator's decision) |
+| Every 2 hours | 30 days | **in place:** version-level immutability, 30 days, **locked** (compliance) since the evening of 2026-10-13, by the operator's decision |
 | Monthly (the first of each month) | 12 months | **not in place:** the 12-month period must first be agreed with counsel, because deleted personal data survives in backups until they expire |
 
 **Not in place yet:** a lifecycle rule that removes versions once their protection has expired. At today's size, keeping them costs less than a cent a month. It is added together with the retention periods agreed with counsel.
@@ -148,12 +148,12 @@ Personal data deleted in Production stays in backups until they expire. The rete
 |---|---|---|
 | Storage in the existing Azure subscription (spend under €0.10 a month, inside the €10 ceiling) | Claude | 2026-10-13 |
 | Key pair, generated with `age-keygen` on the operator's workstation. The private key is never displayed, and its file is readable by the operator's account only | Claude | 2026-10-13 |
-| **Move the private key into the password manager, make the encrypted recovery copy, then delete the workstation copy** | **Operator** | **pending** |
+| **Move the private key into the password manager, make the encrypted recovery copy, then delete the workstation copy** | **Operator** | 2026-10-13. The passphrase written on paper was tested by decrypting the copy and comparing it with the original. The clear copy on the workstation is deleted |
 | Read-only backup role in Production (operator approval 2026-10-13, confirmed directly) | Claude | 2026-10-13 |
 | The two secrets, in the `production-backup` environment of GitHub, released to `main` only | Claude | 2026-10-13 |
 | Workflow, inventory, read-back check, restore and verification scripts, CI round trip | Claude | PR #57 |
 | First real backup, then Drill B | Claude | see the drill report |
-| **Lock the immutability policy (irreversible)** | **Operator decision** | **pending** |
+| **Lock the immutability policy (irreversible)** | Operator decision, carried out by Claude | 2026-10-13. Existing versions locked too |
 
 ## Sources
 

@@ -8,7 +8,7 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 | Part | Where | Notes |
 |---|---|---|
 | Backup role | `luxia_backup` in Production (`scripts/backup/luxia-backup-role.sql`) | SELECT only, read-only by default, BYPASSRLS (required, see the architecture), 3 connections at most. Rollback: `docs/operations/BACKUP-ROLE-ROLLBACK.sql` |
-| Job | `.github/workflows/backup.yml`, every 6 hours (`23 */6 * * *` UTC) and on demand | Runs `scripts/backup/backup.mjs` in the GitHub environment `production-backup` (secrets released to `main` only). Public log: no count, no secret |
+| Job | `.github/workflows/backup.yml`, every 2 hours (`23 */2 * * *` UTC) and on demand | Runs `scripts/backup/backup.mjs` in the GitHub environment `production-backup` (secrets released to `main` only). Public log: no count, no secret |
 | Storage | Azure subscription of the operator, resource group `luxia-backup-rg`, account `luxiabackupfrd325`, container `prod-backups`, region France Central | Zone-redundant (3 zones). Versioning. Version-level immutability, 30 days. Blob and container soft delete, 14 days. Management lock `luxia-backup-no-delete` on the group |
 | Writer credential | Secret `LUXIA_BACKUP_CONTAINER_URL` | Container SAS bound to the stored access policy `bw-202610-r2`: create and read only (no overwrite, no delete, no list). Expires 2027-10-13 |
 | Database credential | Secret `LUXIA_BACKUP_DATABASE_URL` | `luxia_backup` on the direct endpoint (an exported snapshot cannot live behind the pooler) |
@@ -25,7 +25,8 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 ## 2. Watching it
 
 - A failed run fails the workflow. GitHub e-mails the account that last changed the schedule.
-- Until monitoring exists (Ops/Monitoring block), the operator checks weekly that the latest backup is less than 7 hours old. Command, after `az login`:
+- **GitHub does not guarantee scheduled runs.** The first one (2026-10-13 18:23Z) never started.
+- Until an outside alert exists (first item of the Ops/Monitoring block), the operator checks weekly that the latest backup is less than 5 hours old. Command, after `az login`:
 
 ```bash
 az storage blob list --account-name luxiabackupfrd325 --auth-mode key -c prod-backups --prefix prod/ --query "max_by([?ends_with(name,'manifest.json')], &properties.creationTime).{name:name,at:properties.creationTime}" -o table
@@ -141,9 +142,9 @@ gh secret set LUXIA_BACKUP_DATABASE_URL --env production-backup < <new file>
 
 ## 7. Cost
 
-At today's size (encrypted dump under 1 MB, 4 backups a day kept 30 days, about 120 versions):
+At today's size (encrypted dump under 1 MB, 12 backups a day kept 30 days, about 360 versions, under 200 MB):
 - storage and operations: **well under €0.10 a month**;
 - GitHub Actions minutes: free (public repository);
-- Neon compute woken 4 times a day: a few CU-hours a month, inside the Free plan.
+- Neon compute woken 12 times a day: about 8 CU-hours a month. In October the project used about 22 CU-hours a month in total, against 100 in the Free plan.
 
 The authorized ceiling is €10 a month (operator decision, 2026-10-13).
