@@ -1,4 +1,5 @@
 import { adminPrisma } from "../helpers/admin-prisma";
+import { purgeTestOrganization } from "../helpers/purge-test-organization";
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { getAuthContext } from "../../lib/auth/auth-context";
 import { requireAuth } from "../../lib/auth/require-auth";
@@ -45,14 +46,17 @@ describe("AuthContext Security", () => {
   });
 
   afterAll(async () => {
-    await adminPrisma.assignment.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.legacyUserBridge.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.organization.deleteMany({ where: { id: orgId } });
+    // F2: connections are never deleted outside a test database's superuser purge.
+    await purgeTestOrganization(async (tx) => {
+      await tx.assignment.deleteMany({ where: { organizationId: orgId } });
+      await tx.session.deleteMany({ where: { organizationId: orgId } });
+      await tx.identityAccount.deleteMany({ where: { organizationId: orgId } });
+      await tx.legacyUserBridge.deleteMany({ where: { organizationId: orgId } });
+      await tx.subject.deleteMany({ where: { organizationId: orgId } });
+      await tx.tenant.deleteMany({ where: { organizationId: orgId } });
+      await tx.providerConnection.deleteMany({ where: { organizationId: orgId } });
+      await tx.organization.deleteMany({ where: { id: orgId } });
+    });
   });
 
 

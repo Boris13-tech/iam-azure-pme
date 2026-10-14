@@ -127,7 +127,8 @@ describe.runIf(enabled)("ProviderConnection lifecycle and sign-in kill switch (P
     try {
       const prior = readdirSync("prisma/migrations").filter((dir) => /^\d{14}_/.test(dir) && dir < NEW).sort();
       expect(prior.length).toBeGreaterThan(20);
-      for (const dir of prior) psqlOk(url, ["-f", `prisma/migrations/${dir}/migration.sql`]);
+      // One transaction per migration, as Prisma applies them (several take table locks).
+      for (const dir of prior) psqlOk(url, ["-1", "-f", `prisma/migrations/${dir}/migration.sql`]);
       // app_user's table privileges as in Production before F2 (DELETE included).
       psqlOk(url, ["-c", `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user`]);
       for (const seed of ["self-onboarding-backfill-seed", "organization-status-seed", "provider-connection-seed"])
@@ -321,7 +322,7 @@ describe.runIf(enabled)("ProviderConnection lifecycle and sign-in kill switch (P
       held.open(); await pause.promise;
     });
     await held.promise;
-    const t = settle(applyConnectionTransition(as(org), change(), org.federated, "QUARANTINE", plan.planDigest));
+    const t = applyConnectionTransition(as(org), change(), org.federated, "QUARANTINE", plan.planDigest).then((value) => value, (error: unknown) => error);
     try { await waitBlocked(1); } finally { pause.open(); }
     await s;
     expect(await t).toMatchObject({ to: "QUARANTINED", revokedSessions: 1 });
