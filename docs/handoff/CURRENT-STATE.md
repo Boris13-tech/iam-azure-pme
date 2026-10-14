@@ -1,7 +1,7 @@
 # LUXIA Identity — CURRENT STATE
 
 > **2026-10-13 ~22:55Z — E4 BACKUP FRESHNESS: PRODUCTION PASS** (`docs/certification/E4-BACKUP-FRESHNESS-ALERT-2026-10-13.md`).
-> - **GitHub's scheduler had never run this repository's schedules** (0 runs ever, at diagnosis time). **Update 2026-10-14:** it ran once at 00:23Z, then missed 01:23 and 02:23: unreliable, not absent. The schedule is now a gated fallback that backs up only when Azure missed (E4 certification, section 7).
+> - **GitHub's scheduler had never run this repository's schedules** (0 runs ever, at diagnosis time). **Update 2026-10-14:** it ran 4 times in 18 slots (00:23, 06:15, 12:08, 17:22Z), irregular, each an extra backup until the gate is merged. The schedule is now a gated fallback that backs up only when Azure missed (E4 certification, section 7).
 > - **Hourly trigger, now in Azure:** the Logic App `luxia-backup-dispatcher` starts `backup.yml` at :53 UTC, with a GitHub token held in Key Vault `luxia-bkp-kv-284e` (this repository only, Actions read and write only, expires 2027-10-13). First automatic run: 22:53Z, backup verified.
 > - **Freshness alert outside GitHub:** `luxia-backup-freshness` fires after 3 hours without a backup. Both of the operator's addresses are verified. Fired and Resolved were received on both, and the automatic resolution was observed.
 > - The drill rule `luxia-backup-freshness-drill` stays **disabled** between drills.

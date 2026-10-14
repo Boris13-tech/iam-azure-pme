@@ -25,7 +25,7 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 ## 2. Watching it, and catching up
 
 **What can go wrong:**
-- **GitHub's scheduler is unreliable for this repository.** At diagnosis time (2026-10-13 22:10Z) it had never run: 0 scheduled runs since the repository was created, and 18:23, 20:23 and 21:23 were missed. Since then it ran once, at 2026-10-14 00:23Z, then missed 01:23 and 02:23. The hourly trigger is therefore in Azure (line 1). The GitHub schedule is a gated fallback: it backs up only when Azure missed (E4 certification, section 7).
+- **GitHub's scheduler is unreliable for this repository.** At diagnosis time (2026-10-13 22:10Z) it had never run: 0 scheduled runs since the repository was created, and 18:23, 20:23 and 21:23 were missed. On 2026-10-14 it ran 4 times in 18 hourly slots (00:23, 06:15, 12:08, 17:22Z), irregular and up to an hour late, and each run was an extra backup. The hourly trigger is therefore in Azure (line 1). The GitHub schedule is a gated fallback: it backs up only when Azure missed (E4 certification, section 7).
 - GitHub also disables scheduled workflows in a public repository after 60 days without activity.
 - A job can fail: its database credential, its storage credential, or Neon can be down.
 
@@ -33,7 +33,7 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 
 | # | Mechanism | Covers | Outside GitHub |
 |---|---|---|---|
-| 1 | **Hourly trigger from Azure.** The Logic App `luxia-backup-dispatcher` starts `backup.yml` every hour at minute 53 UTC. A failed run is caught up by the next one. The GitHub schedule (`23 * * * *`) is a gated fallback: it backs up only if no dispatched backup succeeded in the last 50 minutes | One failed run: data stays about 1.5 to 2 hours old | **Yes** (the trigger) |
+| 1 | **Hourly trigger from Azure.** The Logic App `luxia-backup-dispatcher` starts `backup.yml` every hour at minute 53 UTC. A failed run is caught up by the next one. The GitHub schedule (`23 * * * *`) is a gated fallback: it backs up only if no dispatched backup succeeded in the last 65 minutes | One failed run: data stays about 1.5 to 2 hours old | **Yes** (the trigger) |
 | 2 | **Azure alert `luxia-backup-freshness`**, detailed below | Two misses in a row, GitHub outages, disabled schedules, broken credentials, and a broken log pipeline | **Yes** |
 | 3 | **Catch-up by the operator** on alert (below) | Everything that lines 1 and 2 report | Partly, see 3b |
 

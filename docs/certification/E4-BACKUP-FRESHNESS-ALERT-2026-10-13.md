@@ -20,6 +20,13 @@ Date: 2026-10-13 (UTC), evening.
 **Observed since (addendum 2026-10-14, GitHub API, VERIFIED):**
 - The scheduler ran once: `schedule` run `38489882851` at **2026-10-14 00:23:18Z**, success.
 - The next slots, 01:23 and 02:23, did not run. As of 03:29Z, the scheduler has run 1 time in 4 hourly slots.
+- **Second update, 2026-10-14 17:42Z (API, VERIFIED; the operator observed it first):** four `schedule` runs succeeded that day:
+  - 00:23:18Z, run `38489882851`;
+  - **06:15:51Z**, run `38521190168`;
+  - **12:08:28Z**, run `38561595265`;
+  - **17:22:02Z**, run `38606045268`.
+- That is 4 of the 18 hourly slots from 00:23 to 17:23, at irregular times: the `23 * * * *` slots arrive up to about an hour late.
+- With no gate merged, **each of them was an extra backup**, 4 that day. The scheduler is irregular, not absent.
 - So "never ran" was true at diagnosis time, and is no longer true in absolute terms. The scheduler is **unreliable** for this repository, not absent.
 - During 00:00 to 01:00, two backups were taken (00:23 by the schedule, 00:53 by Azure): the double backup that risk 5 below foresaw.
 
@@ -108,19 +115,29 @@ All within the €10 a month ceiling:
 
 | Option | Result | Verdict |
 |---|---|---|
-| **A.** Azure primary, GitHub schedule as fallback | Covers a missed Azure slot (Logic App, token or Key Vault fault) 30 minutes later instead of 60. Without a gate, it doubles the backups whenever GitHub's scheduler fires | **Chosen, with a gate** |
+| **A.** Azure primary, GitHub schedule as fallback | Covers a missed Azure slot (Logic App, token or Key Vault fault) whenever GitHub's next scheduled run comes, often before Azure's next slot. Without a gate, it doubles the backups whenever GitHub's scheduler fires: **4 doubles on 2026-10-14** | **Chosen, with a gate** |
 | B. Azure only | Simplest. A missed Azure slot waits for the next hour or for the alert | Acceptable, but gives up a free catch-up |
 | C. Two independent triggers, both backing up | Two backups an hour when both fire, irregular because GitHub's scheduler is unreliable. Doubles Neon compute and immutable storage for no designed RPO | Rejected |
 
 **How A is enforced (`backup.yml`, `scripts/backup/schedule-gate.mjs`, tested in `tests/security/backup-architecture.test.ts`):**
 - **The gate job holds no secret.** It has no environment, and only `contents: read` and `actions: read`.
 - A `workflow_dispatch` (Azure, or by hand) always backs up.
-- A `schedule` run backs up only if no **dispatched** backup run succeeded in the last 50 minutes.
-  - Azure runs at :53 and the schedule at :23, so after a normal Azure run the gate skips.
-  - After a missed Azure slot, the last dispatched backup is at least 90 minutes old, so the gate backs up.
+- A `schedule` run backs up only if no **dispatched** backup run succeeded in the last **65 minutes**: one hourly slot plus a margin.
+  - The decision is taken when the scheduled run starts, whatever its delay. While Azure keeps its :53 slots, the last dispatched backup is always under 65 minutes old, so the gate skips.
+  - After a missed Azure slot, it is more than 65 minutes old, so the gate backs up.
   - A scheduled run never proves a backup, because it may have skipped. Only dispatched runs count.
+- **Why 65 and not 50 (first version of this PR):** the observed delays showed that a scheduled run can start at any minute.
+  - With 50, a run starting between :43 and :53 would still have doubled.
+  - **Replay on the real history** (`decide()` on the GitHub runs, 2026-10-14): the 4 scheduled runs of that day are all `skip` with 65, and the backups they made would have been avoided.
+  - A run at :52 with Azure on time: `skip` with 65 (`back up` with 50).
+  - A run at 19:10 after Azure missed 18:53: `back up` with both.
 - **Fail-open:** if the run history cannot be read, the gate backs up. An extra backup is harmless; a missing one is not.
 - The concurrency group still prevents two backups at once.
 
-**Effect on the RPO:** about 1 hour normally, unchanged. After a missed Azure slot, about 1.5 hours if GitHub's scheduler fires, otherwise about 2 hours. Beyond that, the alert and the operator. Still no hard maximum.
+**Effect on the RPO:** about 1 hour normally, unchanged. After a missed Azure slot, it depends on when GitHub's next scheduled run comes (irregular), and at worst it waits for Azure's next slot: about 2 hours. Beyond that, the alert and the operator. Still no hard maximum.
+
+**Status of the gate:** `IMPLEMENTED` once merged. **`PRODUCTION VERIFIED` only after a real `schedule` run on `main` is observed applying it.**
+- In practice, its gate job logs `skip (backup-…min-ago)` and its backup job is skipped while Azure keeps its slots.
+- Ideally, also a catch-up after a real missed slot.
+- A merge or a green CI is not enough.
 

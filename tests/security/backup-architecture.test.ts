@@ -32,7 +32,7 @@ describe("Independent backup architecture", () => {
     expect(gate).toMatch(/permissions:\n      contents: read\n      actions: read\n/);
     expect(gate).toContain(`if [ "$EVENT" != "schedule" ]; then echo "run=true"`);
     expect(gate).toMatch(/else\n\s+echo "run=true" >> "\$GITHUB_OUTPUT"; echo "gate: back up \(run history unavailable\)"/);
-    expect(gate).toContain("node scripts/backup/schedule-gate.mjs \"$RUNNER_TEMP/runs.json\" \"$GITHUB_RUN_ID\" 50");
+    expect(gate).toContain("node scripts/backup/schedule-gate.mjs \"$RUNNER_TEMP/runs.json\" \"$GITHUB_RUN_ID\" 65");
     expect(backupJob).toMatch(/^\n  backup:\n    needs: gate\n    if: needs.gate.outputs.run == 'true'\n/);
     expect(backupJob).toMatch(/environment: production-backup/);
   });

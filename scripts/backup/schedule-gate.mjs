@@ -1,7 +1,8 @@
 // Decides whether a SCHEDULED run of backup.yml backs up (docs/operations/BACKUP-RUNBOOK.md, section 2).
-// The Azure Logic App is the primary hourly trigger (workflow_dispatch at :53 UTC); GitHub's schedule (:23) is a
-// fallback that backs up only when no dispatched backup succeeded in the last `windowMinutes`. So the schedule never
-// doubles the backups while Azure works, and catches up 30 minutes after a missed Azure slot.
+// The Azure Logic App is the primary hourly trigger (workflow_dispatch at :53 UTC); GitHub's schedule is a fallback
+// that backs up only when no dispatched backup succeeded in the last `windowMinutes` (65: one hourly slot plus margin).
+// The decision is taken when the scheduled run starts, whatever its delay: while Azure keeps its slots, a dispatched
+// backup is always under 65 minutes old and the schedule never doubles; after a missed slot, it catches up.
 // Fail-open: anything unreadable means "back up" (an extra backup is harmless; a missing one is not).
 // Usage: node schedule-gate.mjs <runs.json from the GitHub API> <this run id> <window minutes>   → prints run=true|false
 import { readFileSync } from "node:fs";

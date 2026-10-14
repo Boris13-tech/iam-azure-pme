@@ -7,9 +7,10 @@ name: Independent backup
 on:
   schedule:
     # Primary hourly trigger: the Azure Logic App luxia-backup-dispatcher (workflow_dispatch at :53 UTC). GitHub's
-    # scheduler is unreliable here (0 runs until 2026-10-13, then 1 of the first 4 slots), so this schedule is a
-    # fallback, offset by 30 minutes: the gate job below backs up only if no dispatched backup succeeded in the last
-    # 50 minutes. If no complete backup lands for 3 hours, an Azure alert e-mails the operator (runbook, section 2).
+    # scheduler is irregular here (0 runs until 2026-10-13; on 2026-10-14, 4 runs in 18 slots, up to an hour late), so
+    # this schedule is only a fallback: the gate job below backs up only if no dispatched backup succeeded in the last
+    # 65 minutes, which means Azure missed its slot. If no complete backup lands for 3 hours, an Azure alert e-mails the
+    # operator (runbook, section 2).
     - cron: '23 * * * *'
   workflow_dispatch:
 
@@ -42,7 +43,7 @@ jobs:
         run: |
           if [ "$EVENT" != "schedule" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; echo "gate: back up ($EVENT)"; exit 0; fi
           if gh api "repos/$GITHUB_REPOSITORY/actions/workflows/backup.yml/runs?status=success&per_page=30" > "$RUNNER_TEMP/runs.json"; then
-            node scripts/backup/schedule-gate.mjs "$RUNNER_TEMP/runs.json" "$GITHUB_RUN_ID" 50 >> "$GITHUB_OUTPUT"
+            node scripts/backup/schedule-gate.mjs "$RUNNER_TEMP/runs.json" "$GITHUB_RUN_ID" 65 >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "gate: back up (run history unavailable)"
           fi
