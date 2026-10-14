@@ -120,6 +120,39 @@ Proven in CI on a scratch database, by `provider-connection-lifecycle-postgres.t
 6. M1 again.
 7. Delete the branch.
 
+### 4.1 Rehearsal evidence, 2026-10-14 (VERIFIED)
+
+**Branch:**
+- An ephemeral branch in the EU drill project, restored by Neon from the E1 Drill B branch (`br-raspy-frost-b9j52do9`), then deleted.
+- The Production project had no free branch slot. Freeing one means deleting a backup branch, which is an operator decision.
+
+**Content:**
+- **The real Production rows:** the encrypted backup of 2026-10-13, with 3 organizations and 4 connections, including Legrand Tech.
+- 121 test organizations created after it, when the application suites ran during Drill B. In total: 153 connections, 93 open sessions.
+- The real roles `neondb_owner` and `app_user`.
+
+**Procedure:** the Production gate's own, `prisma migrate deploy` as the owner on the direct endpoint. Exactly one migration was pending: M1.
+
+| Step | Result |
+|---|---|
+| Before | Digest `a268d90195b0`. 153 connections, 0 not ACTIVE. 93 open sessions. `app_user` DELETE = true |
+| M1 | Applied. **Digest identical**. 0 not ACTIVE. Same open sessions. `app_user` DELETE = false |
+| Rollback | **Digest identical. Function, trigger and privilege definitions identical** (`0ab3ad7798f7`). Status column gone. Migration record removed |
+| M1 again | Applied. Digest identical |
+| `app_user` session through an ACTIVE external connection / ACTIVE local connection | Accepted / accepted |
+| `app_user` DELETE of a connection / owner DELETE | `permission denied` / `PROVIDER_CONNECTION_IMMUTABLE` |
+| Status change without the governance lock | `GOVERNANCE_LOCK_REQUIRED` |
+| DISABLE, then a sign-in through it | Accepted, then `PROVIDER_CONNECTION_NOT_ACTIVE`. The open session is kept (R5) |
+| Disable LUXIA_LOCAL | `PROVIDER_CONNECTION_LOCAL_ALWAYS_ACTIVE` |
+| Quarantine without revoking / with revoking | `PROVIDER_CONNECTION_QUARANTINE_INCOMPLETE_SESSIONS` / accepted. Federated open sessions: 0. Local: 1 (kept) |
+| QUARANTINED straight to ACTIVE | `PROVIDER_CONNECTION_STATUS_TRANSITION` |
+| Rows outside the test organization changed by the checks | 0 |
+| Rollback once a status is in use | `ROLLBACK_REFUSED_CONNECTION_STATUS_IN_USE` |
+
+The script, kept out of the repository, prints only digests, counts and codes:
+- it stops on the Production endpoint, on a pooled endpoint, or on any pending migration other than M1;
+- it deletes the branch on exit.
+
 ## 5. Production certification (after the gates)
 
 **PRODUCTION VERIFIED needs:**
