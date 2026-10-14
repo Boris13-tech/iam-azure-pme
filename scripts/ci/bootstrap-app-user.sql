@@ -24,6 +24,8 @@ GRANT EXECUTE ON FUNCTION public.luxia_login_decoy(TEXT) TO app_user;
 -- First Admin / Break-glass v1: same grants as the migration gives app_user in Production.
 GRANT EXECUTE ON FUNCTION public.luxia_organization_lock_active(TEXT) TO app_user;
 GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
+-- Sovereign providers F2: same grant as the migration gives app_user in Production.
+GRANT EXECUTE ON FUNCTION public.luxia_provider_connection_lock_active(TEXT,TEXT) TO app_user;
 GRANT CONNECT ON DATABASE luxia_db TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
@@ -34,3 +36,5 @@ REVOKE ALL ON "OrganizationDomain", "Invitation" FROM app_user;
 GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;
 -- T0: the journal and the sign-in evidence are append-only (same as the migration gives app_user in Production).
 REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEvidence" FROM app_user;
+-- F2: a provider connection is never deleted (same as the migration gives app_user in Production).
+REVOKE DELETE, TRUNCATE ON "ProviderConnection" FROM app_user;

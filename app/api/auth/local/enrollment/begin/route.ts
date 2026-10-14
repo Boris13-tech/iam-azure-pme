@@ -37,6 +37,7 @@ export async function POST(request: Request) {
           connection = await tx.providerConnection.create({ data: {
             organizationId: auth.organizationId,
             providerType: "LUXIA_LOCAL",
+            status: "ACTIVE",
             externalScopeId: auth.tenantId,
             name: "LUXIA Local",
           }, select: { id: true } });

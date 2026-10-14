@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { completeEntraAuthentication } from "../../../lib/auth/providers/entra";
 import { ProviderAdapterError } from "../../../lib/provider-adapters";
 import { AuthTransactionStore } from "../../../lib/auth/auth-transaction-store";
-import { rawPrisma } from "../../../lib/db/raw-prisma";
 import { withTenantDb } from "../../../lib/db/scoped-client";
 import { SessionCreationDeniedError, SessionStore } from "../../../lib/auth/session-store";
 import { entraSignInEvidence, recordRejectedSignIn } from "../../../lib/auth/sign-in-evidence";
@@ -25,14 +24,20 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Invalid or expired transaction" }, { status: 400 });
     }
 
-    // 2. Fetch ProviderConnection
-    const provider = await rawPrisma.providerConnection.findUnique({
-      where: { id: transaction.expectedProviderConnectionId }
-    });
+    // 2. Fetch ProviderConnection, inside the organization's scope
+    const provider = await withTenantDb(
+      { organizationId: transaction.expectedOrganizationId, tenantId: transaction.expectedTenantId },
+      (tx) => tx.providerConnection.findFirst({
+        where: { id: transaction.expectedProviderConnectionId, organizationId: transaction.expectedOrganizationId },
+      }),
+    );
 
     if (!provider || provider.organizationId !== transaction.expectedOrganizationId) {
       return NextResponse.json({ error: "Provider mismatch" }, { status: 400 });
     }
+    // F2 kill switch: a connection disabled or quarantined since the sign-in started gets the generic answer,
+    // before any call to the provider.
+    if (provider.status !== "ACTIVE") return NextResponse.redirect(new URL("/login?error=signin", request.url), 303);
 
     // 3. Exchange and validate the authorization response inside the adapter.
     let verifiedIdentity;
@@ -121,6 +126,8 @@ export async function GET(request: Request) {
         await recordRejectedSignIn(entraSignInEvidence(signInIdentity, "REJECTED", error.reason));
         // B3: the organization status is never revealed; same generic return as an unknown organization.
         if (error.reason === "ORGANIZATION_NOT_ACTIVE") return NextResponse.redirect(new URL("/login?error=signin", request.url), 303);
+        // F2: a connection disabled or quarantined meanwhile gets the same generic answer.
+        if (error.reason === "PROVIDER_CONNECTION_NOT_ACTIVE") return NextResponse.redirect(new URL("/login?error=signin", request.url), 303);
         return NextResponse.json({ error: error.reason }, { status: 403 });
       }
       throw error;

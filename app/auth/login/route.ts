@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { beginEntraAuthentication } from "../../../lib/auth/providers/entra";
 import { AuthTransactionStore } from "../../../lib/auth/auth-transaction-store";
-import { rawPrisma } from "../../../lib/db/raw-prisma";
+import { withTenantDb } from "../../../lib/db/scoped-client";
 import { normalizeOrganizationSlug, resolveLoginOrganization, safeReturnTo, singleFederationConnection } from "../../../lib/auth/organization-login";
 import { allowRequest, clientNetworkKey } from "../../../lib/security/rate-limit";
 
@@ -23,9 +23,10 @@ export async function GET(request: Request) {
     const connectionId = organization ? singleFederationConnection(organization, "MICROSOFT_ENTRA") : null;
     if (!organization || !connectionId) return back(request, "signin");
 
-    const provider = await rawPrisma.providerConnection.findUnique({ where: { id: connectionId } });
-    if (!provider || provider.organizationId !== organization.organizationId || provider.providerType !== "MICROSOFT_ENTRA")
-      return back(request, "signin");
+    // Read inside the organization's scope; only an ACTIVE connection starts a sign-in (F2 kill switch).
+    const provider = await withTenantDb({ organizationId: organization.organizationId, tenantId: organization.tenantId },
+      (tx) => tx.providerConnection.findFirst({ where: { id: connectionId, organizationId: organization.organizationId, providerType: "MICROSOFT_ENTRA", status: "ACTIVE" } }));
+    if (!provider) return back(request, "signin");
 
     // Build the provider request behind the adapter boundary.
     const challenge = await beginEntraAuthentication({

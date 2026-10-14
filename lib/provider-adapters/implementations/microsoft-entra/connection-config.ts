@@ -3,7 +3,7 @@ import {
   assertProviderOperationContext,
   type ProviderOperationContext,
 } from "../..";
-import { rawPrisma } from "../../../db/raw-prisma";
+import { withTenantDb } from "../../../db/scoped-client";
 import type {
   MicrosoftEntraConnectionConfig,
   MicrosoftEntraConnectionConfigResolver,
@@ -17,23 +17,25 @@ export class PrismaMicrosoftEntraConnectionConfigResolver
   ): Promise<MicrosoftEntraConnectionConfig> {
     assertProviderOperationContext(context);
 
-    const [tenant, connection] = await Promise.all([
-      rawPrisma.tenant.findFirst({
-        where: {
-          id: context.tenantId,
-          organizationId: context.organizationId,
-        },
-        select: { id: true },
-      }),
-      rawPrisma.providerConnection.findFirst({
-        where: {
-          id: context.providerConnectionId,
-          organizationId: context.organizationId,
-          providerType: "MICROSOFT_ENTRA",
-        },
-        select: { id: true, externalScopeId: true },
-      }),
-    ]);
+    // Read inside the organization's scope (row-level security on connections, F2). No status check here:
+    // sign-in is gated by the connection status; sign-out and configuration reads are always allowed.
+    const [tenant, connection] = await withTenantDb(
+      { organizationId: context.organizationId, tenantId: context.tenantId },
+      async (tx) => [
+        await tx.tenant.findFirst({
+          where: { id: context.tenantId, organizationId: context.organizationId },
+          select: { id: true },
+        }),
+        await tx.providerConnection.findFirst({
+          where: {
+            id: context.providerConnectionId,
+            organizationId: context.organizationId,
+            providerType: "MICROSOFT_ENTRA",
+          },
+          select: { id: true, externalScopeId: true },
+        }),
+      ] as const,
+    );
 
     if (!tenant || !connection) {
       throw new ProviderAdapterError({
@@ -94,10 +96,10 @@ export async function locateMicrosoftEntraConnection(input: {
   organizationId: string;
   tenantId: string;
 }): Promise<string> {
-  const tenant = await rawPrisma.tenant.findFirst({
+  const tenant = await withTenantDb(input, (tx) => tx.tenant.findFirst({
     where: { id: input.tenantId, organizationId: input.organizationId },
     select: { id: true },
-  });
+  }));
   if (!tenant) {
     throw new ProviderAdapterError({
       code: "INVALID_SCOPE",
@@ -106,14 +108,14 @@ export async function locateMicrosoftEntraConnection(input: {
   }
   // Never a "first result" (Customer Self-Onboarding v1, requirement 14): exactly one connection
   // of this organization, otherwise the choice is ambiguous and refused.
-  const connections = await rawPrisma.providerConnection.findMany({
+  const connections = await withTenantDb(input, (tx) => tx.providerConnection.findMany({
     where: {
       organizationId: input.organizationId,
       providerType: "MICROSOFT_ENTRA",
     },
     select: { id: true },
     take: 2,
-  });
+  }));
   if (connections.length !== 1) {
     throw new ProviderAdapterError({
       code: "NOT_FOUND",

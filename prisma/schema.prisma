@@ -110,6 +110,14 @@ enum ProviderType {
   CUSTOM
 }
 
+enum ProviderConnectionStatus {
+  DRAFT
+  TESTING
+  ACTIVE
+  DISABLED
+  QUARANTINED
+}
+
 enum OrganizationStatus {
   ACTIVE
   SUSPENDED
@@ -202,6 +210,9 @@ model ProviderConnection {
   providerType    ProviderType
   externalScopeId String // e.g., Entra Tenant ID, AWS Account ID
   name            String
+  // F2 lifecycle (sovereign design 4.4): sign-in only through ACTIVE; database guards in 20261014090000.
+  status          ProviderConnectionStatus @default(ACTIVE)
+  statusChangedAt DateTime?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 

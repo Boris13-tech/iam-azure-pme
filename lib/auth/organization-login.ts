@@ -61,6 +61,8 @@ export async function resolveLoginOrganization(slug: string): Promise<LoginOrgan
     where: {
       organizationId: organization.id,
       providerType: { in: ["LUXIA_LOCAL", ...FEDERATED_SIGN_IN_PROVIDER_TYPES] },
+      // F2: a DRAFT, TESTING, DISABLED or QUARANTINED connection is no sign-in method (same answer as none).
+      status: "ACTIVE",
       tenantScopes: { some: { organizationId: organization.id, tenantId: scope.tenantId } },
     },
     select: { id: true, providerType: true },
