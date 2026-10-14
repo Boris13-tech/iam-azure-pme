@@ -232,14 +232,21 @@ So the first Key integration needs **no new cryptography in Identity**. The open
 
 | Operation | Phase | Direction of trust | Step-up (K3) | Note |
 |---|---|---|---|---|
-| Disable, quarantine a connection | F2 | Reduces | **No** | Containment must be fast. Kept: dry-run count, explicit confirmation, `PROVIDER.*` journal (decision D3) |
+| Disable, quarantine a connection | F2 | Reduces | **No** | Containment must be fast. Kept: dry-run count, explicit confirmation bound to a plan digest, `PROVIDER.*` journal (decision D3; implemented in #66) |
 | Release from quarantine, activate (TESTING → ACTIVE) | F2, F4 | Increases | **Yes** | Re-enabling a compromised provider is the dangerous direction |
 | Promote a candidate secret to active | F3 | Increases | **Yes** | Lockout and takeover risk |
 | Create or activate an OIDC_GENERIC connection | F4 | Increases | **Yes** | A new issuer that can sign people in |
 | Relink IdentityAccounts to a new connection | R10 | Increases | **Yes**, for the administrator | The Subject's own LUXIA_LOCAL authenticator, if present, also confirms. A malicious IdP must not capture a Subject through a relink |
 | Operator break-glass (B4/B5) | — | — | Unchanged | Closed operator procedure. **Never requires Key** |
 
-K3 needs no Key. It ships with the WebAuthn authenticator Identity already has, so F2 to F4 gain step-up without waiting for Key. When Key is integrated (K4), it satisfies the same requirement.
+K3 needs no Key. It ships with the WebAuthn authenticator Identity already has, so F2 to F4 gain step-up without waiting for Key.
+
+**Precedent in Identity (VERIFIED):** B2 already has one narrow freshness rule. Generating recovery codes requires that the session was opened by a passkey sign-in less than 15 minutes ago, with its VERIFIED evidence (`lib/auth/recovery.ts`, rule R2). K3 generalizes this rule:
+- the operation is bound into the challenge;
+- any qualifying authenticator can satisfy it;
+- it applies to the operations in this table.
+
+There is no generic step-up today. When Key is integrated (K4), it satisfies the same requirement.
 
 **Order:** K3 lands after F2 and **before F4 and R10 go to Production**.
 
