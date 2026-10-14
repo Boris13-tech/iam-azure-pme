@@ -125,7 +125,9 @@ All within the €10 a month ceiling:
 - A `schedule` run backs up only if no **dispatched** backup run succeeded in the last **65 minutes**: one hourly slot plus a margin.
   - The decision is taken when the scheduled run starts, whatever its delay. While Azure keeps its :53 slots, the last dispatched backup is always under 65 minutes old, so the gate skips.
   - After a missed Azure slot, it is more than 65 minutes old, so the gate backs up.
-  - A scheduled run never proves a backup, because it may have skipped. Only dispatched runs count.
+  - A scheduled run never proves a backup, because it may have skipped. Only dispatched runs count. **A scheduled backup, even a recent successful one, never serves as proof that the Azure primary trigger works.**
+  - **A dispatched backup on `main` that is still queued or running counts as proof** (operator requirement, 2026-10-14). The concurrency group already makes the scheduled run wait behind it, so a second backup would be redundant. A failed or cancelled dispatch never counts, and neither does a dispatch on another branch.
+  - The gate reads every status of the last 30 runs on `main` (`runs?branch=main&per_page=30`), not only successes.
 - **Why 65 and not 50 (first version of this PR):** the observed delays showed that a scheduled run can start at any minute.
   - With 50, a run starting between :43 and :53 would still have doubled.
   - **Replay on the real history** (`decide()` on the GitHub runs, 2026-10-14): the 4 scheduled runs of that day are all `skip` with 65, and the backups they made would have been avoided.

@@ -33,6 +33,9 @@ describe("Independent backup architecture", () => {
     expect(gate).toContain(`if [ "$EVENT" != "schedule" ]; then echo "run=true"`);
     expect(gate).toMatch(/else\n\s+echo "run=true" >> "\$GITHUB_OUTPUT"; echo "gate: back up \(run history unavailable\)"/);
     expect(gate).toContain("node scripts/backup/schedule-gate.mjs \"$RUNNER_TEMP/runs.json\" \"$GITHUB_RUN_ID\" 65");
+    // Every status is read (queued and running dispatches count), on main only.
+    expect(gate).toContain("actions/workflows/backup.yml/runs?branch=main&per_page=30");
+    expect(gate).not.toContain("status=success");
     expect(backupJob).toMatch(/^\n  backup:\n    needs: gate\n    if: needs.gate.outputs.run == 'true'\n/);
     expect(backupJob).toMatch(/environment: production-backup/);
   });
@@ -46,6 +49,16 @@ describe("Independent backup architecture", () => {
     expect(decide([run(30, { conclusion: "failure" })], now, 999, 50)).toMatchObject({ run: true });
     expect(decide([run(30, { event: "schedule" })], now, 999, 50)).toMatchObject({ run: true }); // a scheduled run may have skipped: no proof
     expect(decide([run(30, { id: 999 })], now, 999, 50)).toMatchObject({ run: true });
+    // A dispatched backup still queued or running is proof enough: no second, redundant scheduled backup.
+    for (const status of ["queued", "in_progress", "waiting", "pending", "requested"])
+      expect(decide([run(2, { status, conclusion: null })], now, 999, 65), status).toMatchObject({ run: false, reason: `dispatched-backup-${status}-2min-ago` });
+    // ...but a dispatched run that failed or was cancelled is not, and neither is a dispatch on another branch.
+    expect(decide([run(2, { conclusion: "cancelled" })], now, 999, 65)).toMatchObject({ run: true });
+    expect(decide([run(2, { status: "queued", conclusion: null, head_branch: "feature" })], now, 999, 65)).toMatchObject({ run: true });
+    // A scheduled run, even recent and successful or running, never proves that the Azure trigger works.
+    expect(decide([run(5, { event: "schedule" }), run(1, { event: "schedule", status: "in_progress", conclusion: null })], now, 999, 65)).toMatchObject({ run: true });
+    // The newest proof is reported.
+    expect(decide([run(60), run(3, { status: "in_progress", conclusion: null })], now, 999, 65)).toMatchObject({ run: false, reason: "dispatched-backup-in_progress-3min-ago" });
     expect(decide([], now, 999, 50)).toMatchObject({ run: true });
     expect(decide(undefined as never, now, 999, 50)).toMatchObject({ run: true, reason: "unreadable" });
     expect(decide([run(30)], now, 999, Number.NaN)).toMatchObject({ run: true, reason: "unreadable" });

@@ -42,7 +42,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           if [ "$EVENT" != "schedule" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; echo "gate: back up ($EVENT)"; exit 0; fi
-          if gh api "repos/$GITHUB_REPOSITORY/actions/workflows/backup.yml/runs?status=success&per_page=30" > "$RUNNER_TEMP/runs.json"; then
+          if gh api "repos/$GITHUB_REPOSITORY/actions/workflows/backup.yml/runs?branch=main&per_page=30" > "$RUNNER_TEMP/runs.json"; then
             node scripts/backup/schedule-gate.mjs "$RUNNER_TEMP/runs.json" "$GITHUB_RUN_ID" 65 >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "gate: back up (run history unavailable)"
