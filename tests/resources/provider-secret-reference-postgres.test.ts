@@ -60,7 +60,7 @@ describe.runIf(enabled)("Provider secret references (F3, PostgreSQL)", () => {
     psqlOk(admin, ["-c", `CREATE DATABASE ${name}`]);
     const scratch = new URL(admin); scratch.pathname = `/${name}`;
     const url = scratch.toString();
-    const catalog = () => psqlOk(url, ["-c", `SELECT string_agg(c.relname || ':' || c.relkind, ',' ORDER BY c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'`,
+    const catalog = () => psqlOk(url, ["-c", `SELECT string_agg(c.relname::text || ':' || c.relkind::text, ',' ORDER BY c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'`,
       "-c", `SELECT string_agg(p.proname || ':' || md5(pg_get_functiondef(p.oid)), ',' ORDER BY p.proname) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'`,
       "-c", `SELECT string_agg(t.typname, ',' ORDER BY t.typname) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'public' AND t.typtype = 'e'`]).replace(/\r/g, "");
     try {
@@ -129,8 +129,9 @@ describe.runIf(enabled)("Provider secret references (F3, PostgreSQL)", () => {
     const visible = await withTenantDb({ organizationId: a.organizationId, tenantId: a.tenantId }, (tx) =>
       tx.providerSecretReference.findMany({ where: { organizationId: { in: [a.organizationId, b.organizationId] } }, select: { organizationId: true } }));
     expect(visible.map((row) => row.organizationId)).toEqual([a.organizationId]);
+    // Both organizations' governance locks are held, so the guard lets it through and row-level security is what refuses.
     const foreign = await settle(withTenantDb({ organizationId: a.organizationId, tenantId: a.tenantId }, async (tx) => {
-      await lock(tx, a);
+      await lock(tx, a); await lock(tx, b);
       return tx.providerSecretReference.create({ data: { organizationId: b.organizationId, providerConnectionId: b.connection, purpose: "DIRECTORY",
         store: "azure-key-vault", locator: "akv://luxia-app-kv/foreign", activeVersion: V1 } });
     }));
