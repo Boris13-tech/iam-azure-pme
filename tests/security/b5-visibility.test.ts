@@ -27,6 +27,11 @@ describe("B5 visibility for the customer", () => {
       expect(label!.startsWith(OPERATOR_ACTION_PREFIX), operation).toBe(true);
       expect(plain(label!), label!).toBe(true);
     }
+    // G1 correction events are operator actions too, and read as such.
+    for (const operation of ["OPERATOR.AUTHENTICATOR.ASSURANCE_CORRECTION", "OPERATOR.AUTHENTICATOR.ASSURANCE_CORRECTION.REVERT"]) {
+      expect(operationLabel(operation)!.startsWith(OPERATOR_ACTION_PREFIX), operation).toBe(true);
+      expect(plain(operationLabel(operation)!), operation).toBe(true);
+    }
     // Nothing else may borrow the operator prefix.
     for (const operation of ["RECOVERY.SIGN_IN", "SESSION.REVOKE", "IDENTITY_ACCOUNT.DISABLE"])
       expect(operationLabel(operation)!.startsWith(OPERATOR_ACTION_PREFIX), operation).toBe(false);

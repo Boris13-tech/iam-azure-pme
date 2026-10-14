@@ -6,9 +6,11 @@ name: Independent backup
 # repository): the script prints no row count, no connection detail and no secret.
 on:
   schedule:
-    # The hourly trigger is the Azure Logic App luxia-backup-dispatcher (workflow_dispatch at :53 UTC): GitHub's
-    # scheduler has never run this repository's schedules. This schedule is only a spare. If no complete backup lands
-    # for 3 hours, an Azure alert e-mails the operator (runbook docs/operations/BACKUP-RUNBOOK.md, section 2).
+    # Primary hourly trigger: the Azure Logic App luxia-backup-dispatcher (workflow_dispatch at :53 UTC). GitHub's
+    # scheduler is irregular here (0 runs until 2026-10-13; on 2026-10-14, 4 runs in 18 slots, up to an hour late), so
+    # this schedule is only a fallback: the gate job below backs up only if no dispatched backup succeeded in the last
+    # 65 minutes, which means Azure missed its slot. If no complete backup lands for 3 hours, an Azure alert e-mails the
+    # operator (runbook, section 2).
     - cron: '23 * * * *'
   workflow_dispatch:
 
@@ -20,7 +22,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Decides without any secret: workflow_dispatch (Azure, or by hand) always backs up; a scheduled run backs up only
+  # when the primary trigger missed. Fail-open: if the run history cannot be read, back up.
+  gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != "schedule" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; echo "gate: back up ($EVENT)"; exit 0; fi
+          if gh api "repos/$GITHUB_REPOSITORY/actions/workflows/backup.yml/runs?branch=main&per_page=30" > "$RUNNER_TEMP/runs.json"; then
+            node scripts/backup/schedule-gate.mjs "$RUNNER_TEMP/runs.json" "$GITHUB_RUN_ID" 65 >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "gate: back up (run history unavailable)"
+          fi
+
   backup:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04
     # Environment secrets, released to the main branch only.
     environment: production-backup
