@@ -33,10 +33,25 @@ Evidence labels:
 | **No value leaves the lease** | Errors carry a reason and the vault and secret names only, never the value, the URL or the token (tested) |
 | **Replaceable store** | The core sees the port only (architecture test). Vault-specific code lives in `lib/provider-adapters/infrastructure/secret-stores/`, over REST, with no vault SDK |
 
-**Data model (design, migration in the F3 rollout).** `ProviderSecretReference`:
-- columns: `organizationId`, `providerConnectionId`, `purpose`, `store`, `locator`, `activeVersion`, `candidateVersion`, `rotatedAt`, `revokedAt`;
-- forced RLS, append-only history;
-- unique per (connection, purpose).
+**Data model: IMPLEMENTED off Production.**
+- Migration `20261014110000_provider_secret_reference`, expand only. Rollback: `docs/operations/PROVIDER-SECRET-REFERENCE-ROLLBACK.sql`, which refuses once references exist.
+- Store: `connectionSecretReference(context, purpose, "active" | "candidate")`.
+- Proven in `tests/resources/provider-secret-reference-postgres.test.ts`.
+
+The database itself enforces that:
+- a reference points into a vault and **never at the environment**;
+- its shape cannot hold a value;
+- versions are pinned;
+- a rotation only promotes the recorded candidate;
+- a reference is revoked, never deleted, and frozen once revoked;
+- one live reference exists per connection and purpose;
+- every write takes the governance lock;
+- RLS is forced, and the foreign key is composite, so a reference never points at another organization's connection.
+
+`ProviderSecretReference`:
+- columns: `organizationId`, `providerConnectionId`, `purpose` (`OIDC_CLIENT`, `DIRECTORY`), `store`, `locator`, `activeVersion`, `candidateVersion`, `rotatedAt`, `revokedAt`;
+- forced RLS, history kept (revocation instead of deletion);
+- one live row per (connection, purpose).
 
 ## 3. Reaching the vault without a stored secret
 

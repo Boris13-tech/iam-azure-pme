@@ -38,3 +38,5 @@ GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;
 REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEvidence" FROM app_user;
 -- F2: a provider connection is never deleted (same as the migration gives app_user in Production).
 REVOKE DELETE, TRUNCATE ON "ProviderConnection" FROM app_user;
+-- F3: secret references are revoked, never deleted (same as the migration gives app_user in Production).
+REVOKE DELETE, TRUNCATE ON "ProviderSecretReference" FROM app_user;

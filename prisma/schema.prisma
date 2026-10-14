@@ -222,6 +222,7 @@ model ProviderConnection {
   authenticationEvidence AuthenticationEvidence[]
   identityCollisions     ProviderIdentityCollision[]
   tenantScopes           ProviderConnectionTenantScope[]
+  secretReferences       ProviderSecretReference[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, providerType, externalScopeId])
@@ -1517,4 +1518,29 @@ model RateLimitBucket {
 model RateLimitConfig {
   id     Int    @id @default(1)
   pepper String
+}
+
+// F3 (docs/architecture/F3-SECRET-STORE-DESIGN.md): per-connection secret references, never values. Database guards and
+// forced RLS in 20261014110000_provider_secret_reference.
+enum ProviderSecretPurpose {
+  OIDC_CLIENT
+  DIRECTORY
+}
+
+model ProviderSecretReference {
+  id                   String                @id @default(uuid())
+  organizationId       String
+  providerConnectionId String
+  purpose              ProviderSecretPurpose
+  store                String
+  locator              String
+  activeVersion        String
+  candidateVersion     String?
+  createdAt            DateTime              @default(now())
+  rotatedAt            DateTime?
+  revokedAt            DateTime?
+
+  providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict, map: "ProviderSecretReference_connection_fkey")
+
+  @@index([organizationId, providerConnectionId], map: "ProviderSecretReference_connection_idx")
 }
