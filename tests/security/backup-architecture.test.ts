@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { decide } from "../../scripts/backup/schedule-gate.mjs";
 
 // Independent backup (docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md): the rules that keep it safe, checked on
 // every change. The backup side holds the public key only; the backup role can only read; a restore never writes
@@ -22,6 +23,32 @@ describe("Independent backup architecture", () => {
     expect(workflow).toMatch(/actions\/checkout@[0-9a-f]{40} /);
     expect(workflow).toMatch(/persist-credentials: false/);
     expect([...workflow.matchAll(/secrets\.(\w+)/g)].map(m => m[1]).sort()).toEqual(["LUXIA_BACKUP_CONTAINER_URL", "LUXIA_BACKUP_DATABASE_URL"]);
+  });
+
+  it("E4: the Azure dispatch is the primary trigger; GitHub's schedule is a fallback decided by a job that holds no secret", () => {
+    const gate = workflow.slice(workflow.indexOf("\n  gate:\n"), workflow.indexOf("\n  backup:\n"));
+    const backupJob = workflow.slice(workflow.indexOf("\n  backup:\n"));
+    expect(gate).not.toMatch(/environment:|secrets\./);
+    expect(gate).toMatch(/permissions:\n      contents: read\n      actions: read\n/);
+    expect(gate).toContain(`if [ "$EVENT" != "schedule" ]; then echo "run=true"`);
+    expect(gate).toMatch(/else\n\s+echo "run=true" >> "\$GITHUB_OUTPUT"; echo "gate: back up \(run history unavailable\)"/);
+    expect(gate).toContain("node scripts/backup/schedule-gate.mjs \"$RUNNER_TEMP/runs.json\" \"$GITHUB_RUN_ID\" 50");
+    expect(backupJob).toMatch(/^\n  backup:\n    needs: gate\n    if: needs.gate.outputs.run == 'true'\n/);
+    expect(backupJob).toMatch(/environment: production-backup/);
+  });
+
+  it("E4: the schedule gate backs up unless a dispatched backup succeeded in the window, and fails open", () => {
+    const now = Date.parse("2026-10-14T01:23:30Z");
+    const run = (minutesAgo: number, extra: Record<string, unknown> = {}) => ({ id: minutesAgo, event: "workflow_dispatch", status: "completed",
+      conclusion: "success", created_at: new Date(now - minutesAgo * 60_000).toISOString(), ...extra });
+    expect(decide([run(30)], now, 999, 50)).toMatchObject({ run: false });            // Azure ran at :53: skip
+    expect(decide([run(90)], now, 999, 50)).toMatchObject({ run: true });             // Azure missed :53: back up
+    expect(decide([run(30, { conclusion: "failure" })], now, 999, 50)).toMatchObject({ run: true });
+    expect(decide([run(30, { event: "schedule" })], now, 999, 50)).toMatchObject({ run: true }); // a scheduled run may have skipped: no proof
+    expect(decide([run(30, { id: 999 })], now, 999, 50)).toMatchObject({ run: true });
+    expect(decide([], now, 999, 50)).toMatchObject({ run: true });
+    expect(decide(undefined as never, now, 999, 50)).toMatchObject({ run: true, reason: "unreadable" });
+    expect(decide([run(30)], now, 999, Number.NaN)).toMatchObject({ run: true, reason: "unreadable" });
   });
 
   it("the backup side can encrypt only: no private key, no decryption, one public X25519 recipient with its key id", () => {

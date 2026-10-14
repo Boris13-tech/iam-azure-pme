@@ -8,7 +8,7 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 | Part | Where | Notes |
 |---|---|---|
 | Backup role | `luxia_backup` in Production (`scripts/backup/luxia-backup-role.sql`) | SELECT only, read-only by default, BYPASSRLS (required, see the architecture), 3 connections at most. Rollback: `docs/operations/BACKUP-ROLE-ROLLBACK.sql` |
-| Job | `.github/workflows/backup.yml`, started every hour at :53 UTC by the Azure Logic App `luxia-backup-dispatcher`, on demand, and by the GitHub schedule `23 * * * *` if GitHub ever honours it | Runs `scripts/backup/backup.mjs` in the GitHub environment `production-backup` (secrets released to `main` only). Public log: no count, no secret |
+| Job | `.github/workflows/backup.yml`, started every hour at :53 UTC by the Azure Logic App `luxia-backup-dispatcher`, on demand, and by the GitHub schedule `23 * * * *` when it fires. A secretless gate job then backs up only if Azure missed its slot | Runs `scripts/backup/backup.mjs` in the GitHub environment `production-backup` (secrets released to `main` only). Public log: no count, no secret |
 | Storage | Azure subscription of the operator, resource group `luxia-backup-rg`, account `luxiabackupfrd325`, container `prod-backups`, region France Central | Zone-redundant (3 zones). Versioning. Version-level immutability, 30 days. Blob and container soft delete, 14 days. Management lock `luxia-backup-no-delete` on the group |
 | Writer credential | Secret `LUXIA_BACKUP_CONTAINER_URL` | Container SAS bound to the stored access policy `bw-202610-r2`: create and read only (no overwrite, no delete, no list). Expires 2027-10-13 |
 | Database credential | Secret `LUXIA_BACKUP_DATABASE_URL` | `luxia_backup` on the direct endpoint (an exported snapshot cannot live behind the pooler) |
@@ -25,7 +25,7 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 ## 2. Watching it, and catching up
 
 **What can go wrong:**
-- **GitHub's scheduler has never run this workflow:** 0 scheduled runs since the repository was created; 18:23, 20:23 and 21:23 were missed on 2026-10-13. The hourly trigger is therefore in Azure (line 1). The GitHub schedule stays only as a spare.
+- **GitHub's scheduler is unreliable for this repository.** At diagnosis time (2026-10-13 22:10Z) it had never run: 0 scheduled runs since the repository was created, and 18:23, 20:23 and 21:23 were missed. Since then it ran once, at 2026-10-14 00:23Z, then missed 01:23 and 02:23. The hourly trigger is therefore in Azure (line 1). The GitHub schedule is a gated fallback: it backs up only when Azure missed (E4 certification, section 7).
 - GitHub also disables scheduled workflows in a public repository after 60 days without activity.
 - A job can fail: its database credential, its storage credential, or Neon can be down.
 
@@ -33,7 +33,7 @@ How LUXIA backs up Production outside Neon, and how to restore it after losing t
 
 | # | Mechanism | Covers | Outside GitHub |
 |---|---|---|---|
-| 1 | **Hourly trigger from Azure.** The Logic App `luxia-backup-dispatcher` starts `backup.yml` every hour at minute 53 UTC. A failed run is caught up by the next one. The GitHub schedule (`23 * * * *`) is a spare | One failed run: data stays at most about 2 hours old | **Yes** (the trigger) |
+| 1 | **Hourly trigger from Azure.** The Logic App `luxia-backup-dispatcher` starts `backup.yml` every hour at minute 53 UTC. A failed run is caught up by the next one. The GitHub schedule (`23 * * * *`) is a gated fallback: it backs up only if no dispatched backup succeeded in the last 50 minutes | One failed run: data stays about 1.5 to 2 hours old | **Yes** (the trigger) |
 | 2 | **Azure alert `luxia-backup-freshness`**, detailed below | Two misses in a row, GitHub outages, disabled schedules, broken credentials, and a broken log pipeline | **Yes** |
 | 3 | **Catch-up by the operator** on alert (below) | Everything that lines 1 and 2 report | Partly, see 3b |
 
