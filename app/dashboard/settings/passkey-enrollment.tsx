@@ -31,11 +31,13 @@ export function PasskeyEnrollment() {
       if (!credential) throw new Error();
       const attestation = credential.response as AuthenticatorAttestationResponse;
       const publicKey = attestation.getPublicKey?.();
-      if (!publicKey) throw new Error("PUBLIC_KEY_UNAVAILABLE");
+      const authenticatorData = attestation.getAuthenticatorData?.();
+      if (!publicKey || !authenticatorData) throw new Error("PUBLIC_KEY_UNAVAILABLE");
       const completed = await fetch("/api/auth/local/enrollment/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         providerConnectionId: begin.providerConnectionId, identityAccountId: begin.identityAccountId,
         transactionId: begin.transactionId, challenge: begin.challenge,
-        credentialId: encode(credential.rawId), publicKey: encode(publicKey),
+        credentialId: encode(credential.rawId), clientDataJSON: encode(attestation.clientDataJSON),
+        authenticatorData: encode(authenticatorData), publicKey: encode(publicKey),
       }) });
       if (!completed.ok) {
         const failure = await completed.json().catch(() => ({ error: "ENROLLMENT_COMPLETE_FAILED" }));
