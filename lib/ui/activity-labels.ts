@@ -38,6 +38,9 @@ export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze(
   "BREAK_GLASS.IDENTITY_ACCOUNT.DISABLE": `${OPERATOR_ACTION_PREFIX}compte désactivé`,
   "BREAK_GLASS.DOMAIN.RELEASE": `${OPERATOR_ACTION_PREFIX}domaine libéré`,
   "BREAK_GLASS.RECOVERY_INVITATION.ISSUE": `${OPERATOR_ACTION_PREFIX}invitation d’administrateur de secours émise`,
+  // G1 (LUXIA Key decision P4): correction of an unproven "hardware-bound" claim on passkeys enrolled before #64.
+  "OPERATOR.AUTHENTICATOR.ASSURANCE_CORRECTION": `${OPERATOR_ACTION_PREFIX}niveau de garantie de clés d’accès corrigé`,
+  "OPERATOR.AUTHENTICATOR.ASSURANCE_CORRECTION.REVERT": `${OPERATOR_ACTION_PREFIX}correction du niveau de garantie annulée`,
   // Consultations (read events)
   "AUDIT.READ": "Journal d’audit consulté", "DASHBOARD.POSTURE.READ": "Vue d’ensemble consultée", "SUBJECT.READ": "Identités consultées",
   "SESSION.READ": "Sessions consultées", "ASSIGNMENT.READ": "Accès consultés", "IDENTITY_ACCOUNT.READ": "Comptes consultés",
