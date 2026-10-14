@@ -34,6 +34,7 @@ import {
 } from "../..";
 import { verifyTotp } from "./totp";
 import { verifyPasskeyAssertion } from "./webauthn";
+import { type PasskeyRegistration, verifyPasskeyRegistration } from "./webauthn-registration";
 import {
   LUXIA_LOCAL_PROVIDER_TYPE,
   type LocalAuthenticatorRecord,
@@ -153,22 +154,26 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
     return { transactionId: id, kind: "LOCAL_CHALLENGE", publicChallenge: { challenge: raw }, expiresAt };
   }
 
+  // The stored key comes only from a verified registration ceremony (clientData bound to this enrollment
+  // challenge and origin, rpId hash, user presence and verification, credential id and COSE key matching
+  // the presented key), never from a public key the caller supplies. The challenge is consumed first, so a
+  // failed ceremony burns it. Attestation is "none": hardware binding cannot be proven and is never claimed.
   async enrollPasskey(context: ProviderOperationContext, input: {
     identityAccountId: string; enrollmentTransactionId: string; enrollmentChallenge: string;
-    credentialId: string; publicKey: string; relyingPartyId: string; allowedOrigin: string;
-    hardwareBound?: boolean; userVerificationRequired?: boolean; enrolledBySubjectId?: string;
+    registration: PasskeyRegistration; relyingPartyId: string; allowedOrigin: string; enrolledBySubjectId?: string;
   }): Promise<string> {
     await this.validate(context, "AUTHENTICATION");
-    if (!input.credentialId || !input.publicKey || !input.relyingPartyId || !input.allowedOrigin) invalid("Incomplete passkey enrollment");
+    if (!input.registration || !input.relyingPartyId || !input.allowedOrigin) invalid("Incomplete passkey enrollment");
     await this.consumeEnrollment(context, input.identityAccountId, input.enrollmentTransactionId, input.enrollmentChallenge);
+    const passkey = verifyPasskeyRegistration({ ...input.registration, expectedChallenge: input.enrollmentChallenge,
+      expectedOrigin: input.allowedOrigin, rpId: input.relyingPartyId });
     const id = randomUUID();
     await this.store.saveAuthenticator(context, {
       id, identityAccountId: input.identityAccountId, type: "PASSKEY", status: "ACTIVE",
       credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", credentialFormatVersion: 1,
       ...CURRENT_WEBAUTHN_CRYPTO, keyId: id, keyVersion: 1,
-      verifierPolicyVersion: 1, hardwareBound: input.hardwareBound ?? false,
-      userVerificationRequired: input.userVerificationRequired ?? false,
-      credentialId: input.credentialId, publicKey: input.publicKey,
+      verifierPolicyVersion: 1, hardwareBound: false, userVerificationRequired: true,
+      credentialId: passkey.credentialId, publicKey: passkey.publicKeyPem,
       relyingPartyId: input.relyingPartyId, allowedOrigin: input.allowedOrigin, signCount: 0,
     }, input.enrolledBySubjectId ? { enrollmentAudit: { actorSubjectId: input.enrolledBySubjectId } } : undefined);
     return id;

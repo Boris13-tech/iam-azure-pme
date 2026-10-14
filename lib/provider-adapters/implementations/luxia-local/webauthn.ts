@@ -34,19 +34,21 @@ export function verifyPasskeyAssertion(input: {
       assertion.credentialId !== authenticator.credentialId) fail("PASSKEY_BINDING_INVALID");
   if (Buffer.byteLength(authenticator.publicKey, "utf8") > MAX_WEBAUTHN_FIELD_BYTES)
     fail("PASSKEY_PUBLIC_KEY_SIZE_INVALID");
-  let client: { type?: string; challenge?: string; origin?: string };
+  let client: { type?: string; challenge?: string; origin?: string; crossOrigin?: unknown };
   try { client = JSON.parse(decode(assertion.clientDataJSON).toString("utf8")); }
   catch { return fail("PASSKEY_CLIENT_DATA_INVALID"); }
   if (client.type !== "webauthn.get" || client.challenge !== input.expectedChallenge ||
-      client.origin !== authenticator.allowedOrigin) fail("PASSKEY_CLIENT_DATA_MISMATCH");
+      client.origin !== authenticator.allowedOrigin || client.crossOrigin === true) fail("PASSKEY_CLIENT_DATA_MISMATCH");
   const authData = decode(assertion.authenticatorData);
   if (authData.length < 37 || !timingSafeEqual(authData.subarray(0, 32), digest(authenticator.relyingPartyId!)))
     fail("PASSKEY_RP_MISMATCH");
   if ((authData[32] & 0x01) === 0) fail("PASSKEY_USER_PRESENCE_REQUIRED");
   if (authenticator.userVerificationRequired && (authData[32] & 0x04) === 0)
     fail("PASSKEY_USER_VERIFICATION_REQUIRED");
+  // WebAuthn signature counter: once either side is non-zero it must strictly increase. A counter that
+  // falls back (to zero included) is a possible cloned authenticator and is refused, never stored.
   const counter = authData.readUInt32BE(33);
-  if (counter !== 0 && counter <= authenticator.signCount) fail("PASSKEY_REPLAY_DETECTED");
+  if ((counter !== 0 || authenticator.signCount !== 0) && counter <= authenticator.signCount) fail("PASSKEY_REPLAY_DETECTED");
   const signed = Buffer.concat([authData, digest(decode(assertion.clientDataJSON))]);
   let publicKey;
   try { publicKey = createPublicKey(authenticator.publicKey!); }

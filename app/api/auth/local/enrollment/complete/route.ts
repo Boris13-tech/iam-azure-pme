@@ -6,11 +6,6 @@ import { ProviderAdapterError } from "@/lib/provider-adapters";
 
 export const runtime = "nodejs";
 
-function spkiPem(value: string): string {
-  const base64 = Buffer.from(value, "base64url").toString("base64");
-  return `-----BEGIN PUBLIC KEY-----\n${base64.match(/.{1,64}/g)?.join("\n") ?? ""}\n-----END PUBLIC KEY-----`;
-}
-
 export async function POST(request: Request) {
   try {
     const auth = await requireAuth();
@@ -26,12 +21,11 @@ export async function POST(request: Request) {
       identityAccountId: body.identityAccountId,
       enrollmentTransactionId: body.transactionId,
       enrollmentChallenge: body.challenge,
-      credentialId: body.credentialId,
-      publicKey: spkiPem(body.publicKey),
+      // The whole registration ceremony is verified by the adapter; the stored key is the one it proves.
+      registration: { credentialId: body.credentialId, clientDataJSON: body.clientDataJSON,
+        authenticatorData: body.authenticatorData, publicKey: body.publicKey },
       relyingPartyId: new URL(request.url).hostname,
       allowedOrigin: new URL(request.url).origin,
-      hardwareBound: true,
-      userVerificationRequired: true,
       enrolledBySubjectId: auth.subjectId,
     });
     return NextResponse.json({ authenticatorId: id, status: "ENROLLED" });

@@ -1,8 +1,9 @@
-import { createHash, createHmac, generateKeyPairSync, sign } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { LuxiaLocalAdapter } from "../../lib/provider-adapters/implementations/luxia-local";
 import { context, defineProviderAdapterContract } from "./provider-adapter-contract-kit";
 import { MemoryLocalStore, MemorySecrets } from "./luxia-local-test-kit";
+import { softwarePasskey } from "../helpers/software-passkey";
 
 const make = (now = () => new Date("2026-09-21T12:00:00.000Z")) => {
   const store = new MemoryLocalStore(); const secrets = new MemorySecrets();
@@ -23,18 +24,49 @@ describe("LUXIA_LOCAL authentication security", () => {
   it("verifies a WebAuthn assertion, origin, RP and monotonic counter; rejects replay", async () => {
     const { adapter, store } = make(); const created = await adapter.createIdentity(context("create-passkey"), { subjectId: "subject-1", displayName: "Alice", principalName: "alice" });
     const identity = await adapter.getUser(context("lookup-passkey"), created.identity!); const account = identity!.attributes.identityAccountId as string;
-    const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" }); const publicKey = pair.publicKey.export({ type: "spki", format: "pem" }).toString();
-    const enrollment = await adapter.beginEnrollment(context("begin-enroll-passkey"), account);
-    const authenticatorId = await adapter.enrollPasskey(context("enroll-passkey"), { identityAccountId: account, enrollmentTransactionId: enrollment.transactionId, enrollmentChallenge: String(enrollment.publicChallenge!.challenge), credentialId: "credential-1", publicKey, relyingPartyId: "local.luxia", allowedOrigin: "https://local.luxia" });
-    expect([...store.authenticators.values()][0]).toMatchObject({ credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", algorithmId: "WEBAUTHN_ES256", algorithmVersion: 1, keyVersion: 1 });
+    const passkey = softwarePasskey("local.luxia", "https://local.luxia");
+    const enrollment = await adapter.beginEnrollment(context("begin-enroll-passkey"), account); const enrollmentChallenge = String(enrollment.publicChallenge!.challenge);
+    const authenticatorId = await adapter.enrollPasskey(context("enroll-passkey"), { identityAccountId: account, enrollmentTransactionId: enrollment.transactionId, enrollmentChallenge, registration: passkey.register(enrollmentChallenge), relyingPartyId: "local.luxia", allowedOrigin: "https://local.luxia" });
+    expect([...store.authenticators.values()][0]).toMatchObject({ credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", algorithmId: "WEBAUTHN_ES256", algorithmVersion: 1, keyVersion: 1,
+      credentialId: passkey.credentialId, publicKey: passkey.publicKeyPem, hardwareBound: false, userVerificationRequired: true });
     const start = await adapter.beginAuthentication({ context: context("begin-passkey"), loginHint: "alice" });
-    const challenge = String(start.publicChallenge!.challenge); const clientDataJSON = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge, origin: "https://local.luxia" })).toString("base64url");
-    const authData = Buffer.alloc(37); createHash("sha256").update("local.luxia").digest().copy(authData); authData[32] = 1; authData.writeUInt32BE(1, 33);
-    const signed = Buffer.concat([authData, createHash("sha256").update(Buffer.from(clientDataJSON, "base64url")).digest()]);
+    const challenge = String(start.publicChallenge!.challenge);
     // Browsers return the WebAuthn credential ID, never LUXIA's internal authenticator row ID.
-    const response = { externalObjectId: created.identity!.externalObjectId, challenge, credentialId: "credential-1", clientDataJSON, authenticatorData: authData.toString("base64url"), signature: sign("sha256", signed, pair.privateKey).toString("base64url"), credentialType: "PASSKEY" };
-    await expect(adapter.completeAuthentication({ context: context("complete-passkey"), transactionId: start.transactionId, response })).resolves.toMatchObject({ assuranceLevel: "LOCAL_PASSKEY", evidence: { method: "PASSKEY", outcome: "VERIFIED", assurance: { phishingResistant: true }, provenance: { source: "LOCAL_VERIFIER", offline: true, algorithmId: "WEBAUTHN_ES256", algorithmVersion: 1, keyId: authenticatorId, keyVersion: "1" } } });
+    const response = { externalObjectId: created.identity!.externalObjectId, challenge, ...passkey.assert(challenge), credentialType: "PASSKEY" };
+    await expect(adapter.completeAuthentication({ context: context("complete-passkey"), transactionId: start.transactionId, response })).resolves.toMatchObject({ assuranceLevel: "LOCAL_PASSKEY", evidence: { method: "PASSKEY", outcome: "VERIFIED", assurance: { phishingResistant: true, hardwareBound: false, userVerification: "VERIFIED" }, provenance: { source: "LOCAL_VERIFIER", offline: true, algorithmId: "WEBAUTHN_ES256", algorithmVersion: 1, keyId: authenticatorId, keyVersion: "1" } } });
     await expect(adapter.completeAuthentication({ context: context("replay-passkey"), transactionId: start.transactionId, response })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+  });
+
+  it("enrolls a passkey only from a verified registration ceremony, never from a caller-supplied public key", async () => {
+    const { adapter, store } = make(); const created = await adapter.createIdentity(context("create-ceremony"), { subjectId: "subject-1", displayName: "Alice", principalName: "alice" });
+    const account = (await adapter.getUser(context("lookup-ceremony"), created.identity!))!.attributes.identityAccountId as string;
+    const passkey = softwarePasskey("local.luxia", "https://local.luxia"); const other = softwarePasskey("local.luxia", "https://local.luxia");
+    const attempt = async (registration: (challenge: string) => Record<string, string>) => {
+      const enrollment = await adapter.beginEnrollment(context("begin-ceremony"), account); const enrollmentChallenge = String(enrollment.publicChallenge!.challenge);
+      try {
+        await adapter.enrollPasskey(context("enroll-ceremony"), { identityAccountId: account, enrollmentTransactionId: enrollment.transactionId, enrollmentChallenge,
+          registration: registration(enrollmentChallenge) as never, relyingPartyId: "local.luxia", allowedOrigin: "https://local.luxia" });
+        return "ACCEPTED";
+      } catch (error) { return (error as { safeDetails?: { reason?: string } }).safeDetails?.reason; }
+    };
+    const der = (pem: string) => Buffer.from(pem.replace(/-----[^-]+-----|\s/g, ""), "base64").toString("base64url");
+    // The pre-fix request shape: an identifier and a public key, no ceremony.
+    expect(await attempt(() => ({ credentialId: passkey.credentialId, publicKey: der(passkey.publicKeyPem) }))).toBe("REGISTRATION_CLIENT_DATA_INVALID");
+    expect(await attempt(() => passkey.register("a-ceremony-for-another-challenge"))).toBe("REGISTRATION_CLIENT_DATA_MISMATCH");
+    expect(await attempt((c) => passkey.register(c, { origin: "https://attacker.example" }))).toBe("REGISTRATION_CLIENT_DATA_MISMATCH");
+    expect(await attempt((c) => passkey.register(c, { rpId: "attacker.example" }))).toBe("REGISTRATION_RP_MISMATCH");
+    expect(await attempt((c) => passkey.register(c, { flags: 0x41 }))).toBe("REGISTRATION_USER_VERIFICATION_REQUIRED");
+    expect(await attempt((c) => passkey.register(c, { publicKey: der(other.publicKeyPem) }))).toBe("REGISTRATION_PUBLIC_KEY_MISMATCH");
+    expect(await attempt((c) => passkey.register(c, { credentialId: other.credentialId }))).toBe("REGISTRATION_CREDENTIAL_MISMATCH");
+    expect(store.authenticators.size).toBe(0);
+    // A failed ceremony burns its challenge: the same enrollment cannot be retried.
+    const enrollment = await adapter.beginEnrollment(context("begin-burn"), account); const enrollmentChallenge = String(enrollment.publicChallenge!.challenge);
+    const input = { identityAccountId: account, enrollmentTransactionId: enrollment.transactionId, enrollmentChallenge, relyingPartyId: "local.luxia", allowedOrigin: "https://local.luxia" };
+    await expect(adapter.enrollPasskey(context("burn-first"), { ...input, registration: passkey.register(enrollmentChallenge, { flags: 0x41 }) })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+    await expect(adapter.enrollPasskey(context("burn-retry"), { ...input, registration: passkey.register(enrollmentChallenge) })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+    expect(store.authenticators.size).toBe(0);
+    expect(await attempt((c) => passkey.register(c))).toBe("ACCEPTED");
+    expect(store.authenticators.size).toBe(1);
   });
 
   it("accepts local TOTP once per time step and never persists the secret value", async () => {

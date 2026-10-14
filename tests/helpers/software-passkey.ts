@@ -27,10 +27,11 @@ export function softwarePasskey(rpId = "localhost", origin = "http://localhost:3
         publicKey: overrides.publicKey ?? b64(publicKey.export({ format: "der", type: "spki" }) as Buffer),
       };
     },
-    assert(challenge: string) {
+    assert(challenge: string, overrides: { counter?: number; crossOrigin?: boolean } = {}) {
       counter += 1;
-      const clientDataJSON = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge, origin }));
-      const count = Buffer.alloc(4); count.writeUInt32BE(counter);
+      const clientDataJSON = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge, origin,
+        ...(overrides.crossOrigin === undefined ? {} : { crossOrigin: overrides.crossOrigin }) }));
+      const count = Buffer.alloc(4); count.writeUInt32BE(overrides.counter ?? counter);
       const authenticatorData = Buffer.concat([rpIdHash, Buffer.from([0x05]), count]);
       const signature = sign("sha256", Buffer.concat([authenticatorData, createHash("sha256").update(clientDataJSON).digest()]), privateKey);
       return { credentialId: b64(rawId), clientDataJSON: b64(clientDataJSON), authenticatorData: b64(authenticatorData), signature: b64(signature) };
