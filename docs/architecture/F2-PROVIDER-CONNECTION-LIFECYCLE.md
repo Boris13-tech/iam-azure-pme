@@ -10,7 +10,7 @@ Phase F2 of the approved design in `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.m
 | F2 code in Production | **PRODUCTION VERIFIED**, 2026-10-15: `d631edb` deployed 17:02Z (section 5.2) |
 | DISABLE, QUARANTINE, RELEASE, ACTIVATE | **VERIFIED** by CI and the rehearsals. Their Production proof needs a test connection supported by F4 |
 | M2 (RLS) rehearsal on a fresh clone of Production | **VERIFIED**, 2026-10-15: isolation of every organization, sign-in paths, lossless rollback and re-application (section 4.3) |
-| Production M2 (RLS) | Operator gate |
+| Production M2 (RLS) | **PRODUCTION VERIFIED**, 2026-10-15 22:05Z: every organization isolated, sign-ins and backups work under it (section 5.3) |
 
 Evidence labels:
 - **VERIFIED:** read in the code, CI, or the Production database (read-only).
@@ -309,3 +309,23 @@ Every organization was compared, read-only, between 17:00:44Z (before the deploy
   - The only new sessions (2) and the only revocation (1) belong to the operator, in Legrand Tech.
   - No open session rests on a non-ACTIVE organization, account or connection.
 - **Journal and evidence:** append-only. Every earlier row is identical, and the new rows are dated after the baseline.
+
+### 5.3 M2 (row-level security) in Production, 2026-10-15 (PRODUCTION VERIFIED)
+
+Operator gate, approved by the operator. The running application stayed the F2 deployment (`d631edb`) throughout.
+
+The gate tool uses the standard of sections 4.3 and 5.1. It was first exercised end to end, refusals included, on a disposable clone of Production.
+
+| Step | Result |
+|---|---|
+| Independent backup just before | `20261015T220301Z-09d7eb`: 22:03Z, 26 migrations, verified |
+| BEFORE (read-only) | Schema `e6a7e3a4b58f` and definitions `fdd949998883`: **the rehearsed BEFORE**. Only M2 pending. The runtime saw all 4 connections from any organization's context |
+| M2 | 22:05:01Z → 22:05:10Z, `prisma migrate deploy` as the owner. Data and definitions re-checked unchanged just before |
+| AFTER (read-only), 12/12 | ENABLE and FORCE ROW LEVEL SECURITY, one policy. **`app_user` sees 0 connections without context, and in each organization exactly its own, 0 foreign.** Data, sessions and authority identical. The 4 connections ACTIVE. Schema `e31636851362` and definitions `31aa741dc9cd`: **the rehearsed AFTER-M2**. `luxia_backup` keeps BYPASSRLS |
+| Anonymous smoke test | 20/20 |
+| Operator's Microsoft sign-in, 22:06:59Z | 11/11 |
+| Operator's sign-in with an existing passkey, 22:08:39Z | 6/6: through the ACTIVE `LUXIA_LOCAL` connection, no enrollment |
+| Every organization, 22:03:40Z → 22:09:12Z | 11/11: connections, authority (every column), sessions coherent, journal and evidence append-only |
+| Next hourly backup | `20261015T225341Z-4d1bc1`: 22:53Z, 51 tables, **27 migrations**, verified. Backups read through row-level security |
+
+**Rollback:** `docs/operations/PROVIDER-CONNECTION-RLS-ROLLBACK.sql`. Lossless, since no data is involved, and possible at any time.
