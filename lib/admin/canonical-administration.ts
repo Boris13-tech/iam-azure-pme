@@ -554,6 +554,8 @@ export async function createProviderConnection(
       data: {
         organizationId: auth.organizationId,
         providerType: input.providerType,
+        // F2: an external connection starts as DRAFT and signs nobody in until it is tested and activated (F4).
+        status: input.providerType === "LUXIA_LOCAL" ? "ACTIVE" : "DRAFT",
         externalScopeId: input.externalScopeId.trim(),
         name: input.name.trim(),
       },
@@ -569,7 +571,7 @@ export async function createProviderConnection(
     await writeAudit(tx, auth, {
       operation: "PROVIDER.CREATE",
       changeId,
-      metadata: { providerConnectionId: connection.id, providerType: connection.providerType },
+      metadata: { providerConnectionId: connection.id, providerType: connection.providerType, status: connection.status },
     });
     return connection;
   });

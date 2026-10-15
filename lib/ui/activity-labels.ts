@@ -16,6 +16,10 @@ export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze(
   "RESOURCE.ASSIGNMENT.UPDATE": "Accès à une ressource modifié", "AUTHORIZATION.DENIED": "Action refusée",
   "SESSION.REVOKE": "Session révoquée", "IDENTITY_ACCOUNT.DISABLE": "Compte désactivé", "IDENTITY_ACCOUNT.LINK": "Compte lié",
   "SUBJECT.CREATE": "Identité créée", "SUBJECT.UPDATE": "Identité modifiée", "PROVIDER.CREATE": "Fournisseur ajouté", "PROVIDER.UPDATE": "Fournisseur modifié",
+  // Provider connection lifecycle (sovereign providers, F2)
+  "PROVIDER.CONNECTION.PLAN": "Changement de fournisseur préparé", "PROVIDER.CONNECTION.DISABLE": "Fournisseur désactivé",
+  "PROVIDER.CONNECTION.ACTIVATE": "Fournisseur réactivé", "PROVIDER.CONNECTION.QUARANTINE": "Fournisseur mis en quarantaine, sessions révoquées",
+  "PROVIDER.CONNECTION.RELEASE": "Fournisseur sorti de quarantaine (reste désactivé)",
   "RESOURCE.CREATE": "Ressource créée", "RESOURCE.UPDATE": "Ressource modifiée", "RESOURCE.CATALOG.CREATE": "Ressource créée",
   "RESOURCE.CATALOG.UPDATE": "Ressource modifiée", "RESOURCE.SCOPE.CREATE": "Périmètre créé", "RESOURCE.ENTITLEMENT.CREATE": "Droit créé",
   "RESOURCE.ENTITLEMENT.REVOKE": "Droit retiré", "SOD.POLICY.CREATE": "Politique de séparation créée", "SOD.POLICY.UPDATE": "Politique de séparation modifiée",
@@ -75,4 +79,5 @@ export const ASSURANCE_LABELS: Readonly<Record<string, string>> = Object.freeze(
 export const REFUSAL_LABELS: Readonly<Record<string, string>> = Object.freeze({
   SUBJECT_NOT_ACTIVE: "Identité non active", IDENTITY_ACCOUNT_DISABLED: "Compte désactivé",
   RECOVERY_CODE_INVALID: "Code de récupération invalide ou déjà utilisé",
+  PROVIDER_CONNECTION_NOT_ACTIVE: "Fournisseur d’identité désactivé ou en quarantaine",
 });

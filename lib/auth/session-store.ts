@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { rawPrisma } from "../db/raw-prisma";
 import { withTenantDb } from "../db/scoped-client";
-import { lockOrganizationActive } from "../organizations/lifecycle";
+import { lockOrganizationActive, lockProviderConnectionActive } from "../organizations/lifecycle";
 import * as crypto from "crypto";
 
 export type SessionContext = {
@@ -12,7 +12,7 @@ export type SessionContext = {
 };
 
 export class SessionCreationDeniedError extends Error {
-  constructor(public readonly reason: "IDENTITY_ACCOUNT_DISABLED" | "SUBJECT_NOT_ACTIVE" | "ORGANIZATION_NOT_ACTIVE") {
+  constructor(public readonly reason: "IDENTITY_ACCOUNT_DISABLED" | "SUBJECT_NOT_ACTIVE" | "ORGANIZATION_NOT_ACTIVE" | "PROVIDER_CONNECTION_NOT_ACTIVE") {
     super(reason);
     this.name = "SessionCreationDeniedError";
   }
@@ -51,6 +51,10 @@ export class SessionStore {
         // session, and a status change waits until this transaction ends.
         if (!await lockOrganizationActive(tx, ctx.organizationId)) {
           throw new SessionCreationDeniedError("ORGANIZATION_NOT_ACTIVE");
+        }
+        // F2 kill switch: a session is opened only through an ACTIVE connection (share-locked, same as B3).
+        if (!await lockProviderConnectionActive(tx, ctx.organizationId, ctx.identityAccountId)) {
+          throw new SessionCreationDeniedError("PROVIDER_CONNECTION_NOT_ACTIVE");
         }
         const account = await tx.identityAccount.findFirst({
           where: { id: ctx.identityAccountId, subjectId: ctx.subjectId },

@@ -76,7 +76,7 @@ export async function completeSignup(input: { code: unknown } & PasskeyRegistrat
       const context = { organizationId, tenantId };
 
       // 2. Sign-in method of the new organization and its founder.
-      const connection = await tx.providerConnection.create({ data: { organizationId, providerType: "LUXIA_LOCAL", externalScopeId: tenantId, name: "LUXIA Local" } });
+      const connection = await tx.providerConnection.create({ data: { organizationId, providerType: "LUXIA_LOCAL", status: "ACTIVE", externalScopeId: tenantId, name: "LUXIA Local" } });
       await tx.providerConnectionTenantScope.create({ data: { ...context, providerConnectionId: connection.id } });
       const founder = await tx.subject.create({ data: { ...context, type: "HUMAN", name: payload.founderName } });
       await createPasskeyIdentity(tx, context, { subjectId: founder.id, connectionId: connection.id, principalName: payload.principalName,

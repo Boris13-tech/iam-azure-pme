@@ -18,6 +18,32 @@ export async function lockOrganizationActive(tx: Prisma.TransactionClient, organ
   return rows[0]?.status === "ACTIVE";
 }
 
+/**
+ * F2 kill switch: share-locks the connection of an identity account and tells whether it is ACTIVE. Called
+ * after lockOrganizationActive (same lock order as the database trigger). A status change waits until the
+ * sign-in transaction ends, so a quarantine then sees, and revokes, the session it created. Never raises.
+ */
+export async function lockProviderConnectionActive(tx: Prisma.TransactionClient, organizationId: string, identityAccountId: string): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ status: string }>>`
+    SELECT pc."status"::text AS status FROM "IdentityAccount" ia
+    JOIN "ProviderConnection" pc ON pc."organizationId" = ia."organizationId" AND pc."id" = ia."providerConnectionId"
+    WHERE ia."organizationId" = ${organizationId} AND ia."id" = ${identityAccountId}
+    FOR SHARE OF pc`;
+  return rows[0]?.status === "ACTIVE";
+}
+
+/**
+ * F2 quarantine effect, in the caller's transaction (the connection row already locked and set QUARANTINED):
+ * revokes every open session opened through the connection, in the caller's tenant scope. A session of another
+ * tenant would be left open, and the deferred completeness check then fails the whole transaction.
+ */
+export async function revokeProviderConnectionSessions(tx: Prisma.TransactionClient, organizationId: string, providerConnectionId: string): Promise<number> {
+  return tx.$executeRaw`UPDATE "Session" s SET "revokedAt" = (now() AT TIME ZONE 'UTC')
+    FROM "IdentityAccount" ia
+    WHERE ia."organizationId" = s."organizationId" AND ia."id" = s."identityAccountId"
+      AND s."organizationId" = ${organizationId} AND ia."providerConnectionId" = ${providerConnectionId} AND s."revokedAt" IS NULL`;
+}
+
 type Counts = { openSessions: number; openInvitations: number; heldDomains: number };
 export type OrganizationTransition = {
   organizationId: string; from: OrganizationStatus; to: OrganizationStatus; before: Counts; after: Counts;

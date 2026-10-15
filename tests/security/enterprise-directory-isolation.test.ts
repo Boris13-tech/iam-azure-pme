@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTenantDb } from "../../lib/db/scoped-client";
 import { PrismaDirectoryProjectionStore } from "../../lib/provider-adapters/implementations/enterprise-directory";
 import { adminPrisma } from "../helpers/admin-prisma";
+import { purgeTestOrganization } from "../helpers/purge-test-organization";
 
 describe("Phase 6H enterprise directory tenant isolation", () => {
   const org = randomUUID(), tenantA = randomUUID(), tenantB = randomUUID(), subjectA = randomUUID(), subjectB = randomUUID(), connection = randomUUID();
@@ -21,12 +22,15 @@ describe("Phase 6H enterprise directory tenant isolation", () => {
         externalObjectId, reasonCode: "DUPLICATE_EXTERNAL_ID", evidence: { reason: "test" } } });
   });
   afterAll(async () => {
-    await adminPrisma.providerIdentityCollision.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.identityAccount.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.subject.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.tenant.deleteMany({ where: { organizationId: org } });
-    await adminPrisma.organization.deleteMany({ where: { id: org } });
+    // F2: connections are never deleted outside a test database's superuser purge.
+    await purgeTestOrganization(async (tx) => {
+      await tx.providerIdentityCollision.deleteMany({ where: { organizationId: org } });
+      await tx.identityAccount.deleteMany({ where: { organizationId: org } });
+      await tx.providerConnection.deleteMany({ where: { organizationId: org } });
+      await tx.subject.deleteMany({ where: { organizationId: org } });
+      await tx.tenant.deleteMany({ where: { organizationId: org } });
+      await tx.organization.deleteMany({ where: { id: org } });
+    });
   });
 
   it("links and replays one provider projection without changing the canonical Subject", async () => {

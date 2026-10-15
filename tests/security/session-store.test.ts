@@ -1,4 +1,5 @@
 import { adminPrisma } from "../helpers/admin-prisma";
+import { purgeTestOrganization } from "../helpers/purge-test-organization";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { SessionCreationDeniedError, SessionStore } from "../../lib/auth/session-store";
 import { rawPrisma } from "../../lib/db/raw-prisma";
@@ -33,12 +34,15 @@ describe("SessionStore Security", () => {
   });
 
   afterAll(async () => {
-    await adminPrisma.session.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.identityAccount.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.subject.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.tenant.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.providerConnection.deleteMany({ where: { organizationId: orgId } });
-    await adminPrisma.organization.deleteMany({ where: { id: orgId } });
+    // F2: connections are never deleted outside a test database's superuser purge.
+    await purgeTestOrganization(async (tx) => {
+      await tx.session.deleteMany({ where: { organizationId: orgId } });
+      await tx.identityAccount.deleteMany({ where: { organizationId: orgId } });
+      await tx.subject.deleteMany({ where: { organizationId: orgId } });
+      await tx.tenant.deleteMany({ where: { organizationId: orgId } });
+      await tx.providerConnection.deleteMany({ where: { organizationId: orgId } });
+      await tx.organization.deleteMany({ where: { id: orgId } });
+    });
   });
 
   it("should create a session, returning a raw token and saving a hashed ID", async () => {
