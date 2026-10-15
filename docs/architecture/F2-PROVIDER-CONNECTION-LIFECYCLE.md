@@ -9,7 +9,8 @@ Phase F2 of the approved design in `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.m
 | Production M1 | **PRODUCTION VERIFIED**, 2026-10-15 16:17Z, with the pre-F2 code still running (section 5.1) |
 | F2 code in Production | **PRODUCTION VERIFIED**, 2026-10-15: `d631edb` deployed 17:02Z (section 5.2) |
 | DISABLE, QUARANTINE, RELEASE, ACTIVATE | **VERIFIED** by CI and the rehearsals. Their Production proof needs a test connection supported by F4 |
-| Production M2 (RLS) | Operator gate, after M1 and its code are in Production |
+| M2 (RLS) rehearsal on a fresh clone of Production | **VERIFIED**, 2026-10-15: isolation of every organization, sign-in paths, lossless rollback and re-application (section 4.3) |
+| Production M2 (RLS) | Operator gate |
 
 Evidence labels:
 - **VERIFIED:** read in the code, CI, or the Production database (read-only).
@@ -188,6 +189,60 @@ Run `20261015T155202Z`, code `c2c1ac5` (this PR's head). **43 checks, 0 failures
 | 4 | **Production unchanged during the whole run:** its definitions, markers and data are identical in all four manifests. Still no status column | 4/4 |
 | 5 | Guards on the clone, with a test organization created there after the manifests were sealed. Same results as the table in 4.1, and 0 existing connections touched | 15/15 |
 | — | Evidence integrity: 8 files, read-only, hashes verified | 1/1 |
+
+### 4.3 M2 (row-level security) rehearsal on a fresh clone of Production, 2026-10-15 (VERIFIED)
+
+Run `20261015T213831Z`, code `bf2335a` (#67). **0 failures.**
+
+**Branch:**
+- A Neon branch of Production `main` with M1 and the F2 code in place, taken at 21:38Z.
+- Deleted only after the evidence was verified. The Production project's other branches were left untouched.
+
+The evidence standard is that of section 4.2:
+- one immutable manifest per phase;
+- a read-only snapshot of Production in each;
+- `INDEX.sha256` = `589c019d705d…`.
+
+Each manifest also records what `app_user` (the runtime) sees, without context and inside each organization's context.
+
+| Phase | Data | Full schema | Definitions | Runtime view |
+|---|---|---|---|---|
+| BEFORE | `32776657fda3` | `e6a7e3a4b58f` | `fdd949998883` | 4 connections without context; **from any organization's context, all 4, 2 or 3 of them foreign** (finding M3) |
+| AFTER-M2 | `32776657fda3` | `e31636851362` | `31aa741dc9cd` | **0 without context; inside each organization, exactly its own, 0 foreign** |
+| AFTER-ROLLBACK | `32776657fda3` | `e6a7e3a4b58f` | `fdd949998883` | Identical to BEFORE |
+| AFTER-REAPPLY | `32776657fda3` | `e31636851362` | `31aa741dc9cd` | Identical to AFTER-M2 |
+
+**Verdicts:**
+
+| # | Proof | Checks |
+|---|---|---|
+| 0 | The clone is the current Production (M1, the F2 code). Before M2, the runtime sees every connection | 4/4 |
+| 1 | **Safe apply:** ENABLE and FORCE ROW LEVEL SECURITY, one policy. 0 rows without context, every organization isolated. Data, sessions and authority (Subjects, IdentityAccounts, Assignments, every column) identical. The 4 connections ACTIVE. Nothing else in the schema changed. `luxia_backup` keeps BYPASSRLS | 11/11 |
+| 2 | **Lossless rollback:** data, sessions, full schema, definitions (RLS flags and policies included), state, markers and runtime view back to BEFORE | 7/7 |
+| 3 | **Reproducible:** M2 applies again to the same schema, definitions, state and runtime view; data identical | 5/5 |
+| 4 | **Production unchanged during the whole run.** Still without M2 | 5/5 |
+| 5a | The **real application code**, as `app_user`, on the re-applied clone (17 checks, see below) | 1/1 |
+| 5b | SQL guards with a test organization created in the clone (listed below), and Legrand Tech's connections untouched (every column) | 10/10 |
+| — | Evidence integrity | 1/1 |
+
+**5a, the real application code** (17 checks):
+- The unscoped client sees 0 connections. Inside Legrand Tech's scope it sees exactly its 2 connections, and another organization's connection by id is not found.
+- **Microsoft path:** `resolveLoginOrganization`, the login route read, the configuration resolver, `locateMicrosoftEntraConnection` and the callback's account lookup. Then a session with its VERIFIED evidence, through the session trigger. It resolves, and sign-out reads the connection through the session.
+- **Passkey path:** the begin route read and the local adapter's challenge. Then a session of the local account, which resolves and signs out.
+- Every session open before still resolves (no mass sign-out).
+
+**5b, the SQL guards:**
+- A test organization's context sees only its own 2 connections.
+- A cross-organization INSERT is refused by row-level security.
+- A cross-organization UPDATE changes 0 rows, and so does a cross-organization DISABLE, even while holding the other organization's lock.
+- `app_user` DELETE is still refused.
+- Under RLS, a session opens through an ACTIVE connection, DISABLE works under the lock, a session through the DISABLED connection is refused (`PROVIDER_CONNECTION_NOT_ACTIVE`), and quarantine with revocation works.
+
+**Code audit:**
+- Only two SQL functions read `ProviderConnection`: `luxia_provider_connection_effects` and `luxia_provider_connection_lock_active`. Both are SECURITY DEFINER, owned by `neondb_owner` (BYPASSRLS).
+- `luxia_session_resolve` does not read it.
+- The application reads connections, and their relations, inside a tenant scope only.
+- The Production gate tool was first exercised end to end, refusals included, on a disposable clone of Production.
 
 ## 5. Production certification (after the gates)
 
