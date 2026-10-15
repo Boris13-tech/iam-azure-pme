@@ -5,6 +5,7 @@ Phase F2 of the approved design in `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.m
 | Item | State |
 |---|---|
 | Status | **IMPLEMENTED, off Production** |
+| M1 rehearsal on a fresh clone of Production | **VERIFIED**, 2026-10-15: apply, lossless rollback and re-application (section 4.2) |
 | Production M1 | Operator gate |
 | Production M2 (RLS) | Operator gate, after M1 and its code are in Production |
 
@@ -152,6 +153,39 @@ Proven in CI on a scratch database, by `provider-connection-lifecycle-postgres.t
 The script, kept out of the repository, prints only digests, counts and codes:
 - it stops on the Production endpoint, on a pooled endpoint, or on any pending migration other than M1;
 - it deletes the branch on exit.
+
+### 4.2 Fresh rehearsal on a clone of Production, 2026-10-15 (VERIFIED)
+
+Run `20261015T155202Z`, code `c2c1ac5` (this PR's head). **43 checks, 0 failures.**
+
+**Branch:**
+- A Neon branch of Production `main` itself, taken at 15:52Z: the current state, after G1, with the real roles. No data left the Production project.
+- Deleted only after the evidence was written and verified. The Production project's other branches were left untouched.
+
+**Evidence:**
+- One manifest per phase: BEFORE, AFTER-M1, AFTER-ROLLBACK, AFTER-REAPPLY.
+- Each manifest holds the data digest, the open sessions, a full `pg_dump --schema-only`, and every function, trigger, grant, type and `ProviderConnection` column.
+- Each also holds a read-only snapshot of Production.
+- Written once, then made read-only. All are listed in `INDEX.sha256` (`3b8c01dab4f4…`), and every hash was checked again after the run.
+
+| Phase | Data | Full schema | Definitions | State |
+|---|---|---|---|---|
+| BEFORE | `f8ab856d3a1e` | `5a63eb6fe301` | `9016c89ff7db` | 4 connections. `app_user` DELETE = true. No status column. Last migration `20261013090000` |
+| AFTER-M1 | `f8ab856d3a1e` | `e6a7e3a4b58f` | `6a512e4763b9` | 4 connections, **0 not ACTIVE**. `app_user` DELETE = false, TRUNCATE = false |
+| AFTER-ROLLBACK | `f8ab856d3a1e` | `5a63eb6fe301` | `9016c89ff7db` | Identical to BEFORE: state, privileges, type removed, columns, migration history |
+| AFTER-REAPPLY | `f8ab856d3a1e` | `e6a7e3a4b58f` | `6a512e4763b9` | Identical to AFTER-M1 |
+
+**Verdicts:**
+
+| # | Proof | Checks |
+|---|---|---|
+| 0 | The clone is the current Production after G1: same data, same definitions, same markers (last migration, G1 event, 0 passkeys claiming hardware binding) | 4/4 |
+| 1 | **Safe apply:** data and sessions identical, the 4 connections ACTIVE, DELETE and TRUNCATE revoked from `app_user` | 5/5 |
+| 2 | **Lossless rollback:** back to BEFORE exactly. Data, sessions, full schema, functions, triggers, privileges (DELETE restored), types, columns, state and migration history | 9/9 |
+| 3 | **Reproducible:** M1 applies again. Data and sessions identical. Schema, definitions and state the same as the first application | 5/5 |
+| 4 | **Production unchanged during the whole run:** its definitions, markers and data are identical in all four manifests. Still no status column | 4/4 |
+| 5 | Guards on the clone, with a test organization created there after the manifests were sealed. Same results as the table in 4.1, and 0 existing connections touched | 15/15 |
+| — | Evidence integrity: 8 files, read-only, hashes verified | 1/1 |
 
 ## 5. Production certification (after the gates)
 
