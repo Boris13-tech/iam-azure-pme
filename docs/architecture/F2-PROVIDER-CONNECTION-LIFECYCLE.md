@@ -4,9 +4,10 @@ Phase F2 of the approved design in `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.m
 
 | Item | State |
 |---|---|
-| Status | **IMPLEMENTED, off Production** |
+| Status | **IMPLEMENTED**. M1 in Production; the F2 code is not deployed yet |
 | M1 rehearsal on a fresh clone of Production | **VERIFIED**, 2026-10-15: apply, lossless rollback and re-application (section 4.2) |
-| Production M1 | Operator gate |
+| Production M1 | **PRODUCTION VERIFIED**, 2026-10-15 16:17Z, with the pre-F2 code still running (section 5.1) |
+| F2 code deploy | Operator gate |
 | Production M2 (RLS) | Operator gate, after M1 and its code are in Production |
 
 Evidence labels:
@@ -204,3 +205,26 @@ The kill switch is then exercised **only on a test organization**, never on Legr
 3. RELEASE, then ACTIVATE.
 
 All of it is journaled.
+
+### 5.1 M1 in Production, 2026-10-15 (PRODUCTION VERIFIED)
+
+Operator gate, approved by the operator. The running application stayed the pre-F2 deployment (`cfb8be2`) throughout.
+
+The gate tool uses the same evidence standard as the rehearsal:
+- immutable manifests and an `INDEX.sha256`;
+- `apply` refuses if the data or the definitions moved since BEFORE, or if the migration differs from the rehearsed one;
+- `after` compares Production with the rehearsal's exact hashes.
+
+It was first exercised end to end, refusals included, on a disposable clone of Production.
+
+| Step | Result |
+|---|---|
+| Independent backup just before | `20261015T161451Z-d74566`: snapshot 16:14:51Z, 51 tables, 25 migrations, verified |
+| BEFORE (read-only) | Data `f8ab856d3a1e`, schema `5a63eb6fe301`, definitions `9016c89ff7db`: **the rehearsed BEFORE**. 4 connections. Only M1 pending |
+| M1 | 16:17:01Z → 16:17:10Z, `prisma migrate deploy` as the owner. Data and definitions re-checked unchanged just before |
+| AFTER (read-only), 9/9 | **Data identical**. Sessions unchanged. 4 connections, 0 not ACTIVE. `app_user` DELETE = false, TRUNCATE = false. Schema `e6a7e3a4b58f` and definitions `6a512e4763b9`: **the rehearsed AFTER-M1**. G1 markers unchanged |
+| Anonymous smoke test | 20/20 |
+| Operator's Microsoft sign-in, 16:20:39Z | 11/11: VERIFIED evidence and a new FULL session through the ACTIVE connection. Accounts, subjects, assignments, connections and passkeys unchanged. Journal and evidence append-only |
+| Operator's sign-in with an existing passkey, 16:25:43Z | 6/6: `LOCAL_PASSKEY_ASSERTION_VERIFIED`, a new FULL session through the ACTIVE `LUXIA_LOCAL` connection, no enrollment. Every connection still ACTIVE and unchanged |
+
+**Rollback:** still possible, and lossless while every connection is ACTIVE and unchanged, which holds until the F2 code is deployed.
