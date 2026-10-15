@@ -4,7 +4,7 @@ Phase F2 of the approved design in `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.m
 
 | Item | State |
 |---|---|
-| Status | **PRODUCTION VERIFIED**, 2026-10-15: M1 and the F2 code, on the non-destructive path (section 5.2) |
+| Status | **COMPLETE, PRODUCTION VERIFIED**, 2026-10-15: M1, the F2 code and M2 (sections 5.1 to 5.3). `main` matches Production (`84c4e45`) |
 | M1 rehearsal on a fresh clone of Production | **VERIFIED**, 2026-10-15: apply, lossless rollback and re-application (section 4.2) |
 | Production M1 | **PRODUCTION VERIFIED**, 2026-10-15 16:17Z, with the pre-F2 code still running (section 5.1) |
 | F2 code in Production | **PRODUCTION VERIFIED**, 2026-10-15: `d631edb` deployed 17:02Z (section 5.2) |
