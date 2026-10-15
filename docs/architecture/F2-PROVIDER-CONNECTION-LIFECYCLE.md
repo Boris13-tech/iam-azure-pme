@@ -4,10 +4,11 @@ Phase F2 of the approved design in `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.m
 
 | Item | State |
 |---|---|
-| Status | **IMPLEMENTED**. M1 in Production; the F2 code is not deployed yet |
+| Status | **PRODUCTION VERIFIED**, 2026-10-15: M1 and the F2 code, on the non-destructive path (section 5.2) |
 | M1 rehearsal on a fresh clone of Production | **VERIFIED**, 2026-10-15: apply, lossless rollback and re-application (section 4.2) |
 | Production M1 | **PRODUCTION VERIFIED**, 2026-10-15 16:17Z, with the pre-F2 code still running (section 5.1) |
-| F2 code deploy | Operator gate |
+| F2 code in Production | **PRODUCTION VERIFIED**, 2026-10-15: `d631edb` deployed 17:02Z (section 5.2) |
+| DISABLE, QUARANTINE, RELEASE, ACTIVATE | **VERIFIED** by CI and the rehearsals. Their Production proof needs a test connection supported by F4 |
 | Production M2 (RLS) | Operator gate, after M1 and its code are in Production |
 
 Evidence labels:
@@ -228,3 +229,28 @@ It was first exercised end to end, refusals included, on a disposable clone of P
 | Operator's sign-in with an existing passkey, 16:25:43Z | 6/6: `LOCAL_PASSKEY_ASSERTION_VERIFIED`, a new FULL session through the ACTIVE `LUXIA_LOCAL` connection, no enrollment. Every connection still ACTIVE and unchanged |
 
 **Rollback:** still possible, and lossless while every connection is ACTIVE and unchanged, which holds until the F2 code is deployed.
+
+### 5.2 F2 code in Production, 2026-10-15 (PRODUCTION VERIFIED)
+
+Operator gate, approved by the operator. The operator's conditions:
+- no test organization or account is created in Production;
+- Legrand Tech's real Microsoft connection is never disabled or quarantined;
+- the state-changing transitions keep their proof from CI and the rehearsals until F4 brings a properly supported test connection.
+
+| Step | Result |
+|---|---|
+| First hourly backup after M1 | `20261015T165400Z-f75b79`: 16:54Z, 51 tables, **26 migrations**, verified |
+| Merge | #66 merged as `d631edb`, its tree identical to the tested head. `main` CI green on `d631edb` |
+| Deploy | `d631edb` at its exact SHA, READY 17:02:29Z. The previous deployment, `cfb8be2`, is the rollback |
+| Anonymous smoke test | 20/20, and the lifecycle route answers 401 without a session |
+| Operator's Microsoft sign-in, 20:53:52Z | 11/11: VERIFIED evidence and a new FULL session through the ACTIVE connection. Nothing else changed |
+| Operator's sign-in with an existing passkey, 21:16:05Z | 6/6: `LOCAL_PASSKEY_ASSERTION_VERIFIED`, a new FULL session through the ACTIVE `LUXIA_LOCAL` connection, no enrollment |
+
+Every organization was compared, read-only, between 17:00:44Z (before the deploy) and 21:17:03Z. All 11 checks pass:
+- **Connections:** the 4 connections are ACTIVE and never changed (status and `statusChangedAt`).
+- **Authority:** Subjects, IdentityAccounts and Assignments are identical, every row and every column.
+- **Sessions:**
+  - No session was deleted, and already-revoked sessions are unchanged.
+  - The only new sessions (2) and the only revocation (1) belong to the operator, in Legrand Tech.
+  - No open session rests on a non-ACTIVE organization, account or connection.
+- **Journal and evidence:** append-only. Every earlier row is identical, and the new rows are dated after the baseline.
