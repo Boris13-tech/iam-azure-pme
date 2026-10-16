@@ -8,7 +8,8 @@ const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "lu
   "luxia_organization_lock_active", "luxia_organization_status_guard", "luxia_organization_status_effects", "luxia_session_guard", "luxia_session_resolve",
   "luxia_recovery_code_guard", "luxia_audit_append_only",
   "luxia_provider_connection_guard", "luxia_provider_connection_effects", "luxia_provider_connection_lock_active", "luxia_session_connection_guard",
-  "luxia_provider_secret_reference_guard", "luxia_provider_oidc_configuration_guard"];
+  "luxia_provider_secret_reference_guard", "luxia_provider_oidc_configuration_guard",
+  "luxia_provider_test_run_stamp", "luxia_provider_activation_evidence", "luxia_provider_connection_activation_guard"];
 // The only functions app_user may execute. Customer Self-Onboarding v1 adds five narrow SECURITY DEFINER
 // entry points that take hashes only; trigger guards stay owner-only. First Admin / Break-glass v1 adds
 // the canonical session resolver and the organization status lock helper; its B2 recovery-code guard is a
@@ -16,16 +17,19 @@ const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "lu
 // providers F2 adds the connection status lock helper (runtime) and three triggers; one of them, the
 // quarantine completeness check, is SECURITY DEFINER so that it sees every tenant's sessions. F3's secret
 // reference guard and F4's OIDC configuration guard are triggers too (owner-only, not definer); F4's test runs
-// reuse T0's append-only guard.
+// reuse T0's append-only guard. F4 S5 adds two owner-only triggers (test-run clock stamp, activation guard) and one
+// runtime function, the activation evidence: SECURITY INVOKER on purpose, like luxia_sod_scope_contains, so that it
+// reads with the caller's row-level security and can never reveal another organization's runs.
 const runtime = ["luxia_sod_scope_contains", "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy",
-  "luxia_organization_lock_active", "luxia_session_resolve", "luxia_provider_connection_lock_active"];
+  "luxia_organization_lock_active", "luxia_session_resolve", "luxia_provider_connection_lock_active", "luxia_provider_activation_evidence"];
+const runtimeInvokers = ["luxia_sod_scope_contains", "luxia_provider_activation_evidence"];
 const triggerDefiners = ["luxia_provider_connection_effects"];
 describe("LUXIA SQL function privilege architecture", () => {
   it("every function introduced by these migrations explicitly revokes PUBLIC", () => {
     const files = ["20261004120000_resource_governance_foundation", "20261004160000_static_sod_v1", "20261004180000_access_reviews_v1", "20261008040000_resource_onboarding_evidence",
       "20261011000000_customer_self_onboarding_v1", "20261011180000_organization_status_session_scope", "20261012090000_recovery_codes_b2",
       "20261013090000_audit_append_only", "20261014090000_provider_connection_lifecycle", "20261014110000_provider_secret_reference",
-      "20261016090000_provider_oidc_configuration"];
+      "20261016090000_provider_oidc_configuration", "20261016110000_provider_activation_guard"];
     const names: string[] = [];
     for (const file of files) {
       const sql = readFileSync(`prisma/migrations/${file}/migration.sql`, "utf8");
@@ -77,8 +81,9 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LU
         'audit_append_only','audit_append_only_truncate','evidence_append_only','evidence_append_only_truncate',
         'provider_connection_guard','provider_connection_effects','session_guard_provider_connection',
         'provider_secret_reference_guard',
-        'provider_oidc_configuration_guard','provider_test_run_append_only','provider_test_run_append_only_truncate') ORDER BY t.tgname`;
-    expect(triggers).toHaveLength(22);
+        'provider_oidc_configuration_guard','provider_test_run_append_only','provider_test_run_append_only_truncate',
+        'provider_test_run_stamp','provider_connection_activation_guard') ORDER BY t.tgname`;
+    expect(triggers).toHaveLength(24);
     expect(triggers.filter(row => row.proname === 'luxia_audit_append_only')).toHaveLength(6);
     expect(triggers.filter(row => row.proname === 'luxia_review_immutable_guard')).toHaveLength(2);
     expect(triggers.filter(row => row.proname === 'luxia_sod_assignment_guard')).toHaveLength(1);
@@ -89,7 +94,9 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LU
       ["provider_connection_guard", "luxia_provider_connection_guard"], ["provider_connection_effects", "luxia_provider_connection_effects"],
       ["session_guard_provider_connection", "luxia_session_connection_guard"],
       ["provider_secret_reference_guard", "luxia_provider_secret_reference_guard"],
-      ["provider_oidc_configuration_guard", "luxia_provider_oidc_configuration_guard"]])
+      ["provider_oidc_configuration_guard", "luxia_provider_oidc_configuration_guard"],
+      ["provider_test_run_stamp", "luxia_provider_test_run_stamp"],
+      ["provider_connection_activation_guard", "luxia_provider_connection_activation_guard"]])
       expect(triggers.find(row => row.tgname === trigger)?.proname, trigger).toBe(fn);
     // New runtime entry points are SECURITY DEFINER with a pinned search_path; so is the one trigger-only
     // definer listed above; nothing else is definer.
@@ -97,7 +104,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LU
       SELECT p.proname,p.prosecdef,p.proconfig FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='public' AND p.proname LIKE 'luxia_%' ORDER BY p.proname`;
     for (const row of definer) {
-      expect(row.prosecdef, row.proname).toBe((runtime.includes(row.proname) && row.proname !== "luxia_sod_scope_contains") || triggerDefiners.includes(row.proname));
+      expect(row.prosecdef, row.proname).toBe((runtime.includes(row.proname) && !runtimeInvokers.includes(row.proname)) || triggerDefiners.includes(row.proname));
       if (row.prosecdef) expect(row.proconfig, row.proname).toContain("search_path=public, pg_temp");
     }
   });

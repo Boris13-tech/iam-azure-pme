@@ -265,7 +265,10 @@ model ProviderTestRun {
   configurationHash    String
   metadata             Json     @default("{}")
   actorSubjectId       String
+  /// F4 (S5): stamped by the database clock at insert (trigger provider_test_run_stamp).
   occurredAt           DateTime @default(now())
+  /// F4 (S5): monotonic order assigned by the database (identity); the latest run has the highest sequence.
+  sequence             BigInt   @unique @default(autoincrement())
 
   providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict, map: "ProviderTestRun_connection_fkey")
 

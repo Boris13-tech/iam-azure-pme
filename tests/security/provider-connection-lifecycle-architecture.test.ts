@@ -68,7 +68,7 @@ describe("ProviderConnection lifecycle (F2)", () => {
     expect(service).toContain(`target.providerType === "LUXIA_LOCAL"`);
     expect(service).not.toMatch(/fetch\(|https?:\/\//);
     // The first activation reads its evidence in the plan and again in the apply, under the row lock, into the digest.
-    const evidence = "const evidence = firstActivation(target, to) ? await activationEvidence(tx, auth, target, clock(options)) : undefined;";
+    const evidence = "const evidence = firstActivation(target, to) ? await activationEvidence(tx, auth, target) : undefined;";
     expect(service.split(evidence)).toHaveLength(3);
     const apply = service.slice(service.indexOf("export function applyConnectionTransition"));
     expect(apply.indexOf("readTarget(tx, auth, providerConnectionId, true)")).toBeLessThan(apply.indexOf(evidence));

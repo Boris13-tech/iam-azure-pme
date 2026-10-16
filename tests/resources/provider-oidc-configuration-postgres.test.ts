@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+import { seedActivationEvidence } from "../helpers/activation-evidence";
 
 // Sovereign providers F4, slice S2 (docs/architecture/F4-GENERIC-OIDC-CONNECTIONS-DESIGN.md, section 5): the data model
 // of generic OIDC connections, held by the database itself. app_user (rawPrisma) is the runtime.
@@ -94,6 +95,8 @@ describe.runIf(enabled)("F4 S2: generic OIDC configuration, test runs and transa
     const tested = await owner.providerOidcConfiguration.findUniqueOrThrow({ where: { providerConnectionId: connection } });
     expect(tested.configurationHash).toBe(hashOf("https://idp.example.com", "luxia-client", "client_secret_basic", "ES256", "openid email"));
     expect(await failure(update(`"providerConnectionId" = '${a.local}'`))).toContain("PROVIDER_OIDC_CONFIGURATION_IMMUTABLE");
+    // Since S5 the database activates only on valid evidence (test fixture: a passing test and proof).
+    await seedActivationEvidence(owner, a, connection);
     await setStatus(a, connection, "ACTIVE");
     expect(await failure(update(`scopes = 'openid'`))).toContain("PROVIDER_OIDC_CONFIGURATION_LOCKED");
     expect(await failure(asApp(a, (tx) => tx.$executeRawUnsafe(`DELETE FROM "ProviderOidcConfiguration" WHERE "providerConnectionId" = '${connection}'`), { lock: true })))

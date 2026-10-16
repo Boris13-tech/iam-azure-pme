@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ACTIVATION_EVIDENCE_MAX_AGE_MS } from "../../lib/admin/provider-connection-lifecycle";
 import { operationLabel } from "../../lib/ui/activity-labels";
 
 // F4, slice S5: the invariants of the proof sign-in and of the first activation, held on the source. The behaviour is
@@ -9,6 +8,7 @@ const read = (path: string) => readFileSync(path, "utf8").replace(/\r\n/g, "\n")
 const code = (path: string) => read(path).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
 const PROOF = "lib/admin/provider-connection-proof.ts";
 const CALLBACK = "app/auth/callback/route.ts";
+const MIGRATION = "prisma/migrations/20261016110000_provider_activation_guard/migration.sql";
 
 describe("proof sign-in and first activation invariants (F4, S5)", () => {
   it("a proof never opens a session, sets a cookie, creates or links an account, or keeps the provider's subject", () => {
@@ -50,9 +50,37 @@ describe("proof sign-in and first activation invariants (F4, S5)", () => {
     }
   });
 
-  it("no code dates a test run itself: the database stamps it, and freshness is measured from that stamp", () => {
-    for (const file of [PROOF, "lib/admin/provider-connection-test.ts"]) expect(code(file), file).not.toContain("occurredAt");
-    expect(ACTIVATION_EVIDENCE_MAX_AGE_MS).toBe(24 * 60 * 60 * 1000);
+  it("freshness and order are the database's: stamped by its clock, ordered by its sequence, defined once in SQL", () => {
+    // No application code dates or orders a test run itself.
+    for (const file of [PROOF, "lib/admin/provider-connection-test.ts", "lib/admin/provider-connection-lifecycle.ts"]) {
+      expect(code(file), file).not.toMatch(/occurredAt|sequence/);
+    }
+    expect(code("lib/admin/provider-connection-lifecycle.ts")).not.toMatch(/Date\.now|new Date\(/);
+    const migration = read(MIGRATION);
+    expect(migration).toContain(`ADD COLUMN "sequence" BIGINT GENERATED ALWAYS AS IDENTITY;`);
+    expect(migration).toContain(`NEW."occurredAt" := (clock_timestamp() AT TIME ZONE 'UTC');`);
+    expect(migration).toContain(`v_test_at < v_now - interval '60 minutes'`);
+    expect(migration).toContain(`v_proof_at < v_now - interval '15 minutes'`);
+    expect(migration.match(/ORDER BY t."sequence" DESC LIMIT 1;/g)).toHaveLength(2);
+    expect(migration).not.toMatch(/ORDER BY t."occurredAt"|BETWEEN/);
+    // The application asks the database's definition; it has none of its own.
+    const lifecycle = code("lib/admin/provider-connection-lifecycle.ts");
+    expect(lifecycle).toContain("SELECT * FROM luxia_provider_activation_evidence(${auth.organizationId}, ${target.id})");
+    expect(lifecycle).not.toMatch(/providerTestRun\.|interval|minutes/i);
+  });
+
+  it("the database refuses a first activation without evidence, and a generic connection created other than DRAFT", () => {
+    const migration = read(MIGRATION);
+    expect(migration).toContain(`IF OLD."status"::text = 'TESTING' AND NEW."status"::text = 'ACTIVE' THEN`);
+    expect(migration).toContain(`SELECT e."reason" INTO v_reason FROM luxia_provider_activation_evidence(NEW."organizationId", NEW."id") e;`);
+    expect(migration).toContain(`IF NEW."providerType"::text = 'OIDC_GENERIC' AND NEW."status"::text <> 'DRAFT' THEN`);
+    expect(migration).toContain(`CREATE TRIGGER provider_connection_activation_guard BEFORE INSERT OR UPDATE OF "status" ON "ProviderConnection"`);
+  });
+
+  it("prover and activating administrator are recorded separately (no four-eyes in F4 v1)", () => {
+    const lifecycle = code("lib/admin/provider-connection-lifecycle.ts");
+    expect(lifecycle).toContain("...(evidence ? { ...evidence, activationActorSubjectId: auth.subjectId } : {})");
+    expect(lifecycle).not.toMatch(/proofActorSubjectId\s*(===|!==)/);
   });
 
   it("every new journaled operation has a French label (B5)", () => {

@@ -6,6 +6,7 @@ import { GET as callback } from "../../app/auth/callback/route";
 import { POST as startProofRoute } from "../../app/api/canonical/providers/[id]/proof/route";
 import { startConnectionProof } from "../../lib/admin/provider-connection-proof";
 import { applyConnectionTransition, connectionPlanDigest, planConnectionTransition } from "../../lib/admin/provider-connection-lifecycle";
+import { withTenantDb } from "../../lib/db/scoped-client";
 import { testProviderConnection } from "../../lib/admin/provider-connection-test";
 import { SessionStore } from "../../lib/auth/session-store";
 import { LUXIA_ORG_ADMIN_V1 } from "../../lib/auth/native-role-catalog";
@@ -14,6 +15,7 @@ import { OpenIdClientOidcGateway } from "../../lib/provider-adapters/implementat
 import { GenericOidcAuthenticationProvider, PrismaGenericOidcConfigResolver } from "../../lib/provider-adapters/implementations/oidc-generic";
 import { GOVERNANCE_ADMIN_V2 } from "../../lib/resources/admin-bundle";
 import { TestIdp, guardedTestFetch, resolver, testSecretStore } from "../helpers/oidc-test-idp";
+import { activateWithEvidence, insertAgedRun } from "../helpers/activation-evidence";
 
 // F4, slice S5 on PostgreSQL: the proof sign-in (no session, bound to the administrator who started it) and the first
 // activation (TESTING to ACTIVE, on fresh evidence revalidated under lock), through the real services and routes, as
@@ -22,7 +24,6 @@ const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const suffix = randomUUID().slice(0, 8);
 const ORIGIN = "http://localhost:3000";
 const LOCATOR = "akv://luxia-test-vault/oidc-proof";
-const DAY = 24 * 60 * 60 * 1000;
 vi.setConfig({ testTimeout: 60_000 });
 
 const h = vi.hoisted(() => ({ provider: undefined as unknown, sessionToken: undefined as string | undefined, cookieSet: vi.fn() }));
@@ -113,11 +114,28 @@ describe.runIf(enabled)("F4 S5: proof sign-in and first activation (PostgreSQL, 
 
   it("a proof is started through the route by an administrator, bound to purpose, subject and configuration", async () => {
     const id = await testingConnection(org);
-    h.sessionToken = org.admin.token;
-    const changeId = change();
-    const response = await startProofRoute(new Request(`${ORIGIN}/api/canonical/providers/${id}/proof`, { method: "POST", headers: { "x-luxia-change-id": changeId } }),
-      { params: Promise.resolve({ id }) });
-    h.sessionToken = undefined;
+    const viaRoute = async (who: Person, changeId: string) => {
+      h.sessionToken = who.token;
+      try {
+        return await startProofRoute(new Request(`${ORIGIN}/api/canonical/providers/${id}/proof`, { method: "POST", headers: { "x-luxia-change-id": changeId } }),
+          { params: Promise.resolve({ id }) });
+      } finally { h.sessionToken = undefined; }
+    };
+    // The canonical routes authorize through AUTHZ_MODE. Unset, it falls back to "legacy", where only the legacy role
+    // bridge counts and native entitlements do not: the mode every route certification runs in is "native".
+    const previousMode = process.env.AUTHZ_MODE;
+    process.env.AUTHZ_MODE = "native";
+    let response: Response;
+    try {
+      // The route's own check is live: a member is refused before any provider call.
+      expect((await viaRoute(org.member, change())).status).toBe(403);
+      expect(idp.requests).toEqual([]);
+      const changeId = change();
+      response = await viaRoute(org.admin, changeId);
+      expect(await eventOf(changeId)).toMatchObject({ operation: "PROVIDER.CONNECTION.PROOF.START", result: "SUCCESS", actorSubjectId: org.admin.subjectId });
+    } finally {
+      if (previousMode === undefined) delete process.env.AUTHZ_MODE; else process.env.AUTHZ_MODE = previousMode;
+    }
     expect(response.status).toBe(200);
     const body = await response.json() as { authorizationUrl: string };
     const state = new URL(body.authorizationUrl).searchParams.get("state")!;
@@ -125,7 +143,6 @@ describe.runIf(enabled)("F4 S5: proof sign-in and first activation (PostgreSQL, 
     const configuration = await owner.providerOidcConfiguration.findUniqueOrThrow({ where: { providerConnectionId: id } });
     expect(await owner.authTransaction.findUniqueOrThrow({ where: { stateHash: state } })).toMatchObject({ purpose: "ACTIVATION_PROOF",
       subjectId: org.admin.subjectId, expectedProviderConnectionId: id, expectedConfigurationHash: configuration.configurationHash, consumedAt: null });
-    expect(await eventOf(changeId)).toMatchObject({ operation: "PROVIDER.CONNECTION.PROOF.START", result: "SUCCESS", actorSubjectId: org.admin.subjectId });
   });
 
   it("a passing proof is recorded on the configuration hash and the secret version, opens no session and keeps no identity", async () => {
@@ -168,7 +185,7 @@ describe.runIf(enabled)("F4 S5: proof sign-in and first activation (PostgreSQL, 
       ["no secret", org.admin, noSecret, "CONNECTION_SECRET_MISSING"],
       ["unknown", org.admin, randomUUID(), "PROVIDER_NOT_FOUND"],
     ];
-    await owner.$transaction(async (tx) => { await lock(tx, org); await tx.$executeRawUnsafe(`UPDATE "ProviderConnection" SET status = 'ACTIVE' WHERE id = '${active}'`); });
+    await activateWithEvidence(owner, org, active);
     cases.push(["ACTIVE", org.admin, active, "CONNECTION_PROOF_NOT_ALLOWED"]);
     idp.reset();
     for (const [name, who, target, expected] of cases) {
@@ -208,8 +225,13 @@ describe.runIf(enabled)("F4 S5: proof sign-in and first activation (PostgreSQL, 
   });
 
   describe("first activation (TESTING to ACTIVE)", () => {
-    const plan = (o: Org, id: string, now?: Date) => planConnectionTransition(as(o), change(), id, "ACTIVATE", now ? { now: () => now } : {});
-    const apply = (o: Org, id: string, digest: string, now?: Date) => applyConnectionTransition(as(o), change(), id, "ACTIVATE", digest, now ? { now: () => now } : {});
+    const plan = (o: Org, id: string) => planConnectionTransition(as(o), change(), id, "ACTIVATE");
+    const apply = (o: Org, id: string, digest: string) => applyConnectionTransition(as(o), change(), id, "ACTIVATE", digest);
+    const evidenceOf = async (id: string) => {
+      const configuration = await owner.providerOidcConfiguration.findUniqueOrThrow({ where: { providerConnectionId: id } });
+      const secret = await owner.providerSecretReference.findFirstOrThrow({ where: { providerConnectionId: id, revokedAt: null } });
+      return { organizationId: org.organizationId, providerConnectionId: id, configurationHash: configuration.configurationHash, secretVersion: secret.activeVersion };
+    };
 
     it("refused without a proof, and journaled", async () => {
       const id = await testingConnection(org);
@@ -233,8 +255,10 @@ describe.runIf(enabled)("F4 S5: proof sign-in and first activation (PostgreSQL, 
       const applied = await applyConnectionTransition(as(own, own.admin2), changeId, id, "ACTIVATE", planned.planDigest);
       expect(applied).toMatchObject({ from: "TESTING", to: "ACTIVE", activationEvidence: planned.activationEvidence });
       expect(await statusOf(id)).toBe("ACTIVE");
+      // Prover and activating administrator are recorded separately (no four-eyes in F4 v1; kept for a future policy).
       expect(await eventOf(changeId)).toMatchObject({ operation: "PROVIDER.CONNECTION.ACTIVATE", result: "SUCCESS", actorSubjectId: own.admin2.subjectId,
-        metadata: { from: "TESTING", to: "ACTIVE", discoveryRunId: discovery.id, proofRunId: proof.id } });
+        metadata: { from: "TESTING", to: "ACTIVE", discoveryRunId: discovery.id, proofRunId: proof.id,
+          proofActorSubjectId: own.admin.subjectId, activationActorSubjectId: own.admin2.subjectId } });
       // The whole chain: DRAFT -> TESTING -> ACTIVE, then a linked person signs in through slice S4.
       const linked = await owner.subject.create({ data: { organizationId: own.organizationId, tenantId: own.tenantId, type: "HUMAN", name: "Linked", lifecycleState: "ACTIVE" } });
       await owner.identityAccount.create({ data: { organizationId: own.organizationId, tenantId: own.tenantId, subjectId: linked.id, providerConnectionId: id, externalObjectId: "linked-sub" } });
@@ -245,13 +269,40 @@ describe.runIf(enabled)("F4 S5: proof sign-in and first activation (PostgreSQL, 
       expect(await owner.session.count({ where: { subjectId: linked.id } })).toBe(1);
     });
 
-    it("evidence must be fresh (24 h), at plan time and again at apply time", async () => {
+    it("freshness on the database clock: a test older than 60 minutes or a proof older than 15 minutes does not count", async () => {
+      const oldTest = await testingConnection(org);
+      await prove(org, oldTest);
+      const e1 = await evidenceOf(oldTest);
+      await insertAgedRun(owner, { ...e1, kind: "DISCOVERY", outcome: "PASSED", minutesAgo: 61 });
+      expect(await code(plan(org, oldTest))).toBe("ACTIVATION_TEST_REQUIRED");
+      await insertAgedRun(owner, { ...e1, kind: "DISCOVERY", outcome: "PASSED", minutesAgo: 59 });
+      expect((await plan(org, oldTest)).activationEvidence).toBeDefined();
+      const oldProof = await testingConnection(org);
+      const e2 = await evidenceOf(oldProof);
+      await insertAgedRun(owner, { ...e2, kind: "PROOF", outcome: "PASSED", minutesAgo: 16 });
+      expect(await code(plan(org, oldProof))).toBe("ACTIVATION_PROOF_REQUIRED");
+      await insertAgedRun(owner, { ...e2, kind: "PROOF", outcome: "PASSED", minutesAgo: 14 });
+      expect((await plan(org, oldProof)).activationEvidence).toBeDefined();
+    });
+
+    it("the evidence is read again at apply time: a proof failed after the plan refuses the activation", async () => {
       const id = await testingConnection(org);
       await prove(org, id);
-      expect(await code(plan(org, id, new Date(Date.now() + DAY + 60_000)))).toBe("ACTIVATION_TEST_REQUIRED");
       const planned = await plan(org, id);
-      expect(await code(apply(org, id, planned.planDigest, new Date(Date.now() + DAY + 60_000)))).toBe("ACTIVATION_TEST_REQUIRED");
+      await insertAgedRun(owner, { ...(await evidenceOf(id)), kind: "PROOF", outcome: "FAILED", minutesAgo: 0 });
+      expect(await code(apply(org, id, planned.planDigest))).toBe("ACTIVATION_PROOF_REQUIRED");
       expect(await statusOf(id)).toBe("TESTING");
+    });
+
+    it("the latest run is the database's order, not the timestamps: an older-dated failure inserted last decides", async () => {
+      const id = await testingConnection(org);
+      await prove(org, id);
+      // A failure dated 5 minutes ago, recorded after the passing proof: by sequence it is the latest, so it refuses.
+      await insertAgedRun(owner, { ...(await evidenceOf(id)), kind: "PROOF", outcome: "FAILED", minutesAgo: 5 });
+      expect(await code(plan(org, id))).toBe("ACTIVATION_PROOF_REQUIRED");
+      const runs = await owner.providerTestRun.findMany({ where: { providerConnectionId: id, kind: "PROOF" }, orderBy: { sequence: "asc" } });
+      expect(runs.map((run) => run.outcome)).toEqual(["PASSED", "FAILED"]);
+      expect(runs[1].occurredAt.getTime()).toBeLessThan(runs[0].occurredAt.getTime());
     });
 
     it("the latest run decides: a failed test or a failed proof after a passing one refuses", async () => {
@@ -293,6 +344,32 @@ describe.runIf(enabled)("F4 S5: proof sign-in and first activation (PostgreSQL, 
       await prove(org, id);
       expect(await code(apply(org, id, planned.planDigest))).toBe("CONNECTION_PLAN_STALE");
       expect(await statusOf(id)).toBe("TESTING");
+    });
+
+    it("the database refuses TESTING -> ACTIVE without valid evidence, for the owner and for app_user alike", async () => {
+      const id = await testingConnection(org);
+      const activate = (asOwner: boolean) => asOwner
+        ? owner.$transaction(async (tx) => { await lock(tx, org); await tx.$executeRawUnsafe(`UPDATE "ProviderConnection" SET status = 'ACTIVE' WHERE id = '${id}'`); })
+        : withTenantDb(as(org), async (tx) => { await lock(tx, org); await tx.$executeRawUnsafe(`UPDATE "ProviderConnection" SET status = 'ACTIVE' WHERE id = '${id}'`); });
+      const reason = (promise: Promise<unknown>) => promise.then(() => "ACTIVATED", (error: unknown) => String((error as Error).message));
+      for (const asOwner of [true, false]) expect(await reason(activate(asOwner))).toContain("PROVIDER_CONNECTION_ACTIVATION_EVIDENCE");
+      // An old test, then an old proof: still refused. A generic connection can never be created other than DRAFT.
+      const e = await evidenceOf(id);
+      await insertAgedRun(owner, { ...e, kind: "DISCOVERY", outcome: "PASSED", minutesAgo: 61 });
+      await insertAgedRun(owner, { ...e, kind: "PROOF", outcome: "PASSED", minutesAgo: 1 });
+      expect(await reason(activate(true))).toContain("PROVIDER_CONNECTION_ACTIVATION_EVIDENCE");
+      await insertAgedRun(owner, { ...e, kind: "DISCOVERY", outcome: "PASSED", minutesAgo: 1 });
+      await insertAgedRun(owner, { ...e, kind: "PROOF", outcome: "PASSED", minutesAgo: 16 });
+      expect(await reason(activate(true))).toContain("PROVIDER_CONNECTION_ACTIVATION_EVIDENCE");
+      // A proof made with another secret version: refused.
+      await insertAgedRun(owner, { ...e, kind: "PROOF", outcome: "PASSED", minutesAgo: 1, secretVersion: randomBytes(16).toString("hex") });
+      expect(await reason(activate(true))).toContain("PROVIDER_CONNECTION_ACTIVATION_EVIDENCE");
+      expect(await reason(owner.providerConnection.create({ data: { organizationId: org.organizationId, providerType: "OIDC_GENERIC", status: "ACTIVE",
+        externalScopeId: `oidc-${randomUUID()}`, name: "Direct" } }))).toContain("PROVIDER_CONNECTION_ACTIVATION_EVIDENCE");
+      // Valid evidence (fresh test, fresh proof with the live secret version): the same update goes through, as app_user.
+      await insertAgedRun(owner, { ...e, kind: "PROOF", outcome: "PASSED", minutesAgo: 1 });
+      expect(await reason(activate(false))).toBe("ACTIVATED");
+      expect(await statusOf(id)).toBe("ACTIVE");
     });
 
     it("F2 regression: reactivating a DISABLED connection needs no evidence and keeps its digest", async () => {

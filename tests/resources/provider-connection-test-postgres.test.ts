@@ -6,6 +6,7 @@ import { testProviderConnection, type ConnectionTestDependencies } from "../../l
 import type { OidcProbeInput, OidcProbeResult } from "../../lib/provider-adapters/implementations/oidc/probe";
 import { LUXIA_ORG_ADMIN_V1 } from "../../lib/auth/native-role-catalog";
 import { GOVERNANCE_ADMIN_V2 } from "../../lib/resources/admin-bundle";
+import { activateWithEvidence } from "../helpers/activation-evidence";
 
 // F4, slice S3 on PostgreSQL: the connection test service as app_user (rawPrisma), with the network probe stubbed.
 // The owner (BYPASSRLS) sets up and reads what the runtime cannot.
@@ -107,7 +108,7 @@ describe.runIf(enabled)("F4 S3: connection test (PostgreSQL, app_user, probe stu
   it("refusals are journaled and call no outside host: a member, another type, an active connection, no configuration, another organization", async () => {
     const draft = await oidcConnection(a);
     const active = await oidcConnection(a);
-    await setStatus(a, active, "TESTING"); await setStatus(a, active, "ACTIVE");
+    await activateWithEvidence(owner, a, active);
     const unconfigured = await oidcConnection(a, { configure: false });
     const foreign = await oidcConnection(b);
     const cases: Array<[string, (changeId: string) => Promise<unknown>, string]> = [];

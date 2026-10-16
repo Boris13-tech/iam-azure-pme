@@ -9,6 +9,7 @@ import { rawPrisma } from "../../lib/db/raw-prisma";
 import { OpenIdClientOidcGateway } from "../../lib/provider-adapters/implementations/oidc";
 import { GenericOidcAuthenticationProvider, PrismaGenericOidcConfigResolver } from "../../lib/provider-adapters/implementations/oidc-generic";
 import { TestIdp, guardedTestFetch, resolver, testSecretStore } from "../helpers/oidc-test-idp";
+import { activateWithEvidence } from "../helpers/activation-evidence";
 
 // F4, slice S4 on PostgreSQL: the real /auth/login and /auth/callback routes, as app_user, against providers simulated
 // in memory behind the SSRF guard (stubbed DNS and transport; test secrets only, served by a stand-in for the vault).
@@ -56,7 +57,8 @@ async function genericConnection(org: Org, idp: TestIdp, clientId: string, locat
     await tx.providerSecretReference.create({ data: { organizationId: org.organizationId, providerConnectionId: connection.id, purpose: "OIDC_CLIENT",
       store: "azure-key-vault", locator, activeVersion: randomBytes(16).toString("hex") } });
   });
-  if (options.activate ?? true) { await setStatus(org, connection.id, "TESTING"); await setStatus(org, connection.id, "ACTIVE"); }
+  // Since S5 the database activates only on valid evidence (test fixture: a passing test and proof).
+  if (options.activate ?? true) await activateWithEvidence(owner, org, connection.id);
   const configuration = await owner.providerOidcConfiguration.findUniqueOrThrow({ where: { providerConnectionId: connection.id } });
   return { id: connection.id, configurationHash: configuration.configurationHash };
 }
