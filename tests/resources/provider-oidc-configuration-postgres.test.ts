@@ -28,17 +28,18 @@ async function oidcConnection(org: Org): Promise<string> {
     organizationId: org.organizationId, providerType: "OIDC_GENERIC", status: "DRAFT", externalScopeId: `oidc-${randomUUID()}`, name: "Generic IdP" } });
   return connection.id;
 }
+// pg_advisory_xact_lock returns void, which $queryRaw cannot read: always run it with $executeRaw.
 const lockSql = (org: Org) => Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`resource-governance:${org.organizationId}:${org.tenantId}`}, 0))`;
 /** As the runtime, inside the organization's scope; with the governance lock when asked. */
 function asApp<T>(org: Org, work: (tx: Prisma.TransactionClient) => Promise<T>, options: { lock?: boolean } = {}): Promise<T> {
   return rawPrisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT set_config('app.organization_id', ${org.organizationId}, true), set_config('app.tenant_id', ${org.tenantId}, true)`;
-    if (options.lock) await tx.$queryRaw(lockSql(org));
+    if (options.lock) await tx.$executeRaw(lockSql(org));
     return work(tx);
   });
 }
 async function asOwnerLocked<T>(org: Org, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-  return owner.$transaction(async (tx) => { await tx.$queryRaw(lockSql(org)); return work(tx); });
+  return owner.$transaction(async (tx) => { await tx.$executeRaw(lockSql(org)); return work(tx); });
 }
 const insertConfig = (tx: Prisma.TransactionClient, org: Org, connection: string, fields: Record<string, string> = {}) => {
   const row = { issuer: "https://idp.example.com", clientId: "luxia-client", ...fields };
@@ -140,7 +141,7 @@ describe.runIf(enabled)("F4 S2: generic OIDC configuration, test runs and transa
     const foreign = await oidcConnection(a);
     // Holding A's lock too. Under M2's row-level security the guard cannot even see A's connection from B's scope, so it
     // refuses before the policy would; the configuration of A stays out of B's reach either way.
-    expect(await failure(asApp(b, async (tx) => { await tx.$queryRaw(lockSql(a)); return insertConfig(tx, a, foreign); }))).toContain("PROVIDER_OIDC_CONFIGURATION_CONNECTION");
+    expect(await failure(asApp(b, async (tx) => { await tx.$executeRaw(lockSql(a)); return insertConfig(tx, a, foreign); }))).toContain("PROVIDER_OIDC_CONFIGURATION_CONNECTION");
     expect(await owner.providerOidcConfiguration.count({ where: { providerConnectionId: foreign } })).toBe(0);
   });
 
