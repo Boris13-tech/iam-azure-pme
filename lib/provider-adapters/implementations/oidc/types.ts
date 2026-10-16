@@ -14,6 +14,11 @@ export type OidcClientConfig = Readonly<{
   scope?: string;
   /** The only accepted ID token signature algorithm. Default: RS256 (never "none", never a shared-secret HMAC). */
   idTokenAlgorithm?: "RS256" | "PS256" | "ES256";
+  /**
+   * Client authentication at the token endpoint (F4, decision F4-5). Absent: openid-client's default for a client with
+   * a secret, client_secret_post, which is what every profile used before F4 and still uses when it sets nothing.
+   */
+  clientAuthMethod?: "client_secret_basic" | "client_secret_post";
 }>;
 
 /** What a provider adds to the core: a name for errors, and the claim that holds its stable subject. */
