@@ -25,6 +25,7 @@ import { transitionOrganization, type OrganizationStatus } from "../../lib/organ
 import { listSecurityJournal } from "../../lib/audit/security-journal";
 import { listMySessions } from "../../lib/auth/self-service";
 import { softwarePasskey } from "../helpers/software-passkey";
+import { withinOneRateLimitWindow } from "../helpers/rate-limit-window";
 import { POST as begin } from "../../app/api/auth/local/begin/route";
 import { POST as complete } from "../../app/api/auth/local/complete/route";
 import { POST as recover } from "../../app/api/auth/local/recovery/route";
@@ -214,10 +215,11 @@ describe.runIf(enabled)("B2 recovery codes and recovery-only session (app_user, 
     // 5 batches a day per person (the two refused attempts above counted for their own people).
     const fresh = await organization();
     const { token } = await signedIn(fresh);
+    await withinOneRateLimitWindow(86400, 30); // counted per day: the six requests below share one window
     for (let i = 0; i < 5; i++) expect((await generate(token)).status).toBe(200);
     expect(await generate(token)).toMatchObject({ status: 429, body: { error: "RATE_LIMITED" } });
     expect(await owner.localRecoveryCode.count({ where: { ...scope(fresh), usedAt: null, revokedAt: null } })).toBe(10);
-  }, 60_000);
+  }, 90_000);
 
   it("recovery sign-in: a RECOVERY session of exactly 15 minutes, VERIFIED evidence and journal event; the code is single use", async () => {
     const org = await organization();
@@ -298,6 +300,7 @@ describe.runIf(enabled)("B2 recovery codes and recovery-only session (app_user, 
 
   it("rate limits: 5 per hour per person and 10 per hour per client, then even a valid code is refused and not consumed", async () => {
     const org = await organization(); const { codes } = await withCodes(org);
+    await withinOneRateLimitWindow(3600, 60); // both scopes count per hour: every hit below shares one window
     for (let i = 0; i < 5; i++) expect(shape(await recoverWith(org, "0123456789ABCDEFGHJK"))).toEqual(GENERIC);
     expect(shape(await recoverWith(org, codes[0]))).toEqual(GENERIC);
     expect(await codeRow(org, codes[0])).toMatchObject({ usedAt: null });

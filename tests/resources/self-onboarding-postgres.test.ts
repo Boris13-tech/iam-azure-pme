@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { withTenantDb } from "../../lib/db/scoped-client";
+import { withinOneRateLimitWindow } from "../helpers/rate-limit-window";
 
 // Customer Self-Onboarding v1, step 1: migration, forced RLS, guards and definer functions on real
 // PostgreSQL. app_user (rawPrisma, NOSUPERUSER NOBYPASSRLS) is the runtime; owner is the owner.
@@ -111,6 +112,7 @@ describe.runIf(enabled)("Customer Self-Onboarding v1: migration, RLS and adversa
   it("requirement 3: rate limiting counts per scope and client hash, refuses raw client data, stores no client value", async () => {
     const client = sha(`198.51.100.${suffix}`);
     const hit = (scope: string) => rawPrisma.$queryRaw<[{ ok: boolean }]>`SELECT luxia_rate_limit_hit(${scope}, ${client}, 86400, 3) AS ok`.then(rows => rows[0].ok);
+    await withinOneRateLimitWindow(86400, 30); // a one-day window: the four hits share it
     const results = [];
     for (let i = 0; i < 4; i++) results.push(await hit("login-begin"));
     expect(results).toEqual([true, true, true, false]);
@@ -118,7 +120,7 @@ describe.runIf(enabled)("Customer Self-Onboarding v1: migration, RLS and adversa
     await expect(rawPrisma.$queryRaw`SELECT luxia_rate_limit_hit('login-begin', ${"198.51.100.7"}, 60, 3)`).rejects.toThrow(/RATE_LIMIT_INVALID_ARGUMENT/);
     const stored = await owner.rateLimitBucket.findMany({ where: { OR: [{ keyHash: client }, { keyHash: sha(`login-begin:${client}`) }] } });
     expect(stored).toHaveLength(0);
-  });
+  }, 60_000);
 
   it("requirements 1, 5, 6: beta code is hashed, reserved, consumed once inside the founder transaction, never replayed", async () => {
     const code = `LUXIA-${randomUUID()}`, codeHash = sha(code);
