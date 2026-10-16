@@ -156,7 +156,8 @@ describe.runIf(enabled)("F4 S5: proof sign-in and first activation (PostgreSQL, 
     const secret = await owner.providerSecretReference.findFirstOrThrow({ where: { providerConnectionId: id } });
     expect(run).toMatchObject({ outcome: "PASSED", reasonCode: "PROOF_PASSED", configurationHash: configuration.configurationHash, actorSubjectId: org.admin.subjectId,
       metadata: { issuerHost: "idp-proof.luxia-test.example", secretVersion: secret.activeVersion } });
-    expect(JSON.stringify(run)).not.toMatch(/someone-at-the-provider|test-secret|eyJ/);
+    // The run carries the database's BigInt order (sequence): only BigInts are turned into strings to inspect the whole row.
+    expect(JSON.stringify(run, (_key, value: unknown) => (typeof value === "bigint" ? value.toString() : value))).not.toMatch(/someone-at-the-provider|test-secret|eyJ/);
     expect(await counts()).toEqual(before);
     expect(h.cookieSet).not.toHaveBeenCalled();
     expect(await statusOf(id)).toBe("TESTING");

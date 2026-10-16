@@ -111,6 +111,12 @@ describe.runIf(enabled)("F4 S3: connection test (PostgreSQL, app_user, probe stu
     await activateWithEvidence(owner, a, active);
     const unconfigured = await oidcConnection(a, { configure: false });
     const foreign = await oidcConnection(b);
+    // The ACTIVE connection carries its activation evidence (a DISCOVERY and a PROOF run, required by the database since
+    // S5): the runs are captured before the refused calls, which must add none.
+    const runIds = async (id: string) => (await runsOf(id)).map((run) => run.id);
+    const before = new Map<string, string[]>();
+    for (const id of [draft, active, unconfigured, foreign]) before.set(id, await runIds(id));
+    expect(before.get(active)).toHaveLength(2);
     const cases: Array<[string, (changeId: string) => Promise<unknown>, string]> = [];
     const probe = stub(PASSED);
     cases.push(["a member without providers.manage", (cid) => testProviderConnection(as(a, a.member), cid, draft, probe.dependencies), "FORBIDDEN"]);
@@ -125,7 +131,7 @@ describe.runIf(enabled)("F4 S3: connection test (PostgreSQL, app_user, probe stu
       expect(await eventOf(cid), name).toMatchObject({ operation: "PROVIDER.CONNECTION.TEST.DENIED", result: "DENIED", metadata: { reasonCode: expected } });
     }
     expect(probe.calls).toEqual([]);
-    for (const id of [draft, active, unconfigured, foreign]) expect(await runsOf(id)).toEqual([]);
+    for (const id of [draft, active, unconfigured, foreign]) expect(await runIds(id), id).toEqual(before.get(id));
     expect(await statusOf(draft)).toBe("DRAFT");
   });
 
