@@ -1173,6 +1173,8 @@ model AuthTransaction {
   /// F4: SIGN_IN (default), LINK or ACTIVATION_PROOF; LINK and ACTIVATION_PROOF carry the subject that started it.
   purpose                      String    @default("SIGN_IN")
   subjectId                    String?
+  /// F4 (S4): the configurationHash a generic OIDC round trip started with; NULL for Microsoft transactions.
+  expectedConfigurationHash    String?
   returnTo                     String?
   expiresAt                    DateTime
   consumedAt                   DateTime?
