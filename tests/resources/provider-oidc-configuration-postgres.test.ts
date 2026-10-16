@@ -80,8 +80,8 @@ describe.runIf(enabled)("F4 S2: generic OIDC configuration, test runs and transa
     const saved = await owner.providerOidcConfiguration.findUniqueOrThrow({ where: { providerConnectionId: connection } });
     expect(saved).toMatchObject({ clientAuthMethod: "client_secret_basic", idTokenAlgorithm: "RS256", scopes: "openid profile email" });
     expect(saved.configurationHash).toBe(hashOf("https://idp.example.com", "luxia-client", "client_secret_basic", "RS256", "openid profile email"));
-    // One configuration per connection.
-    expect(await failure(asApp(a, (tx) => insertConfig(tx, a, connection), { lock: true }))).toMatch(/Unique constraint|duplicate key/);
+    // One configuration per connection (Prisma hides the message of a raw unique violation: assert on its code).
+    expect(await failure(asApp(a, (tx) => insertConfig(tx, a, connection), { lock: true }))).toContain("23505");
   });
 
   it("it changes while DRAFT or TESTING, is frozen once ACTIVE, never changes its identity and is never deleted", async () => {
