@@ -117,7 +117,7 @@ The database itself enforces that:
 
 **Order decided by the operator on 2026-10-15:**
 1. The references migration comes first, as an expand-only Production gate. The table stays **empty** throughout its certification, and no secret reference is created before the Key Vault decision.
-2. Then the vault decision (step 1 below), with its own note.
+2. Then the vault decision (step 1 below), with its own note: `F3-KEY-VAULT-DECISION.md` (decisions KV1 to KV6).
 
 The steps below keep their content. Graph secrets are out of scope until F5.
 
