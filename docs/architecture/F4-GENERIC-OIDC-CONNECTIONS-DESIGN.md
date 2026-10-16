@@ -7,9 +7,9 @@ Phase F4 of `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.md`:
 
 | Item | State |
 |---|---|
-| This document | **DESIGNED**, for the operator's decisions in section 9 |
-| Code | Not started. Every slice is built off Production, one draft PR each |
-| Production | Nothing. Activation in Production needs F3's vault (a client secret is read by reference) and the operator's gates |
+| This document | **DESIGNED**. Decisions F4-1 to F4-7 **taken by the operator on 2026-10-16**, F4-5 modified (section 9) |
+| Code | In progress off Production, one draft PR per slice: S1 #76 (guarded transport), S2 #77 (data model), then S3 onwards |
+| Production | Nothing from F4. F3's references table is in Production (empty, 2026-10-16). Activating a generic connection in Production still needs F3's vault (the client secret is read by reference) and the operator's gates |
 
 Evidence labels:
 - **VERIFIED:** read in `main` (`f395eeb`) or observed.
@@ -45,7 +45,7 @@ Evidence labels:
 - SAML, SCIM, LDAP;
 - directory reads (F5);
 - IdPs on private addresses (section 3, F4-4);
-- `private_key_jwt` client authentication (later).
+- client authentication `none` (public clients) and `private_key_jwt` (decision F4-5: not in F4).
 
 ## 3. Security model
 
@@ -99,7 +99,7 @@ Evidence labels:
 | Change | Notes |
 |---|---|
 | `ProviderType` += `OIDC_GENERIC` | `ALTER TYPE … ADD VALUE`, not used in the same transaction (PostgreSQL 17) |
-| **`ProviderOidcConfiguration`**, 1 to 1 with a connection | Columns: `issuer`, `clientId`, `clientAuthMethod` (`client_secret_basic`), `idTokenAlgorithm`, `scopes`, `configurationHash`, timestamps. **FORCE RLS** by organization. Guard: writable only while the connection is DRAFT or TESTING; never deleted. Keeping it separate from `ProviderConnection` leaves F2's guard and M2's policy untouched |
+| **`ProviderOidcConfiguration`**, 1 to 1 with a connection | Columns: `issuer`, `clientId`, `clientAuthMethod` (`client_secret_basic`, preferred and the default, or `client_secret_post`; decision F4-5), `idTokenAlgorithm`, `scopes`, `configurationHash`, timestamps. **FORCE RLS** by organization. Guard: writable only while the connection is DRAFT or TESTING; never deleted. Keeping it separate from `ProviderConnection` leaves F2's guard and M2's policy untouched |
 | **`ProviderTestRun`** | Columns: `kind` (`DISCOVERY` or `PROOF`), outcome, reason code, `configurationHash`, safe metadata (issuer, endpoint hosts, key count and types), the subject who ran it, the time. **Append-only** (T0 pattern) and FORCE RLS |
 | `AuthTransaction` += `purpose`, `subjectId` | Nullable, with a CHECK that LINK carries a subject. Existing rows are SIGN_IN |
 
@@ -141,14 +141,20 @@ Each certification creates, tests, proves, activates, links and signs in, runs t
 | Vendor drift ("compliant" IdPs that are not) | Strict OIDC only; each vendor certified, not assumed. A test that fails keeps the connection out of ACTIVE |
 | Secrets for generic IdPs | Only by reference (F3). Without the vault, no `OIDC_GENERIC` connection can pass its proof in Production |
 
-## 9. Decisions for the operator
+## 9. Decisions (taken by the operator on 2026-10-16)
 
-| # | Decision | Recommendation |
+| # | Decision | Operator |
 |---|---|---|
-| F4-1 | Activation needs a passing test **and** a proof sign-in by an administrator, both on the current configuration | Yes |
-| F4-2 | For `OIDC_GENERIC`, linking is **only** by proof (no typed `sub`); the typed link stays for Entra's `oid` until R10 | Yes |
-| F4-3 | The configuration is immutable once ACTIVE; a change means a new connection and a re-link | Yes |
-| F4-4 | Port 443 only, public addresses only; **no exception for private IdPs** in F4. Keycloak is certified on public HTTPS | Yes. A private-IdP policy is a later, separate decision |
-| F4-5 | Client authentication: `client_secret_basic` with the secret by reference (F3). `private_key_jwt` later | Yes |
-| F4-6 | Certification IdPs: Google (free; the operator creates the OAuth client), then an EU Keycloak (spend decided at that time) | Yes |
-| F4-7 | Order: slices S1 to S8 off Production now; certification after F3's vault | Yes |
+| F4-1 | Activation needs a passing test **and** a proof sign-in by an administrator, both on the current configuration | Approved |
+| F4-2 | For `OIDC_GENERIC`, linking is **only** by proof (no typed `sub`); the typed link stays for Entra's `oid` until R10 | Approved |
+| F4-3 | The configuration is immutable once ACTIVE; a change means a new connection and a re-link | Approved |
+| F4-4 | Port 443 only, public addresses only; **no exception for private IdPs** in F4. Keycloak is certified on public HTTPS. A private-IdP policy is a later, separate decision | Approved |
+| F4-5 | **Modified.** `OIDC_GENERIC` accepts `client_secret_basic` and `client_secret_post`, **`client_secret_basic` preferred** (the default). The secret is **always** obtained by F3 reference. `none` and `private_key_jwt` are **not** part of F4 | Approved as modified |
+| F4-6 | Certification IdPs: Google (free; the operator creates the OAuth client), then an EU Keycloak (spend decided at that time) | Approved |
+| F4-7 | Order: slices S1 to S8 off Production now; certification after F3's vault | Approved |
+
+**Still the operator's, by gate:**
+- merging and deploying any F4 slice;
+- the F4 Production migration (after a fresh-clone rehearsal);
+- the vault, Azure and Vercel configuration;
+- any spend.
