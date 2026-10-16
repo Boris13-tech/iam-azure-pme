@@ -208,18 +208,21 @@ describe.runIf(enabled)("F4 S4: generic OIDC sign-in and callback (PostgreSQL, a
     expect(h.cookieSet).not.toHaveBeenCalled();
   });
 
-  it("purpose: a LINK or ACTIVATION_PROOF transaction is consumed and refused generically, before any call to the provider", async () => {
-    for (const purpose of ["LINK", "ACTIVATION_PROOF"]) {
+  it("purpose: no other purpose ever signs in; each is consumed, answered without a session, before any call to the provider", async () => {
+    // LINK (slice S6) gets the generic sign-in refusal; ACTIVATION_PROOF (slice S5) goes to the proof, which needs the
+    // starting administrator's session in this browser (none here) and never opens one.
+    for (const [purpose, answer] of [["LINK", GENERIC_REFUSAL], ["ACTIVATION_PROOF", "/dashboard?providerProof=failed"]]) {
       const state = `purpose-${purpose}-${randomUUID()}`;
       await owner.authTransaction.create({ data: { id: randomUUID().replace(/-/g, ""), stateHash: state, nonce: "n", codeVerifier: "v",
         expectedOrganizationId: orgA.organizationId, expectedTenantId: orgA.tenantId, expectedProviderConnectionId: connA.id,
         purpose, subjectId: member.subjectId, expectedConfigurationHash: connA.configurationHash, expiresAt: new Date(Date.now() + 600_000) } });
       const response = await back({ code: "c", state });
       expect(response.status).toBe(303);
-      expect(location(response)).toBe(GENERIC_REFUSAL);
+      expect(location(response)).toBe(answer);
       expect((await transactionOf(state)).consumedAt).not.toBeNull();
     }
     expect(idpA.requests).toEqual([]);
+    expect(h.cookieSet).not.toHaveBeenCalled();
   });
 
   it("kill switch: a DISABLED or QUARANTINED connection starts no sign-in, and one disabled mid-flight completes none", async () => {

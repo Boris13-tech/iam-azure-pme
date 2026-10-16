@@ -7,6 +7,7 @@ import { withTenantDb } from "../../../lib/db/scoped-client";
 import { SessionCreationDeniedError, SessionStore } from "../../../lib/auth/session-store";
 import { entraSignInEvidence, recordRejectedSignIn } from "../../../lib/auth/sign-in-evidence";
 import { completeGenericOidcSignIn } from "../../../lib/auth/generic-oidc-sign-in";
+import { PROOF_RETURN_PATH, completeConnectionProof } from "../../../lib/admin/provider-connection-proof";
 
 export const runtime = "nodejs";
 
@@ -27,8 +28,14 @@ export async function GET(request: Request) {
     if (!transaction) {
       return NextResponse.json({ error: "Invalid or expired transaction" }, { status: 400 });
     }
-    // F4 (S4): this callback completes sign-ins only. A transaction started for another purpose (linking, activation
-    // proof) is consumed and refused with the generic answer, before any call to the provider.
+    // F4 (S5): an activation proof completes in the browser of the administrator who started it. It never opens a
+    // session and never sets a cookie: its only answer is a fixed page with "passed" or "failed".
+    if (transaction.purpose === "ACTIVATION_PROOF") {
+      const proof = await completeConnectionProof({ transaction, state, currentUrl: url.href });
+      return NextResponse.redirect(new URL(`${PROOF_RETURN_PATH}?providerProof=${proof}`, request.url), 303);
+    }
+    // F4 (S4): any other purpose than SIGN_IN (linking, until slice S6) is consumed and refused with the generic answer,
+    // before any call to the provider.
     if (transaction.purpose !== "SIGN_IN") return NextResponse.redirect(new URL("/login?error=signin", request.url), 303);
 
     // 2. Fetch ProviderConnection, inside the organization's scope
