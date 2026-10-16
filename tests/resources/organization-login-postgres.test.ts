@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { allowRequest } from "../../lib/security/rate-limit";
 import { softwarePasskey } from "../helpers/software-passkey";
+import { withinOneRateLimitWindow } from "../helpers/rate-limit-window";
 
 // Customer Self-Onboarding v1, step 2: organization-aware sign-in and anti-enumeration, exercised
 // through the real route handlers as app_user on PostgreSQL. Microsoft itself is not called: only
@@ -192,6 +193,7 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
 
   it("requirement 3: sign-in is rate limited per client, with the same answer for every organization", async () => {
     const address = ip();
+    await withinOneRateLimitWindow(600, 30); // 10-minute windows: exhausting and checking share one window
     let allowed = 0;
     while (await allowRequest("login-begin", `ip:${address}`) && allowed < 400) allowed++;
     expect(allowed).toBeLessThanOrEqual(300);
@@ -200,7 +202,7 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
       expect(response.status).toBe(429);
       expect(await response.json()).toEqual({ error: "RATE_LIMITED" });
     }
-  });
+  }, 60_000);
 
   it("requirement 14: Microsoft sign-in uses exactly one connection of the organization's single tenant, never a first result", async () => {
     const go = (org: string | null, extra = "") => entraLogin(new Request(`http://localhost:3000/auth/login${org === null ? "" : `?org=${encodeURIComponent(org)}`}${extra}`, { headers: { "x-real-ip": ip() } }));

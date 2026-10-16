@@ -13,6 +13,7 @@ import { POST as acceptComplete } from "../../app/api/auth/invitation/complete/r
 import { POST as loginBegin } from "../../app/api/auth/local/begin/route";
 import { POST as loginComplete } from "../../app/api/auth/local/complete/route";
 import { softwarePasskey } from "../helpers/software-passkey";
+import { withinOneRateLimitWindow } from "../helpers/rate-limit-window";
 
 // Customer Self-Onboarding v1, steps 5 to 7 on PostgreSQL as app_user: DNS verification (fake
 // resolver, real database rules), invitations through the real routes, and the checklist.
@@ -103,9 +104,10 @@ describe.runIf(enabled)("Domains, invitations and checklist (app_user, PostgreSQ
     expect(renewed.id).toBe(added.id);
     expect(renewed.recordValue).not.toBe(added.recordValue);
     await expect(addDomain(as(a), change(), "not a domain")).rejects.toMatchObject({ code: "INVALID_DOMAIN" });
+    await withinOneRateLimitWindow(3600, 30); // exhausting and checking share one hourly window
     while (await allowRequest("dns-verify", `org:${a.organizationId}`)) { /* exhaust the window */ }
     await expect(checkDomain(as(a), change(), renewed.id, dns([renewed.recordValue]))).rejects.toMatchObject({ code: "RATE_LIMITED" });
-  });
+  }, 60_000);
 
   it("requirements 8, 9: a member invitation is a single-use opaque link; acceptance keeps its tenant, person and role", async () => {
     const created = await createInvitation(as(a), change(), { name: "Marie Membre", role: "MEMBER" });
