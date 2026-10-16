@@ -187,12 +187,20 @@ describe.runIf(enabled)("ProviderConnection lifecycle and sign-in kill switch (P
     const draft = await owner.providerConnection.create({ data: { organizationId: org.organizationId, providerType: "GITHUB", status: "DRAFT", externalScopeId: `g-${randomUUID()}`, name: "G" } });
     expect(text(await settle(setStatus(org, draft.id, "ACTIVE")))).toMatch(/PROVIDER_CONNECTION_STATUS_TRANSITION/);
     expect(text(await settle(setStatus(org, draft.id, "TESTING", { lock: false })))).toMatch(/GOVERNANCE_LOCK_REQUIRED/);
-    for (const [to, ok] of [["TESTING", true], ["DISABLED", false], ["ACTIVE", true], ["DRAFT", false], ["DISABLED", true], ["ACTIVE", true],
-      ["QUARANTINED", true], ["ACTIVE", false], ["DISABLED", true], ["QUARANTINED", true], ["DISABLED", true]] as const) {
+    for (const [to, ok] of [["TESTING", true], ["DISABLED", false], ["DRAFT", false]] as const) {
       const outcome = await settle(setStatus(org, draft.id, to));
       if (ok) expect(outcome, to).toBe("ok"); else expect(text(outcome), to).toMatch(/PROVIDER_CONNECTION_STATUS_TRANSITION/);
     }
-    expect(await owner.providerConnection.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ status: "DISABLED", statusChangedAt: expect.any(Date) });
+    // F4 (S5): TESTING -> ACTIVE is an allowed pair, but the database also requires activation evidence, which only a
+    // configured generic OIDC connection can have (tests/resources/provider-connection-proof-postgres.test.ts).
+    expect(text(await settle(setStatus(org, draft.id, "ACTIVE")))).toMatch(/PROVIDER_CONNECTION_ACTIVATION_EVIDENCE/);
+    const live = await owner.providerConnection.create({ data: { organizationId: org.organizationId, providerType: "GITHUB", status: "ACTIVE", externalScopeId: `g-${randomUUID()}`, name: "G2" } });
+    for (const [to, ok] of [["DRAFT", false], ["TESTING", false], ["DISABLED", true], ["ACTIVE", true], ["QUARANTINED", true], ["ACTIVE", false],
+      ["DISABLED", true], ["QUARANTINED", true], ["DISABLED", true]] as const) {
+      const outcome = await settle(setStatus(org, live.id, to));
+      if (ok) expect(outcome, to).toBe("ok"); else expect(text(outcome), to).toMatch(/PROVIDER_CONNECTION_STATUS_TRANSITION/);
+    }
+    expect(await owner.providerConnection.findUniqueOrThrow({ where: { id: live.id } })).toMatchObject({ status: "DISABLED", statusChangedAt: expect.any(Date) });
     for (const to of ["DISABLED", "QUARANTINED"] as const)
       expect(text(await settle(setStatus(org, org.local, to)))).toMatch(/PROVIDER_CONNECTION_LOCAL_ALWAYS_ACTIVE/);
     expect(await statusOf(org.local)).toBe("ACTIVE");

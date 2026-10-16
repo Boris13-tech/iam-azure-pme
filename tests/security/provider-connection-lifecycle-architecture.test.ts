@@ -53,10 +53,11 @@ describe("ProviderConnection lifecycle (F2)", () => {
     expect(read("app/api/auth/local/enrollment/begin/route.ts")).toMatch(/providerType: "LUXIA_LOCAL",\s*status: "ACTIVE"/);
   });
 
-  it("the administrator's actions match the database's transitions, never offer TESTING to ACTIVE, and never touch LUXIA_LOCAL", () => {
+  it("the administrator's actions match the database's transitions, offer TESTING to ACTIVE only on evidence, and never touch LUXIA_LOCAL", () => {
+    // F4 (S5) deliberately adds TESTING to ACTIVATE: the first activation, which needs activation evidence (below).
     expect(CONNECTION_ACTIONS).toEqual({
       DISABLE: { from: ["ACTIVE"], to: "DISABLED" },
-      ACTIVATE: { from: ["DISABLED"], to: "ACTIVE" },
+      ACTIVATE: { from: ["DISABLED", "TESTING"], to: "ACTIVE" },
       QUARANTINE: { from: ["ACTIVE", "DISABLED"], to: "QUARANTINED" },
       RELEASE: { from: ["QUARANTINED"], to: "DISABLED" },
     });
@@ -66,6 +67,13 @@ describe("ProviderConnection lifecycle (F2)", () => {
     const service = read("lib/admin/provider-connection-lifecycle.ts");
     expect(service).toContain(`target.providerType === "LUXIA_LOCAL"`);
     expect(service).not.toMatch(/fetch\(|https?:\/\//);
+    // The first activation reads its evidence in the plan and again in the apply, under the row lock, into the digest.
+    const evidence = "const evidence = firstActivation(target, to) ? await activationEvidence(tx, auth, target) : undefined;";
+    expect(service.split(evidence)).toHaveLength(3);
+    const apply = service.slice(service.indexOf("export function applyConnectionTransition"));
+    expect(apply.indexOf("readTarget(tx, auth, providerConnectionId, true)")).toBeLessThan(apply.indexOf(evidence));
+    expect(apply.indexOf(evidence)).toBeLessThan(apply.indexOf("connectionPlanDigest(auth, target, action, evidence)"));
+    expect(service).toContain(`const firstActivation = (target: Target, to: ProviderConnectionStatus) => target.status === "TESTING" && to === "ACTIVE";`);
   });
 
   it("every journaled operation and the sign-in refusal have a French label (B5)", () => {
