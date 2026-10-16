@@ -5,7 +5,7 @@ Phase F3 of `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.md` (sections 4.6 and 6,
 | Item | State |
 |---|---|
 | Port, adapters, cache, guard | **IMPLEMENTED off Production** (this PR). The guard is not wired yet |
-| Migration `20261014110000` (references table) | Rehearsal on a fresh clone of Production **VERIFIED**, 2026-10-15 (section 9). Production migration: operator gate. The table stays **empty** until the Key Vault decision |
+| Migration `20261014110000` (references table) | **PRODUCTION VERIFIED**, 2026-10-16: applied, rolled back and re-applied in Production, table **empty** (section 10). Rehearsal VERIFIED on 2026-10-15 (section 9). The table stays empty until the Key Vault decision |
 | Vault resource, wiring, secret migration | **DESIGNED**: each is an operator gate (section 8) |
 
 Evidence labels:
@@ -180,3 +180,32 @@ Run `20261015T234541Z`, code `97fb434` (this PR, rebased on `main` `e98cef7`). *
 - deletion is refused, for the owner too;
 - a revoked reference is frozen;
 - the rollback is refused once a reference exists.
+
+## 10. The references migration in Production, 2026-10-16 (PRODUCTION VERIFIED)
+
+Operator gate, approved by the operator. Conditions:
+- BEFORE → APPLY → AFTER → ROLLBACK → REAPPLY **in Production**;
+- the table stays **empty** throughout;
+- no change to business data;
+- complete backups.
+
+The running application stayed the F2 deployment (`d631edb`) throughout. Code: this PR at `2ac7fca`, its migration identical to the rehearsed one (checked by the gate tool). The gate tool was first exercised end to end on a disposable clone (20/20 steps, 39/39 checks).
+
+| Step | Result |
+|---|---|
+| Backup just before | `20261016T065302Z-0f08c0`: 51 tables, 27 migrations, verified |
+| BEFORE | Schema `e31636851362`, definitions `5f8a619d78cc` and existing data `e1df36e3e431`: **the rehearsed BEFORE** |
+| APPLY | 06:57:22Z → 06:57:52Z. Data and definitions re-checked unchanged just before |
+| AFTER, 15/15 | The table is **empty**. RLS is enabled and forced, with one policy. `app_user` has SELECT, INSERT and UPDATE only. Tenant isolation holds. Backups can read the table. The guard is not executable. **Business data, sessions and authority are unchanged.** The 4 connections are ACTIVE and M2's isolation is unchanged. Schema `5ba8f20ef350` and definitions `a15d725e27d4`: **the rehearsed AFTER** |
+| ROLLBACK, 6/6 | 06:59:28Z: back to BEFORE exactly (data, full schema, definitions, state, migration history, views) |
+| REAPPLY, 16/16 | 07:00:55Z: the same result as the first application, table empty, business data unchanged since BEFORE |
+| Backup with F3 | `20261016T070247Z-c1239a`: **52 tables, 28 migrations**, verified |
+| Smoke test | 20/20 |
+| Operator's Microsoft sign-in | 11/11 |
+| Operator's existing-passkey sign-in | 6/6 |
+| Every organization, read-only before and after | 11/11 |
+| End of the gate | **0 references**. Next hourly backup (Azure trigger): `20261016T075340Z-f929bd`, 52 tables, 28 migrations, verified |
+
+**Not done, by decision:** the merge of this PR, the vault, the wiring and the guard. Each is a later gate (`F3-KEY-VAULT-DECISION.md`).
+
+**Rollback:** `docs/operations/PROVIDER-SECRET-REFERENCE-ROLLBACK.sql`, lossless while the table is empty.
