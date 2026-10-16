@@ -37,6 +37,22 @@ export type GuardedFetchOptions = Readonly<{ resolve?: Resolve; send?: Send; tim
 export const OUTBOUND_TIMEOUT_MS = 5_000;
 export const OUTBOUND_MAX_BYTES = 512 * 1024;
 
+/**
+ * The checks of the guarded fetch, without any request: the URL's form, then one resolution where every address must be
+ * public. Used for endpoints LUXIA only shows to the browser (an IdP's authorization endpoint), and by the fetch itself.
+ */
+export async function checkOutboundTarget(input: string | URL, resolve: Resolve = resolveAll): Promise<{ url: URL; address: string }> {
+  const url = toUrl(input);
+  if (url.protocol !== "https:") throw new OutboundRefusedError("OUTBOUND_SCHEME");
+  if (url.port !== "" && url.port !== "443") throw new OutboundRefusedError("OUTBOUND_PORT");
+  if (url.username || url.password || url.hash) throw new OutboundRefusedError("OUTBOUND_URL");
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  const addresses = isIP(host) ? [host] : await resolve(host).catch(() => [] as string[]);
+  if (addresses.length === 0) throw new OutboundRefusedError("OUTBOUND_DNS");
+  if (!addresses.every(isPublicAddress)) throw new OutboundRefusedError("OUTBOUND_PRIVATE_ADDRESS");
+  return { url, address: addresses[0] };
+}
+
 export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fetch {
   const resolve = options.resolve ?? resolveAll;
   const send = options.send ?? sendPinned;
@@ -44,17 +60,9 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
   const maxBytes = options.maxBytes ?? OUTBOUND_MAX_BYTES;
 
   return async function guardedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    const url = toUrl(input);
-    if (url.protocol !== "https:") throw new OutboundRefusedError("OUTBOUND_SCHEME");
-    if (url.port !== "" && url.port !== "443") throw new OutboundRefusedError("OUTBOUND_PORT");
-    if (url.username || url.password || url.hash) throw new OutboundRefusedError("OUTBOUND_URL");
+    const { url, address } = await checkOutboundTarget(input instanceof Request ? input.url : input, resolve);
 
-    const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
-    const addresses = isIP(host) ? [host] : await resolve(host).catch(() => [] as string[]);
-    if (addresses.length === 0) throw new OutboundRefusedError("OUTBOUND_DNS");
-    if (!addresses.every(isPublicAddress)) throw new OutboundRefusedError("OUTBOUND_PRIVATE_ADDRESS");
-
-    const response = await send(url, addresses[0], {
+    const response = await send(url, address, {
       method: (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase(),
       headers: Object.fromEntries(new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))),
       body: await bodyBytes(init?.body),

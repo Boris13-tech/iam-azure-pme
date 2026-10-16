@@ -41,4 +41,20 @@ describe("identity providers are reached only through the SSRF-guarded transport
     expect(guard).toMatch(/agent: false,/);
     expect(guard).not.toMatch(/rejectUnauthorized/);
   });
+
+  it("S3: the connection test reaches the IdP through the guard, and only after the permission check", () => {
+    const probe = read(join("lib", "provider-adapters", "implementations", "oidc", "probe.ts"));
+    expect(probe).toContain("const fetcher = options.fetch ?? createGuardedFetch(");
+    expect(probe).toContain("await checkOutboundTarget(endpoints.authorization_endpoint, options.resolve);");
+    expect(probe).not.toMatch(/\bawait fetch\(/);
+    const service = read(join("lib", "admin", "provider-connection-test.ts"));
+    const permission = service.indexOf(`await requireNative(tx, auth, "providers.manage");`);
+    const probeCall = service.indexOf("await dependencies.probe(");
+    const journaled = service.indexOf(`return operation(auth, changeId, "PROVIDER.CONNECTION.TEST", "providers.manage", async (tx) => {`);
+    expect(permission).toBeGreaterThan(0);
+    expect(probeCall).toBeGreaterThan(permission);
+    // The network call is not inside the journaled transaction (no governance lock held while an outside host answers).
+    expect(journaled).toBeGreaterThan(probeCall);
+    expect(service).toContain(`throw new CanonicalAdminError("CONNECTION_CONFIGURATION_CHANGED", 409);`);
+  });
 });
