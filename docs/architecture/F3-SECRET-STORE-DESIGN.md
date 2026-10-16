@@ -4,7 +4,8 @@ Phase F3 of `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.md` (sections 4.6 and 6,
 
 | Item | State |
 |---|---|
-| Port, adapters, cache, guard | **IMPLEMENTED off Production** (this PR) |
+| Port, adapters, cache, guard | **IMPLEMENTED off Production** (this PR). The guard is not wired yet |
+| Migration `20261014110000` (references table) | Rehearsal on a fresh clone of Production **VERIFIED**, 2026-10-15 (section 9). Production migration: operator gate. The table stays **empty** until the Key Vault decision |
 | Vault resource, wiring, secret migration | **DESIGNED**: each is an operator gate (section 8) |
 
 Evidence labels:
@@ -17,7 +18,7 @@ Evidence labels:
   - `SecretCustody` (versioned handles, states `ACTIVE`/`VERIFY_ONLY`/`REVOKED`/`COMPROMISED`/`RETIRED`) exists for identity keys.
 - **Only adapter:** `EnvironmentSecretResolver`, which reads `process.env[key]`. It is built in two composition roots: the Entra runtime and LUXIA_LOCAL (TOTP seeds; there are none in Production).
 - **Finding M2 is confirmed in Production.** The single Microsoft connection signs in through the **global** variables `ENTRA_AUTH_CLIENT_ID`/`ENTRA_AUTH_CLIENT_SECRET`, through the fallback in `connection-config.ts`. No per-connection variable exists.
-  - The Graph client (`GRAPH_*`) reads and **writes** users of the Microsoft tenant (`lib/graph.ts`).
+  - The Graph client (`GRAPH_*`, `lib/graph.ts`) can read and **write** users of the Microsoft tenant. Its variables were removed from Production on 2026-10-14 (G-R1). Graph is not reintroduced before F5 or a real product need: per connection, with minimal permissions and a kill switch.
 - **Environment separation:** Production secrets must never be readable by Preview deployments.
   - A containment plan for the current state is tracked with the operator (F3-a). It is not detailed in this public repository until it is applied.
   - The structural fix is section 3.
@@ -114,6 +115,12 @@ The database itself enforces that:
 
 ## 8. Rollout (each step after F2 is PRODUCTION VERIFIED; gates in bold)
 
+**Order decided by the operator on 2026-10-15:**
+1. The references migration comes first, as an expand-only Production gate. The table stays **empty** throughout its certification, and no secret reference is created before the Key Vault decision.
+2. Then the vault decision (step 1 below), with its own note.
+
+The steps below keep their content. Graph secrets are out of scope until F5.
+
 1. **Operator: create the application vault.**
    - France Central, RBAC mode, purge protection, separate from the backup vault.
    - An Entra app registration for LUXIA's workload, with **only** "Key Vault Secrets User" on that vault.
@@ -135,3 +142,41 @@ The database itself enforces that:
    - no secret-bearing variable with a Preview target;
    - the old secrets' key ids absent in Entra;
    - a vault outage drill on a non-Production deployment.
+
+## 9. Rehearsal of the references migration on a fresh clone of Production, 2026-10-15 (VERIFIED)
+
+Run `20261015T234541Z`, code `97fb434` (this PR, rebased on `main` `e98cef7`). **0 failures.**
+- No Production change, no Azure resource, no spend.
+- The clone, a Neon branch of Production `main` with M1, the F2 code and M2, was deleted only after the evidence was verified.
+- Evidence: one immutable manifest per phase, each with a read-only snapshot of Production. `INDEX.sha256` = `367127f1d2b0…`.
+
+| Phase | Existing tables (data) | Full schema | Definitions | New table |
+|---|---|---|---|---|
+| BEFORE | `e1df36e3e431` | `e31636851362` (Production after M2) | `5f8a619d78cc` | absent |
+| AFTER-F3 | `e1df36e3e431` | `5ba8f20ef350` | `a15d725e27d4` | present, **0 rows** |
+| AFTER-ROLLBACK | `e1df36e3e431` | `e31636851362` | `5f8a619d78cc` | absent |
+| AFTER-REAPPLY | `e1df36e3e431` | `5ba8f20ef350` | `a15d725e27d4` | present, 0 rows |
+
+| # | Proof | Checks |
+|---|---|---|
+| 0 | The clone is the current Production. M2 is in place | 4/4 |
+| 1 | **Safe apply.** The new table is empty, with RLS enabled and forced and one policy. `app_user` has SELECT, INSERT and UPDATE only, never DELETE or TRUNCATE. `luxia_backup` can read it (default privileges, BYPASSRLS). The guard function is executable by neither PUBLIC nor `app_user`. Every existing table, the sessions and the authority are identical. M2's isolation of `ProviderConnection` is unchanged. No pre-existing function, trigger, grant, type, column, RLS flag, policy or EXECUTE right changed | 12/12 |
+| 2 | **Lossless rollback**, while the table is empty: data, full schema, definitions, state and runtime view back to BEFORE | 6/6 |
+| 3 | **Reproducible:** F3 applies again to the same result | 5/5 |
+| 4 | **Production unchanged during the whole run,** and still without the table | 5/5 |
+| 5a | **The real sign-in code with F3 applied**, as `app_user`: the Microsoft and passkey paths, sessions and sign-out | 17/17 |
+| 5b | **The database invariants for `app_user`**, on a test organization created in the clone (listed below) | 18/18 |
+| — | Evidence integrity | 1/1 |
+
+**5b, the database invariants:**
+- the governance lock is required;
+- the store must be the vault, never the environment;
+- a locator cannot hold a value;
+- one live reference per connection and purpose;
+- a reference for another organization's connection is refused by RLS;
+- `app_user` sees no reference without context, and only its own organization's inside one;
+- the active version changes only by promoting the candidate;
+- a reference's identity never changes;
+- deletion is refused, for the owner too;
+- a revoked reference is frozen;
+- the rollback is refused once a reference exists.
