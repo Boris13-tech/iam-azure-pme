@@ -7,7 +7,10 @@ import {
   type SecretResolver,
 } from "..";
 
+// Development and tests only: Production refuses it (secret-stores/runtime-guard.ts, F3).
 export class EnvironmentSecretResolver implements SecretResolver {
+  readonly kind = "environment";
+
   async withSecret<T>(
     context: ProviderOperationContext,
     reference: SecretReference,
