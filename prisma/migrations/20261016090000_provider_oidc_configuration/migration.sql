@@ -39,7 +39,8 @@ CREATE TABLE "ProviderOidcConfiguration" (
     length("issuer") <= 512
     -- a lower-case host name with at least two labels, the last one starting with a letter (so never an address)
     AND "issuer" ~ '^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z][a-z0-9-]*[a-z0-9](:443)?(/[A-Za-z0-9._~%!$&''()*+,;=:@-]+)*/?$'),
-  CONSTRAINT "ProviderOidcConfiguration_clientId" CHECK (length("clientId") BETWEEN 1 AND 255 AND "clientId" !~ '[[:space:][:cntrl:]]'),
+  -- No BETWEEN: PostgreSQL deparses it differently after a dump and a restore, which the backup check would flag.
+  CONSTRAINT "ProviderOidcConfiguration_clientId" CHECK (length("clientId") >= 1 AND length("clientId") <= 255 AND "clientId" !~ '[[:space:][:cntrl:]]'),
   CONSTRAINT "ProviderOidcConfiguration_clientAuthMethod" CHECK ("clientAuthMethod" IN ('client_secret_basic', 'client_secret_post')),
   CONSTRAINT "ProviderOidcConfiguration_idTokenAlgorithm" CHECK ("idTokenAlgorithm" IN ('RS256', 'PS256', 'ES256')),
   CONSTRAINT "ProviderOidcConfiguration_scopes" CHECK ("scopes" ~ '^openid( [A-Za-z0-9_.:-]{1,64}){0,15}$')
