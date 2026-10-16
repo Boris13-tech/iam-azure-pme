@@ -19,6 +19,9 @@ const suffix = randomUUID().slice(0, 8);
 const ORIGIN = "http://localhost:3000";
 const SECRETS = { "akv://luxia-test-vault/oidc-a": "test-secret-a", "akv://luxia-test-vault/oidc-b": "test-secret-b", "akv://luxia-test-vault/oidc-k": "test-secret-k" };
 
+// Several tests run complete round trips (login, provider, callback, session) five to ten times: more than vitest's 5 s.
+vi.setConfig({ testTimeout: 60_000 });
+
 const h = vi.hoisted(() => ({ provider: undefined as unknown, cookieSet: vi.fn(), entraBegin: vi.fn(), entraComplete: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined, set: h.cookieSet }), headers: async () => ({ get: () => null }) }));
 vi.mock("../../lib/provider-adapters/implementations/oidc-generic/runtime", () => ({ getGenericOidcAuthenticationProvider: () => h.provider }));
