@@ -101,16 +101,18 @@ This is **new spend outside the backup authorization** (€10 a month, backup on
 - Microsoft sign-in is served from the cache for up to 60 minutes, then fails closed for that connection only.
 - Passkey sign-in and recovery are unaffected (tested in a 90-minute outage simulation).
 
-## 8. Decisions requested
+## 8. Decisions (operator, 2026-10-16)
 
-| # | Decision | Recommendation |
-|---|---|---|
-| KV1 | Approve option A and its spend (under €1 a month), outside the backup authorization | Yes |
-| KV2 | Region and naming: France Central; a dedicated vault for application secrets, separate from the backup vault | Yes |
-| KV3 | Audit logs (`AuditEvent`) to the existing Log Analytics workspace | Yes (free tier) |
-| KV4 | Use the rotation the 2026-12-29 expiry requires anyway to put the new Microsoft secret straight into the vault (step 3) | Yes, in November, well before the expiry |
-| KV5 | A non-Production vault for previews | Later (optional) |
-| KV6 | Order: references migration gate (step 0) first, then steps 1 to 7, each as its own gate | Yes |
+| # | Decision | Recommendation | Operator |
+|---|---|---|---|
+| KV1 | Approve option A and its spend (under €1 a month), outside the backup authorization | Yes | **YES** |
+| KV2 | Region and naming: France Central; a dedicated vault for application secrets, separate from the backup vault | Yes | **YES** |
+| KV3 | Audit logs (`AuditEvent`) to the existing Log Analytics workspace | Yes (free tier) | **YES** |
+| KV4 | Use the rotation the 2026-12-29 expiry requires anyway to put the new Microsoft secret straight into the vault (step 3) | Yes, in November, well before the expiry | **YES** |
+| KV5 | A non-Production vault for previews | Later (optional) | **LATER** |
+| KV6 | Order: references migration gate (step 0) first, then steps 1 to 7, each as its own gate | Yes | **YES** |
+
+Approving these decisions creates nothing: **no Azure resource exists yet** (2026-10-16). Step 0 (the references migration) is PRODUCTION VERIFIED; each of steps 1 to 7 is still its own gate, run only on the operator's word.
 
 ## 9. Open assumptions to verify before or at step 1
 

@@ -7,8 +7,8 @@ Phase F4 of `SOVEREIGN-PROVIDER-FEDERATION-LAYER-DESIGN.md`:
 
 | Item | State |
 |---|---|
-| This document | **DESIGNED**. Decisions F4-1 to F4-7 **taken by the operator on 2026-10-16**, F4-5 modified (section 9) |
-| Code | In progress off Production, one draft PR per slice: S1 #76 (guarded transport), S2 #77 (data model), then S3 onwards |
+| This document | **DESIGNED**. Decisions F4-1 to F4-7 taken by the operator on 2026-10-16 (F4-5 modified); F4-8 to F4-14 taken the same evening (section 9) |
+| Code | **IMPLEMENTED off Production**, one draft PR per slice, none merged: S1 #76 (guarded transport), S2 #77 (data model), S3 #78 (test), S4 #79 (sign-in and callback), S5 #80 (proof and first activation). S6 to S8 not started (operator: stop after S5) |
 | Production | Nothing from F4. F3's references table is in Production (empty, 2026-10-16). Activating a generic connection in Production still needs F3's vault (the client secret is read by reference) and the operator's gates |
 
 Evidence labels:
@@ -86,8 +86,8 @@ Evidence labels:
 | **Create** | Administrator (`providers.manage`) | `OIDC_GENERIC`, a name, the issuer, the client id. The connection is DRAFT, with no secret yet | `PROVIDER.CONNECTION.CREATE` |
 | **Attach the secret** | Administrator, after F3's vault exists | Records a `ProviderSecretReference` (purpose `OIDC_CLIENT`). The value goes into the vault, never into LUXIA | `PROVIDER.SECRET.REFERENCE` |
 | **Test** | Administrator | DRAFT → TESTING, after a passing check of discovery (exact issuer), the guarded endpoints, the keys and the algorithm. The result is recorded in `ProviderTestRun`, whatever it is | `PROVIDER.CONNECTION.TEST` (success or denial with its reason) |
-| **Proof sign-in** | The administrator, at the IdP | A sign-in through the TESTING connection, with purpose `ACTIVATION_PROOF`. It opens **no session**; it proves the whole flow and records the result | `PROVIDER.CONNECTION.PROOF` |
-| **Activate** | Administrator | TESTING → ACTIVE. It needs a passing test and a passing proof on the current `configurationHash`. Dry run first, then the plan digest (F2 pattern) | `PROVIDER.CONNECTION.ACTIVATE` |
+| **Proof sign-in** | The administrator, at the IdP | A sign-in through the TESTING connection, with purpose `ACTIVATION_PROOF`. It opens **no session**, creates or links no account and keeps no subject; it completes only in the FULL session of the administrator who started it, on the same configuration hash and secret version, and records the result. It proves the protocol, **not** the administrator's identity at the IdP | `PROVIDER.CONNECTION.PROOF.START`, `PROVIDER.CONNECTION.PROOF` |
+| **Activate** | Administrator | TESTING → ACTIVE. On the current `configurationHash`: the latest DISCOVERY run passed within **60 minutes**, the latest PROOF run passed within **15 minutes** with the secret version in force (F4-8 to F4-10). Dry run first, then the plan digest, which covers the evidence (F2 pattern); the evidence is read again at apply time under the locks. **The database refuses the transition without that evidence** (F4-12). Prover and activating administrator are journaled separately (F4-11) | `PROVIDER.CONNECTION.ACTIVATE` |
 | **Link (proven)** | The person, already signed in to LUXIA with a FULL session | Starts a link with purpose `LINK`, signs in at the IdP, and the callback creates the `IdentityAccount` (that person, that connection, `sub`). Refused if the `sub` is already linked to anyone, or if the person already has an account on that connection | `IDENTITY_ACCOUNT.LINK` with `proven: true` |
 | **Sign in** | Anyone with a linked account | The same core as Microsoft; the connection must be ACTIVE (F2 kill switch). An unknown `sub` gets the generic refusal: no automatic account creation | `AuthenticationEvidence` VERIFIED or REJECTED |
 | **Re-link (R10)** | Each person, invited by an administrator | Proven link on the new connection, then the old connection is disabled. The authority digest stays identical (rehearsal) | as above |
@@ -102,6 +102,8 @@ Evidence labels:
 | **`ProviderOidcConfiguration`**, 1 to 1 with a connection | Columns: `issuer`, `clientId`, `clientAuthMethod` (`client_secret_basic`, preferred and the default, or `client_secret_post`; decision F4-5), `idTokenAlgorithm`, `scopes`, `configurationHash`, timestamps. **FORCE RLS** by organization. Guard: writable only while the connection is DRAFT or TESTING; never deleted. Keeping it separate from `ProviderConnection` leaves F2's guard and M2's policy untouched |
 | **`ProviderTestRun`** | Columns: `kind` (`DISCOVERY` or `PROOF`), outcome, reason code, `configurationHash`, safe metadata (issuer, endpoint hosts, key count and types), the subject who ran it, the time. **Append-only** (T0 pattern) and FORCE RLS |
 | `AuthTransaction` += `purpose`, `subjectId` | Nullable, with a CHECK that LINK carries a subject. Existing rows are SIGN_IN |
+| `AuthTransaction` += `expectedConfigurationHash` (S4, `20261016100000`) | Nullable, 64 hex. A generic round trip (sign-in or proof) is bound to the configuration it started with; Microsoft transactions leave it NULL |
+| `ProviderTestRun` += `sequence`; activation evidence and guard (S5, `20261016110000`) | `sequence`: identity, the database's monotonic order (the latest run is the highest). `occurredAt` stamped by the database clock at insert. `luxia_provider_activation_evidence(organization, connection)`: the one definition of valid evidence (SECURITY INVOKER, under RLS), used by the application. Trigger `provider_connection_activation_guard`: refuses TESTING → ACTIVE without it, and an `OIDC_GENERIC` connection created other than DRAFT |
 
 **No change to Subjects, Assignments, Entitlements or the journal tables:** authority stays in LUXIA (R1, R6).
 
@@ -112,8 +114,8 @@ Evidence labels:
 | S1 | **Guarded transport** (`lib/provider-adapters/infrastructure/outbound/`), plugged into the OIDC core as `customFetch` | Unit tests for every range and refusal; DNS-rebinding test with a resolver stub; the existing core tests unchanged; architecture test: no IdP request without the guard |
 | S2 | `OIDC_GENERIC` profile, `ProviderOidcConfiguration`, `ProviderTestRun` (migration + rollback + rehearsal) | Postgres suites: RLS across two organizations, immutability after activation, append-only test runs |
 | S3 | **Test** action (DRAFT → TESTING), against the local IdP | Pass, plus each failure: wrong issuer, private address, no keys, weak key, `alg=none` in metadata |
-| S4 | Generic sign-in and callback, with `purpose` | The negative table of rule R8, one case each; existing Microsoft sign-in unchanged (F1 tests) |
-| S5 | **Proof sign-in and activation** | Activation refused without a passing proof on the current hash |
+| S4 (#79) | Generic sign-in and callback, with `purpose`; transaction bound to the configuration hash | The negative table of rule R8, one case each; mix-up between two connections; existing Microsoft sign-in unchanged (F1 tests) |
+| S5 (#80) | **Proof sign-in and activation**, with the database's activation guard | Activation refused without a passing test and a passing proof on the current hash, fresh on the database clock, latest by the database's order; the database refuses it for any caller |
 | S6 | **Proven linking** | Refusals: `sub` already linked, second account on the connection, no FULL session, RECOVERY session |
 | S7 | Administrator API and UI (rewritten provider pages) | Route tests; labels (B5); permissions (`providers.manage`) |
 | S8 | **R10 rehearsal on a clone**: a test organization moved from one connection to another | Authority digest identical before and after |
@@ -152,9 +154,18 @@ Each certification creates, tests, proves, activates, links and signs in, runs t
 | F4-5 | **Modified.** `OIDC_GENERIC` accepts `client_secret_basic` and `client_secret_post`, **`client_secret_basic` preferred** (the default). The secret is **always** obtained by F3 reference. `none` and `private_key_jwt` are **not** part of F4 | Approved as modified |
 | F4-6 | Certification IdPs: Google (free; the operator creates the OAuth client), then an EU Keycloak (spend decided at that time) | Approved |
 | F4-7 | Order: slices S1 to S8 off Production now; certification after F3's vault | Approved |
+| F4-8 | A connection test (DISCOVERY) counts for activation for **60 minutes** | Decided (evening) |
+| F4-9 | A proof sign-in (ACTIVATION_PROOF) counts for activation for **15 minutes** | Decided (evening) |
+| F4-10 | Freshness on the **PostgreSQL clock**; `ProviderTestRun` gets a **monotonic database order** that defines the latest run | Decided (evening) |
+| F4-11 | **No mandatory four-eyes** in F4 v1; the prover and the activating administrator are recorded separately, for a future policy | Decided (evening) |
+| F4-12 | Before Production, a **database defense** refuses TESTING → ACTIVE without valid evidence (dedicated S5 migration) | Decided (evening) |
+| F4-13 | An **independent review** is mandatory before merging #76 (S1) | Decided (evening) |
+| F4-14 | S1 has **its own Production gate**, before S2 and later slices | Decided (evening) |
+
+S6 is stopped until the operator says otherwise. Vault decisions KV1 to KV6: `F3-KEY-VAULT-DECISION.md`, section 8.
 
 **Still the operator's, by gate:**
-- merging and deploying any F4 slice;
+- merging and deploying any F4 slice (S1 first, alone, after an independent review);
 - the F4 Production migration (after a fresh-clone rehearsal);
 - the vault, Azure and Vercel configuration;
 - any spend.
