@@ -346,12 +346,16 @@ describe.runIf(enabled)("F4 S4: generic OIDC sign-in and callback (PostgreSQL, a
       const atB = await begin(orgB);
       const fromB = idpB.authorize(atB.authorizationUrl, "sub-b");
       const fromA = idpA.authorize(atA.authorizationUrl, "sub-member");
-      idpA.reset(); idpB.reset();
+      // Only the request logs are cleared: both codes stay valid at the provider that issued them.
+      const clearLogs = () => { idpA.requests.length = 0; idpB.requests.length = 0; };
+      clearLogs();
       expect(location(await back({ code: fromB.code, state: atA.state }))).toBe(GENERIC_REFUSAL);
-      // A's round trip goes to A's token endpoint only: B is never asked for a token with A's transaction.
-      expect(tokenRequests(idpB)).toBe(0);
+      // A's round trip goes to A's token endpoint only (which refuses B's code): B is never asked for a token.
+      expect([tokenRequests(idpA), tokenRequests(idpB)]).toEqual([1, 0]);
+      clearLogs();
       expect(location(await back({ code: fromA.code, state: atB.state }))).toBe(GENERIC_REFUSAL);
-      expect(tokenRequests(idpA)).toBe(0);
+      // The reverse: B's round trip goes to B's token endpoint only; A is never asked.
+      expect([tokenRequests(idpA), tokenRequests(idpB)]).toEqual([0, 1]);
       expect(await owner.session.count({ where: { organizationId: orgB.organizationId } })).toBe(sessionsB);
       expect(h.cookieSet).not.toHaveBeenCalled();
     });
