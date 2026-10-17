@@ -11,6 +11,7 @@ import type {
   OidcProfile,
   OidcVerifiedClaims,
 } from "./types";
+import { OutboundRefusedError, createGuardedFetch } from "../../infrastructure/outbound/guarded-fetch";
 
 /**
  * The generic OpenID Connect gateway: authorization code with PKCE (S256), single-use state and nonce, discovery of
@@ -20,12 +21,15 @@ import type {
  */
 export class OpenIdClientOidcGateway {
   /**
-   * `discoveryOptions` exists for tests that run a local identity provider over plain HTTP. Production code never
-   * passes it (architecture test).
+   * `discoveryOptions` exists for tests that run a local identity provider over plain HTTP; it replaces the outbound
+   * guard. Production code never passes it (architecture test), so every request to an identity provider (discovery,
+   * keys, token) goes through the SSRF-guarded fetch (F4, finding F4-S1). `outboundFetch` lets a test drive the guard
+   * itself with a stubbed resolver and transport; production code never passes it either.
    */
   constructor(
     private readonly secrets: SecretResolver,
     private readonly discoveryOptions?: client.DiscoveryRequestOptions,
+    private readonly outboundFetch: typeof fetch = createGuardedFetch(),
   ) {}
 
   async begin(
@@ -112,6 +116,7 @@ export class OpenIdClientOidcGateway {
     try {
       return await this.secrets.withSecret(context, config.clientSecret, (lease) =>
         lease.use(async (secretBytes) => {
+          const guarded = this.outboundFetch as unknown as client.CustomFetch;
           const oidcConfig = await client.discovery(
             new URL(config.issuer),
             config.clientId,
@@ -120,8 +125,10 @@ export class OpenIdClientOidcGateway {
               id_token_signed_response_alg: config.idTokenAlgorithm ?? "RS256",
             },
             undefined,
-            this.discoveryOptions,
+            this.discoveryOptions ?? { [client.customFetch]: guarded },
           );
+          // The same guard for every later request of this configuration: keys (JWKS) and the token endpoint.
+          if (!this.discoveryOptions) oidcConfig[client.customFetch] = guarded;
           // Discovery must publish exactly the configured issuer (no trailing-slash or case drift).
           if (oidcConfig.serverMetadata().issuer !== config.issuer) {
             throw failed(`${profile.displayName} discovery issuer mismatch`, "DISCOVERY_ISSUER_MISMATCH");
@@ -135,12 +142,22 @@ export class OpenIdClientOidcGateway {
       );
     } catch (error) {
       if (error instanceof ProviderAdapterError) throw error;
+      const reason = outboundRefusal(error);
       throw new ProviderAdapterError({
         code: "AUTHENTICATION_FAILED",
         message: `${profile.displayName} OIDC operation failed`,
+        ...(reason ? { safeDetails: { reason } } : {}),
       });
     }
   }
+}
+
+/** The guard's safe reason, when an outbound refusal caused the failure (openid-client may wrap it as a cause). */
+function outboundRefusal(error: unknown): string | null {
+  for (let current = error, depth = 0; current && depth < 5; current = (current as { cause?: unknown }).cause, depth++) {
+    if (current instanceof OutboundRefusedError) return current.reason;
+  }
+  return null;
 }
 
 function failed(message: string, reason: string): ProviderAdapterError {
