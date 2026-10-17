@@ -31,10 +31,11 @@ One row per threat. STRIDE per boundary, plus the identity abuse cases: mix-up, 
 | I1 Authority is LUXIA's alone | | |
 | I2 Isolation enforced by the database | | |
 | I3 Fail closed, answer generically | | |
-| I4 No security action without evidence | | |
+| I4 Attributable, append-only evidence, atomic with its effect | | |
 | I5 Secrets referenced, never exposed | | |
 | I6 Continuity: no lock-out, no silent data loss | | |
-| I7 Gated and reversible | | |
+| I7 Provider replaceable without loss or modification of authority, history or Subjects | | |
+| ER1 (engineering rule) Gated and reversible | | |
 
 ## 6. Failure modes (availability)
 | Dependency | Failure | Behaviour | Test ID |

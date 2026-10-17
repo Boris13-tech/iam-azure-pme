@@ -12,7 +12,7 @@
 ## Checklist
 | Area | Question | Result | Notes |
 |---|---|---|---|
-| Invariants | Does any change weaken I1–I7? Is each touched invariant named, with evidence? | | |
+| Invariants and rules | Does any change weaken I1–I7 or bypass the engineering rule ER1 (gated and reversible)? Is each touched invariant named, with evidence? | | |
 | Boundaries | Is every boundary crossed in the registry, with its controls? | | |
 | Threat model | Does each threat have a mitigation and a test? Are residual risks accepted by the operator? | | |
 | Adversarial tests | One test per refusal? Replay, race, cross-tenant, outage, mix-up? Do the tests fail without their control? | | |
