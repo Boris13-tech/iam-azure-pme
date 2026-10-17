@@ -5,6 +5,7 @@ Standard, section 15.
 | Item | State |
 |---|---|
 | Targets | **PROPOSED, not binding.** No SLO binds until its SLI has been measured for 30 days; then the operator sets it |
+| OPERATIONALLY PROVEN | Requires the SLIs named in the gate to be measured **continuously** over the whole observation period, without a significant gap (standard, section 17, point 6) |
 | Measurement today | Mostly **MISSING**: there is no automated monitoring yet (recorded in `docs/legal/INCIDENT-RESPONSE-AND-BREACH-NOTIFICATION.md`). Backup freshness is the exception (E4) |
 
 ## Availability and latency
