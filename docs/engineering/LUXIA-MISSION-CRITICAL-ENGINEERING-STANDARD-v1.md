@@ -248,7 +248,7 @@ Every class A change has one of the following before PRODUCTION GATED:
 | Location | Detailed Production evidence lives in the operator's private evidence store. The public repository holds summaries, closures and index hashes. Unfixed security findings are never in the public repository |
 | Retention | **Production gate evidence: 7 years** (operator decision, 2026-10-17). CI evidence: as kept by the CI provider |
 | Evidence store | A dedicated, EU-hosted, **immutable (WORM)** store with version-level immutability, separate from the backup store and from every application credential. Designed; created only through its own cost and security gate (amendment 1) |
-| Encryption | **age encryption of every evidence payload is mandatory**, to **two independent recipients**: the operator's, and a recovery recipient held offline. Manifests and their digests stay in clear, so that integrity can be checked without decrypting (amendment 1) |
+| Encryption | **age encryption is mandatory**, to **two independent recipients**: the operator's, and a recovery recipient held offline. The **detailed manifest and the evidence payload are age-encrypted**. Only a **minimal outer integrity manifest** may stay in clear, so that integrity can be checked without decrypting: run ID, digests and sizes of the encrypted files, dates (amendment 1) |
 | Immutability lock | A trial phase with the immutability policy **unlocked** comes first. Locking the policy (irreversible) is a **separate operator decision** (amendment 1) |
 | Access | **Workload identity or Microsoft Entra authentication is preferred.** **No long-lived SAS.** When a SAS is indispensable: a short-lived **user-delegation** SAS only, with minimal permissions, issued for the operation and **never stored**. **Shared Key access disabled** if the final architecture allows it (amendment 1) |
 | Reproducibility | A claim names the exact commit, deployment, database branch and time (UTC) |
@@ -330,11 +330,11 @@ Operator definition (2026-10-17, completed by amendment 1). A change, or a capab
 5. **Recovery repeated after release.** Its rollback, or the restore that covers its data, was rehearsed again after release.
 6. **Required SLIs measured continuously** throughout the observation period, **without a significant gap** (amendment 1).
    - The required SLIs are those its gate names, taken from the [service-level register](SERVICE-LEVEL-REGISTER.md).
-   - A significant gap is **PROPOSED** as either of:
-     - one interruption of measurement longer than 1 hour;
-     - interruptions totalling more than 1% of the window.
-
-     The operator sets the final thresholds.
+   - A **significant gap** is either of the following (operator decision, 2026-10-17):
+     - **one uncovered interval longer than 15 minutes**;
+     - **uncovered intervals totalling more than 0.1% of the window**.
+   - An interval counts as **covered** when an **independent, equivalent telemetry** measured the same SLI during it.
+   - **Planned maintenance without replacement telemetry counts as a gap.**
    - A significant gap restarts the observation period for the affected SLI.
 
 As for every state (section 2), each point needs its evidence, and the state is lost when that evidence stops being true. An attributable S1 or S2 incident, for example, demotes the item.
@@ -354,5 +354,5 @@ As for every state (section 2), each point needs its evidence, and the state is 
 
 | Amendment | Date | Decided by | Change |
 |---|---|---|---|
-| 1 | 2026-10-17 | Operator | OPERATIONALLY PROVEN also requires the required SLIs measured continuously, without a significant gap (section 17, point 6). Evidence store: mandatory age encryption to two independent recipients; 7-year retention of gate evidence; WORM, with an unlocked trial and then a lock by separate decision; workload identity or Entra preferred; no long-lived SAS, a short user-delegation SAS only if indispensable; Shared Key disabled if the architecture allows it (section 12). No resource is created by this amendment |
+| 1 | 2026-10-17 | Operator | OPERATIONALLY PROVEN also requires the required SLIs measured continuously, without a significant gap: no uncovered interval over 15 minutes and no more than 0.1% uncovered in total; independent equivalent telemetry may cover an interval; planned maintenance without replacement telemetry is a gap (section 17, point 6). Evidence store: mandatory age encryption to two independent recipients (detailed manifest and payload encrypted, only a minimal outer integrity manifest in clear); 7-year retention of gate evidence; WORM, with an unlocked trial and then a lock by separate decision; workload identity or Entra preferred; no long-lived SAS, a short user-delegation SAS only if indispensable; Shared Key disabled if the architecture allows it (section 12). No resource is created by this amendment |
 - An exception to any rule is written, approved by the operator, time-limited, and listed in the gap analysis until it expires.
