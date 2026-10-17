@@ -1,6 +1,9 @@
 import { rawPrisma } from "../db/raw-prisma";
 import * as crypto from "crypto";
 
+/** F4: why a federated round trip was started. Only SIGN_IN opens a session; the others arrive with slices S5 and S6. */
+export type AuthTransactionPurpose = "SIGN_IN" | "LINK" | "ACTIVATION_PROOF";
+
 export type AuthTransactionData = {
   stateHash: string;
   nonce: string;
@@ -8,6 +11,10 @@ export type AuthTransactionData = {
   expectedOrganizationId: string;
   expectedTenantId: string;
   expectedProviderConnectionId: string;
+  /** Default SIGN_IN (the column default, as before F4). */
+  purpose?: "SIGN_IN";
+  /** F4 (S4): the configurationHash a generic OIDC round trip started with. Absent (NULL) for Microsoft. */
+  expectedConfigurationHash?: string;
   returnTo?: string;
   expiresInMinutes?: number;
 };
@@ -30,6 +37,8 @@ export class AuthTransactionStore {
         expectedOrganizationId: data.expectedOrganizationId,
         expectedTenantId: data.expectedTenantId,
         expectedProviderConnectionId: data.expectedProviderConnectionId,
+        ...(data.purpose ? { purpose: data.purpose } : {}),
+        ...(data.expectedConfigurationHash ? { expectedConfigurationHash: data.expectedConfigurationHash } : {}),
         returnTo: data.returnTo,
         expiresAt
       }
@@ -51,12 +60,14 @@ export class AuthTransactionStore {
         return null;
       }
 
-      await tx.authTransaction.update({
-        where: { id: transaction.id },
+      // F4 (S4): single use even when two callbacks race with the same state. Only the request whose update finds the
+      // row still unconsumed wins; PostgreSQL re-checks the condition after waiting for the other one's row lock.
+      const claimed = await tx.authTransaction.updateMany({
+        where: { id: transaction.id, consumedAt: null },
         data: { consumedAt: new Date() }
       });
 
-      return transaction;
+      return claimed.count === 1 ? transaction : null;
     });
   }
 }
