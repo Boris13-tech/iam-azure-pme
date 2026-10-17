@@ -12,6 +12,17 @@ async function fixture() {
   return { crypto, pkg };
 }
 
+/**
+ * Flips one bit of one decoded ciphertext byte, so the tampered payload always differs from the original. Editing the
+ * base64url text instead (for example replacing its last characters) can be a no-op: the characters may already match,
+ * and the last character carries bits the decoder ignores.
+ */
+function tamperCiphertext(ciphertext: string, byteIndex: number): string {
+  const bytes = Buffer.from(ciphertext, "base64url");
+  bytes[byteIndex] ^= 0x01;
+  return bytes.toString("base64url");
+}
+
 describe("Phase 6G sovereign export/import", () => {
   it("round-trips canonical identity, lifecycle, assignments and evidence deterministically", async () => {
     const { crypto, pkg } = await fixture();
@@ -41,8 +52,19 @@ describe("Phase 6G sovereign export/import", () => {
   it("fails closed on tampering, wrong tenant, stale epoch and replay", async () => {
     const { crypto, pkg } = await fixture(); const custody = new MemoryBackupCustody();
     const encrypted = await encryptSovereignBackup(pkg, "custody://backup/key-1", custody);
-    await expect(restoreSovereignBackup({ ...encrypted, ciphertext: `${encrypted.ciphertext.slice(0, -2)}aa` },
-      { scope, recoveryEpoch: 4 }, custody, crypto)).rejects.toThrow("INTEGRITY_FAILURE");
+    // Control: the untouched backup restores, so the refusals below come from the tampering only.
+    await expect(restoreSovereignBackup(encrypted, { scope, recoveryEpoch: 4 }, custody, crypto)).resolves.toBeDefined();
+    const original = Buffer.from(encrypted.ciphertext, "base64url");
+    for (const byteIndex of [0, Math.floor(original.length / 2), original.length - 1]) {
+      const ciphertext = tamperCiphertext(encrypted.ciphertext, byteIndex);
+      const tampered = Buffer.from(ciphertext, "base64url");
+      // The corrupted payload really differs from the original, at the same length.
+      expect(tampered.length).toBe(original.length);
+      expect(tampered.equals(original), `byte ${byteIndex}`).toBe(false);
+      expect(ciphertext).not.toBe(encrypted.ciphertext);
+      await expect(restoreSovereignBackup({ ...encrypted, ciphertext },
+        { scope, recoveryEpoch: 4 }, custody, crypto), `byte ${byteIndex}`).rejects.toThrow("INTEGRITY_FAILURE");
+    }
     await expect(restoreSovereignBackup(encrypted, { scope: { ...scope, tenantId: "tenant-b" }, recoveryEpoch: 4 }, custody, crypto)).rejects.toThrow("INVALID_SCOPE");
     await expect(verifySovereignExport(pkg, { scope, recoveryEpoch: 5 }, crypto)).rejects.toThrow("STALE_RECOVERY_EPOCH");
     await expect(verifySovereignExport(pkg, { scope, recoveryEpoch: 4, seenPackageIds: new Set(["package-a"]) }, crypto)).rejects.toThrow("RECOVERY_REPLAY");
