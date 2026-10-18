@@ -100,8 +100,6 @@ export async function GET(request: Request) {
     const subject = identityAccount.subject;
 
     // 6. Create Session
-    const ip = request.headers.get("x-forwarded-for") || "unknown";
-    const userAgent = request.headers.get("user-agent") || "unknown";
 
     // Security Journal v1: the identity is resolved here, so the outcome is attributable.
     const signInIdentity = {
@@ -119,7 +117,7 @@ export async function GET(request: Request) {
         tenantId: transaction.expectedTenantId,
         subjectId: subject.id,
         identityAccountId: identityAccount.id
-      }, ip, userAgent, { evidence: entraSignInEvidence(signInIdentity, "VERIFIED", "ENTRA_OIDC_VERIFIED") });
+      }, { evidence: entraSignInEvidence(signInIdentity, "VERIFIED", "ENTRA_OIDC_VERIFIED") });
     } catch (error) {
       if (error instanceof SessionCreationDeniedError) {
         // W2: refusal for a known identity is recorded; the refusal stands whatever happens.

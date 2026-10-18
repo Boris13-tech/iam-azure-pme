@@ -101,7 +101,7 @@ async function run() {
   assert(tx && tx.nonce && tx.codeVerifier, "Nonce and PKCE should be created");
   console.log("state / nonce / PKCE            PASS");
 
-  const { session, rawToken } = await SessionStore.createSession({ organizationId: orgId, tenantId: tenantId, subjectId: user.id, identityAccountId: idAcc.id }, "127.0.0.1", "e2e-agent");
+  const { session, rawToken } = await SessionStore.createSession({ organizationId: orgId, tenantId: tenantId, subjectId: user.id, identityAccountId: idAcc.id });
   const cookie = "luxia_session=" + rawToken;
   
   const apiRolesRes = await fetch(baseUrl + "/api/roles", { headers: { Cookie: cookie, Accept: "application/json" } });
@@ -130,7 +130,7 @@ async function run() {
   console.log("revoked token → 401             PASS");
 
   // Tests nécessitant une session valide pour muter
-  const { session: session2, rawToken: rawToken2 } = await SessionStore.createSession({ organizationId: orgId, tenantId: tenantId, subjectId: user.id, identityAccountId: idAcc.id }, "127.0.0.1", "e2e-agent");
+  const { session: session2, rawToken: rawToken2 } = await SessionStore.createSession({ organizationId: orgId, tenantId: tenantId, subjectId: user.id, identityAccountId: idAcc.id });
   const cookie2 = "luxia_session=" + rawToken2;
 
   const dummyUser = await adminPrisma.user.create({ data: { name: "Dummy " + Date.now(), email: "dummy" + Date.now() + "@x.com" }});
