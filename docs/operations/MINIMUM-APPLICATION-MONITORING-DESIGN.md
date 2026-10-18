@@ -3,7 +3,7 @@
 | Item | State |
 |---|---|
 | Status | **DESIGNED**, 2026-10-18. Class C document. Implementation slices are class A (section 6) |
-| Operator decision | **Zero cost** (operator, 2026-10-18: "no money to invest for now"). This supersedes the earlier choice of option A (paid). The design runs on free plans that allow commercial use (section 5). Option A returns when a budget exists. No account, monitor or secret before the execution gate |
+| Operator decision | **Budget cap: €40 per month for everything, €0 until the operator's signal** (2026-10-18). Monitoring runs on **option Z (zero cost)**, on free plans that allow commercial use (section 5). Option A (about €30) would not fit under the cap next to Vercel Pro (about €18.5 from the first pilot). No account, monitor or secret before the execution gate |
 | Requirement | Standard section 17b (proposed in #90): G6 minimum application monitoring active; G7 human alert path tested end to end |
 | Related | [Service-level register](../engineering/SERVICE-LEVEL-REGISTER.md) (SLI-01, SLI-03, SLI-05), E4 backup freshness, `docs/product/ENTERPRISE-READINESS.md` E4 |
 
