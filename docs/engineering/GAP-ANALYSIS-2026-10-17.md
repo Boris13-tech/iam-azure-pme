@@ -61,6 +61,14 @@ These keep their state (standard, section 18). The missing intermediate states a
 | Backup schedule gate (#68) | Catch-up path never observed in Production |
 | F4 S1–S5 (#76–#80, not in Production) | THREAT-MODELED, traceability tables, INDEPENDENTLY REVIEWED (required before merging #76, decision F4-13), STAGING VERIFIED, gates |
 
+## 3b. Exceptions in force (standard, section 19)
+
+Every exception is written, approved by the operator, limited in time, and listed here until it expires.
+
+| ID | Rule waived | Scope (exact) | Granted | Expires | Conditions | State |
+|---|---|---|---|---|---|---|
+| EX-001 | Independent review before merge, for a class A change (standard, section 8) | PR #84 (items P3 and P4 only: actions pinned to SHAs, explicit least-privilege workflow permissions), **head `7dfc59935e2f7398df63fb99214deb67d49484fd` only**. Any other commit or change is outside the exception | By the operator, 2026-10-18 | **At the merge of #84, or 24 hours after the grant**, whichever comes first | Full CI green on that exact head; merged only after #82 and the CI of `main` are closed; merged with an exact head-SHA match | ACTIVE |
+
 ## 4. Recommended order (for the operator's decision)
 
 1. **Evidence durability (ER1, section 12).** Done locally on 2026-10-17: a verified durable copy. Next: an off-site immutable store and a private repository for the gate tools (designed, creation gated).
