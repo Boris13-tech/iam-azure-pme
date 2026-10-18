@@ -36,6 +36,8 @@ jobs:
     outputs:
       ci_run_id: ${{ steps.verify.outputs.ci_run_id }}
       ci_run_url: ${{ steps.verify.outputs.ci_run_url }}
+      ci_head_sha: ${{ steps.verify.outputs.ci_head_sha }}
+      ci_workflow_name: ${{ steps.verify.outputs.ci_workflow_name }}
     steps:
       - name: Dispatched from main, on a commit whose CI passed
         id: verify
@@ -63,6 +65,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "ci_run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "ci_run_url=$run_url" >> "$GITHUB_OUTPUT"
+          echo "ci_head_sha=$run_sha" >> "$GITHUB_OUTPUT"
+          echo "ci_workflow_name=$run_name" >> "$GITHUB_OUTPUT"
 
   database-activation:
     needs: ci-verified
