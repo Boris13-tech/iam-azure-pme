@@ -51,6 +51,14 @@ jobs:
           BOOTSTRAP_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
+          # Fail closed: only the two known modes, checked before anything else (the value is never echoed).
+          case "$BOOTSTRAP_MODE" in
+            preflight|apply) ;;
+            *)
+              echo "Unsupported bootstrap mode"
+              exit 1
+              ;;
+          esac
           test -n "$DATABASE_URL" || { echo "Missing Production DATABASE_URL"; exit 1; }
           test -n "$DATABASE_MIGRATION_URL" || { echo "Missing Production DATABASE_MIGRATION_URL"; exit 1; }
           [[ "$DATABASE_URL" == postgresql://app_user:* ]] || { echo "Runtime URL is not app_user"; exit 1; }

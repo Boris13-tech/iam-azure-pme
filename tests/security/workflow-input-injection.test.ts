@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 // Finding confirmed on 2026-10-18: workflow inputs were interpolated with expressions directly into the shell scripts of
 // a Production workflow, so a crafted value could run commands in a job that holds Production secrets. Inputs now reach
 // the shell through `env:` only. These tests hold that on the source, and prove it by running the real step scripts with
-// hostile payloads. A control shows that the same payloads do execute under the old, interpolated form.
+// hostile payloads. A control shows that the same payloads do execute under the old, interpolated form. The mode is also
+// checked against an allowlist first (fail closed): any value other than preflight or apply stops the job before
+// anything else, and is never echoed (no log or workflow-command pollution).
 const PRODUCTION_WORKFLOWS = [".github/workflows/production-identity-bootstrap.yml", ".github/workflows/production-activation-gate.yml"];
 const BOOTSTRAP = PRODUCTION_WORKFLOWS[0];
 const read = (path: string) => readFileSync(path, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
@@ -94,6 +96,21 @@ describe("Production workflow inputs never reach a shell by expression interpola
     expect(stepScript("Evidence summary")).toContain(`echo "Mode: $BOOTSTRAP_MODE"`);
   });
 
+  it("the mode allowlist comes first, and the evidence summary runs only after the earlier steps succeeded", () => {
+    const validate = stepScript("Validate connection posture and requested mode");
+    const allowlist = validate.indexOf(`case "$BOOTSTRAP_MODE" in`);
+    expect(allowlist).toBeGreaterThan(0);
+    expect(validate).toMatch(/^\s*preflight\|apply\) ;;$/m);
+    expect(validate).toContain(`echo "Unsupported bootstrap mode"`);
+    expect(allowlist).toBeLessThan(validate.indexOf(`test -n "$DATABASE_URL"`));
+    // No `if:` on the summary step: GitHub runs it only when every earlier step succeeded (success() by default).
+    const lines = read(BOOTSTRAP).split("\n");
+    const at = lines.findIndex((l) => l.trim() === "- name: Evidence summary");
+    const stepEnd = lines.findIndex((l, i) => i > at && /^\s*- name: /.test(l));
+    const summaryStep = lines.slice(at, stepEnd < 0 ? undefined : stepEnd).join("\n");
+    expect(summaryStep).not.toMatch(/^\s*if:/m);
+  });
+
   describe.runIf(Boolean(BASH))("the real step scripts, run with hostile payloads", () => {
     it("apply with a hostile confirmation: refused, and nothing executed", () => {
       const script = stepScript("Validate connection posture and requested mode");
@@ -106,14 +123,30 @@ describe("Production workflow inputs never reach a shell by expression interpola
       }
     });
 
-    it("a hostile mode is never 'apply' and executes nothing; the evidence summary prints it literally", () => {
+    it("an unknown or hostile mode is refused first, never echoed, and executes nothing", () => {
       const validate = stepScript("Validate connection posture and requested mode");
+      const { marker } = sandbox();
+      const modes = [
+        ...payloads(marker).map((payload) => `apply${payload}`),
+        "", "APPLY", " apply", "apply ", "preflight\napply",
+        // Newlines and strings shaped like GitHub Actions workflow commands, which a runner would act on if echoed.
+        "preflight\n::error::injected", "apply\n::add-mask::secret", "x\n::set-output name=mode::apply", "::stop-commands::token",
+      ];
+      for (const mode of modes) {
+        // No posture variables at all: the refusal must come from the allowlist, before any other check.
+        const result = spawnSync(BASH!, ["-c", validate], { env: { ...process.env, DATABASE_URL: "", DATABASE_MIGRATION_URL: "",
+          BOOTSTRAP_MODE: mode, BOOTSTRAP_CONFIRMATION: "APPLY_CANONICAL_IDENTITY_BOOTSTRAP_PRODUCTION" }, encoding: "utf8" });
+        expect(result.status, JSON.stringify(mode)).toBe(1);
+        expect(result.stdout.trim(), JSON.stringify(mode)).toBe("Unsupported bootstrap mode");
+        if (mode.trim()) expect(result.stdout + result.stderr, JSON.stringify(mode)).not.toContain(mode.trim());
+        expect(existsSync(marker), JSON.stringify(mode)).toBe(false);
+      }
+    });
+
+    it("defence in depth: even if reached, the evidence summary would print a value literally and execute nothing", () => {
       const summary = stepScript("Evidence summary");
       const { marker } = sandbox();
       for (const payload of payloads(marker)) {
-        const result = runStep(validate, { BOOTSTRAP_MODE: `apply${payload}`, BOOTSTRAP_CONFIRMATION: "" });
-        expect(result.status, payload).toBe(0);
-        expect(result.stdout, payload).toContain("Bootstrap inputs PASS");
         const printed = runStep(summary, { BOOTSTRAP_MODE: payload, GITHUB_SHA: "0".repeat(40) });
         expect(printed.status, payload).toBe(0);
         expect(printed.stdout, payload).toContain(`Mode: ${payload}`);
@@ -133,7 +166,7 @@ describe("Production workflow inputs never reach a shell by expression interpola
       const { marker } = sandbox();
       // What GitHub did before the fix: the value pasted into the script text before bash parses it.
       const interpolated = (confirmation: string) => script
-        .replace(`"$BOOTSTRAP_MODE"`, `"apply"`)
+        .replaceAll(`"$BOOTSTRAP_MODE"`, `"apply"`)
         .replace(`"$BOOTSTRAP_CONFIRMATION"`, `"${confirmation}"`);
       const executed = payloads(marker).filter((payload) => {
         rmSync(marker, { force: true });
