@@ -2,7 +2,7 @@
 
 | Item | State |
 |---|---|
-| Status | **Approved in principle by the operator on 2026-10-17**, with the modifications recorded in sections 1, 1b, 16 and 17. It applies once merged; until then, the existing practice (section 18) stays in force |
+| Status | **In force** since its merge on 2026-10-17 (#81, approved by the operator with the modifications recorded in sections 1, 1b, 16 and 17). Amendments are listed in section 19 |
 | Scope | LUXIA Identity: this repository, its CI, its Production and every change to them |
 | Effect | Governance only. **No runtime, migration, secret, environment or Production change** comes with this standard |
 | Companion documents | [Gap analysis](GAP-ANALYSIS-2026-10-17.md), [trust-boundary registry](TRUST-BOUNDARY-REGISTRY.md), [service-level register](SERVICE-LEVEL-REGISTER.md), [templates](templates/) |
@@ -246,7 +246,11 @@ Every class A change has one of the following before PRODUCTION GATED:
 | Immutability | Manifests written once (noclobber, read-only) with SHA-256 and an index. Any change produces a new run, never an edit |
 | Forbidden content | No secret, token, password, IP address, user agent or personal data beyond pseudonymous identifiers. A secret seen in evidence is an incident |
 | Location | Detailed Production evidence lives in the operator's private evidence store. The public repository holds summaries, closures and index hashes. Unfixed security findings are never in the public repository |
-| Retention | Production gate evidence: at least the life of the system plus one year (operator to confirm). CI evidence: as kept by the CI provider |
+| Retention | **Production gate evidence: 7 years** (operator decision, 2026-10-17). CI evidence: as kept by the CI provider |
+| Evidence store | A dedicated, EU-hosted, **immutable (WORM)** store with version-level immutability, separate from the backup store and from every application credential. Designed; created only through its own cost and security gate (amendment 1) |
+| Encryption | **age encryption is mandatory**, to **two independent recipients**: the operator's, and a recovery recipient held offline. The **detailed manifest and the evidence payload are age-encrypted**. Only a **minimal outer integrity manifest** may stay in clear, so that integrity can be checked without decrypting: run ID, digests and sizes of the encrypted files, dates (amendment 1) |
+| Immutability lock | A trial phase with the immutability policy **unlocked** comes first. Locking the policy (irreversible) is a **separate operator decision** (amendment 1) |
+| Access | **Workload identity or Microsoft Entra authentication is preferred.** **No long-lived SAS.** When a SAS is indispensable: a short-lived **user-delegation** SAS only, with minimal permissions, issued for the operation and **never stored**. **Shared Key access disabled** if the final architecture allows it (amendment 1) |
 | Reproducibility | A claim names the exact commit, deployment, database branch and time (UTC) |
 
 ## 13. Migration assurance
@@ -318,12 +322,20 @@ Severity follows [`INCIDENT-RESPONSE-AND-BREACH-NOTIFICATION.md`](../legal/INCID
 
 ## 17. Definition of OPERATIONALLY PROVEN
 
-Operator definition (2026-10-17). A change, or a capability, already **PRODUCTION VERIFIED** (and not demoted since) is **OPERATIONALLY PROVEN** when all five hold:
+Operator definition (2026-10-17, completed by amendment 1). A change, or a capability, already **PRODUCTION VERIFIED** (and not demoted since) is **OPERATIONALLY PROVEN** when all six hold:
 1. **At least 30 days** in Production.
 2. **Predefined scenarios and volume** observed. They are written in its gate before release (for example the sign-in paths and a number of real sign-ins through each). A path never exercised is not proven.
 3. **Alert path tested.** An alert on its failure modes reached a human, whether real or synthetic, and was acknowledged.
 4. **Runbook exercised.** The runbooks for its failure modes were exercised after release, as a tabletop or on a clone.
 5. **Recovery repeated after release.** Its rollback, or the restore that covers its data, was rehearsed again after release.
+6. **Required SLIs measured continuously** throughout the observation period, **without a significant gap** (amendment 1).
+   - The required SLIs are those its gate names, taken from the [service-level register](SERVICE-LEVEL-REGISTER.md).
+   - A **significant gap** is either of the following (operator decision, 2026-10-17):
+     - **one uncovered interval longer than 15 minutes**;
+     - **uncovered intervals totalling more than 0.1% of the window**.
+   - An interval counts as **covered** when an **independent, equivalent telemetry** measured the same SLI during it.
+   - **Planned maintenance without replacement telemetry counts as a gap.**
+   - A significant gap restarts the observation period for the affected SLI.
 
 As for every state (section 2), each point needs its evidence, and the state is lost when that evidence stops being true. An attributable S1 or S2 incident, for example, demotes the item.
 
@@ -339,4 +351,8 @@ As for every state (section 2), each point needs its evidence, and the state is 
 ## 19. Ownership and amendment
 
 - The operator owns this standard. Amendments are class C changes with the operator's approval, recorded with their date.
+
+| Amendment | Date | Decided by | Change |
+|---|---|---|---|
+| 1 | 2026-10-17 | Operator | OPERATIONALLY PROVEN also requires the required SLIs measured continuously, without a significant gap: no uncovered interval over 15 minutes and no more than 0.1% uncovered in total; independent equivalent telemetry may cover an interval; planned maintenance without replacement telemetry is a gap (section 17, point 6). Evidence store: mandatory age encryption to two independent recipients (detailed manifest and payload encrypted, only a minimal outer integrity manifest in clear); 7-year retention of gate evidence; WORM, with an unlocked trial and then a lock by separate decision; workload identity or Entra preferred; no long-lived SAS, a short user-delegation SAS only if indispensable; Shared Key disabled if the architecture allows it (section 12). No resource is created by this amendment |
 - An exception to any rule is written, approved by the operator, time-limited, and listed in the gap analysis until it expires.
