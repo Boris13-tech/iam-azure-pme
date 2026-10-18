@@ -67,7 +67,7 @@ Every exception is written, approved by the operator, limited in time, and liste
 
 | ID | Rule waived | Scope (exact) | Granted | Expires | Conditions | State |
 |---|---|---|---|---|---|---|
-| EX-001 | Independent review before merge, for a class A change (standard, section 8) | PR #84 (items P3 and P4 only: actions pinned to SHAs, explicit least-privilege workflow permissions), **head `7dfc59935e2f7398df63fb99214deb67d49484fd` only**. Any other commit or change is outside the exception | By the operator, 2026-10-18 | **At the merge of #84, or 24 hours after the grant**, whichever comes first | Full CI green on that exact head; merged only after #82 and the CI of `main` are closed; merged with an exact head-SHA match | ACTIVE |
+| EX-001 | Independent review before merge, for a class A change (standard, section 8) | PR #84 (items P3 and P4 only: actions pinned to SHAs, explicit least-privilege workflow permissions), **head `7dfc59935e2f7398df63fb99214deb67d49484fd` only**. Any other commit or change is outside the exception | By the operator, 2026-10-18 | **At the merge of #84, or 24 hours after the grant**, whichever comes first | Full CI green on that exact head; merged only after #82 and the CI of `main` are closed; merged with an exact head-SHA match | **EXPIRED** 2026-10-18T09:04:13Z: expired at merge of PR #84 (merged on head `7dfc599…` as `91386d6`, within the 24 h) |
 
 ## 4. Recommended order (for the operator's decision)
 
