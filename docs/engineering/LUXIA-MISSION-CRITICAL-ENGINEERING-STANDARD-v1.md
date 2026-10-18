@@ -339,6 +339,26 @@ Operator definition (2026-10-17, completed by amendment 1). A change, or a capab
 
 As for every state (section 2), each point needs its evidence, and the state is lost when that evidence stops being true. An attributable S1 or S2 incident, for example, demotes the item.
 
+## 17b. Private Beta entry gate (amendment 3)
+
+Operator decision, 2026-10-18.
+- **The Private Beta does not require OPERATIONALLY PROVEN.** OPERATIONALLY PROVEN (section 17) is accumulated during the Private Beta, and is required before general availability (GA) for every capability in the GA scope.
+- The first limited pilot starts only when **all eight criteria** below hold. The gate is all or nothing. It is recorded with the [Production gate template](templates/PRODUCTION-GATE-TEMPLATE.md) and decided by the operator.
+- The **Beta scope** is written and approved by the operator before the gate. It names the pilots' profile, the capabilities and sign-in flows they use, and the legal, retention and hosting requirements that apply to them.
+
+| # | Criterion | What it requires |
+|---|---|---|
+| G1 | Beta-critical capabilities are PRODUCTION VERIFIED | Every capability the Beta scope names is PRODUCTION VERIFIED and not demoted (section 2) |
+| G2 | Every relevant class A change is INDEPENDENTLY REVIEWED | Relevant: every class A change a Beta-critical capability depends on. This includes those already PRODUCTION VERIFIED (assurance debts, section 18) and those merged under an exception |
+| G3 | No unresolved critical security finding affects the Beta scope | Critical: a finding that could cause an S1 or S2 incident (section 16). Unresolved: not fixed and verified. A critical finding is not closed by acceptance |
+| G4 | The Production rollback and recovery path is verified | The database restore **and** the switch of the application to the restored database are rehearsed on the platform the pilots use: within 90 days before the gate, and again after any change of platform or region |
+| G5 | The required gate evidence is current | Each Beta-critical capability has its sealed gate evidence (section 12) for the commit deployed at the time of the gate |
+| G6 | Minimum application monitoring is active | At least: availability of the sign-in page and of the API, checked from outside the hosting platform; server errors (5xx); database availability; sign-in success (SLI-01); backup freshness (SLI-05) |
+| G7 | The human alert path has been tested end to end | For each G6 signal, an alert (real or synthetic) reached the operator through a channel outside the monitored platform and was acknowledged, with the times recorded |
+| G8 | The legal, retention and hosting blockers applicable to the pilot are closed | As listed in the Beta scope: the documents the pilot signs reviewed by counsel; retention and deletion enforced for the data the pilot creates; a hosting tier and region allowed for the pilot's use |
+
+**Generic OIDC (F4).** F4 is not a blocker for the first pilots if they use only supported Microsoft Entra or passkey flows. A flow is supported when it is PRODUCTION VERIFIED for the connection type and configuration the pilot will use. F4 becomes a gate before broader provider-neutral expansion.
+
 ## 18. Transition from the current practice
 
 - Items already PRODUCTION VERIFIED keep that state. Their missing intermediate states are recorded as **assurance debts** in the gap analysis. They are not repaid by relabelling.
@@ -358,3 +378,4 @@ As for every state (section 2), each point needs its evidence, and the state is 
 |---|---|---|---|
 | 1 | 2026-10-17 | Operator | OPERATIONALLY PROVEN also requires the required SLIs measured continuously, without a significant gap: no uncovered interval over 15 minutes and no more than 0.1% uncovered in total; independent equivalent telemetry may cover an interval; planned maintenance without replacement telemetry is a gap (section 17, point 6). Evidence store: mandatory age encryption to two independent recipients (detailed manifest and payload encrypted, only a minimal outer integrity manifest in clear); 7-year retention of gate evidence; WORM, with an unlocked trial and then a lock by separate decision; workload identity or Entra preferred; no long-lived SAS, a short user-delegation SAS only if indispensable; Shared Key disabled if the architecture allows it (section 12). No resource is created by this amendment |
 | 2 | 2026-10-18 | Operator | Ended exceptions (expired, closed or revoked) stay in the exception register with their state, the date and time they ended, and the reason; none is deleted (this section, and the gap analysis section 3b) |
+| 3 | 2026-10-18 | Operator | Private Beta entry gate: eight criteria (G1 to G8) before the first limited pilot; OPERATIONALLY PROVEN not required for the Private Beta, required before GA; generic OIDC (F4) not a blocker for first pilots that use only supported Entra or passkey flows, a gate before broader provider-neutral expansion (section 17b) |
