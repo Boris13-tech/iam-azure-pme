@@ -41,7 +41,7 @@ jobs:
       DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
     steps:
       - name: Checkout requested revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Validate connection posture and requested mode
         shell: bash
