@@ -58,7 +58,7 @@ The Pilot is provided **without any availability, performance or support-time co
 3. **Location:**
    - Production runs in the United States today, and moves to the European Union before the Pilot starts (rehearsed on 2026-10-18).
    - Some subprocessors are US companies. Any transfer relies on the mechanism counsel confirms (for EU data, for example the EU–US Data Privacy Framework for certified recipients, or standard contractual clauses).
-4. **Personal data breach:** LUXIA notifies the Customer **without undue delay**, with a first notice within **[72] hours** of becoming aware of it, and follow-ups as facts are established.
+4. **Personal data breach:** LUXIA notifies the Customer **without undue delay**, with a first notice within **[48] hours** of becoming aware of it (so that the Customer, as controller, can meet its own legal deadline), and follow-ups as facts are established.
 
 ## 9. Retention, return and deletion
 
@@ -98,7 +98,7 @@ LUXIA keeps all rights in LUXIA Identity. The Customer keeps all rights in its d
 | Production in the EU before the Pilot (8.3) | Rehearsed, not done | Gate EU-4 |
 | Export on request (9.2) | **Manual only** (no export feature yet, E9) | A written, tested export procedure |
 | Deletion within 90 days and written confirmation (9.2) | **Designed** (R7) | Implemented and tested, or a tested manual operator procedure |
-| Breach notification within 72 hours (8.4) | Partly: backup alerting exists; application monitoring is in review | Monitoring active (G6), alert path tested (G7), runbook exercised |
+| Breach notification within 48 hours (8.4) | Partly: backup alerting exists; application monitoring is in review | Monitoring active (G6), alert path tested (G7), runbook exercised |
 | Removal of network identifiers (DPA annex A) | In review (R1) | R1 merged and deployed |
 | Hosting terms that allow the Pilot | **No** (Vercel Hobby is non-commercial) | Vercel Pro: `BLOCKED_BY_BUDGET` |
 | Counsel review of this agreement | No | Free consultation, or a budget |
