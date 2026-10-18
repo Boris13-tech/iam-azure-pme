@@ -3,7 +3,7 @@
 | Item | State |
 |---|---|
 | Status | **DESIGNED**, 2026-10-18. Class C document. It extends the nine-step sequence of [HOSTING-EU-AND-COSTS.md](HOSTING-EU-AND-COSTS.md), section 4 |
-| Operator decisions (2026-10-18) | **Budget cap: €40 per month for everything, and €0 until the operator gives the signal.** This supersedes the earlier €120 envelope and the Neon Scale target. **Database:** a new **Neon Free** project in AWS Frankfurt (`aws-eu-central-1`): €0, no credit card. **Hosting:** stays on Vercel, so the domain and every passkey stay; **Vercel Pro** (about €18.5 per month) is activated at the operator's signal, **before the first pilot**, because Hobby forbids commercial use |
+| Operator decisions (2026-10-18) | **Budget cap: €40 per month for everything, and €0 until the operator gives the signal.** This supersedes the earlier €120 envelope and the Neon Scale target. **Database:** a new **Neon Free** project in AWS Frankfurt (`aws-eu-central-1`): €0, no credit card. **Hosting:** stays on Vercel, so the domain and every passkey stay. **Functions move to `fra1` (Frankfurt) on the Hobby plan, at €0:** Hobby allows one function region of the project's choice (Vercel documentation, VERIFIED 2026-10-18). **Vercel Pro** (about €18.5 per month) is activated at the operator's signal **before the first pilot**, only because Hobby forbids commercial use; it changes neither the region nor the domain |
 | Nothing is created by this document | Every resource, secret, payment and Production change below happens only at its own gate (section 3) |
 | Private Beta criteria served | G4 (recovery and switch rehearsed on the final platform), G8 (hosting terms that allow the pilots, EU region); G6 and G7 are proven after the move |
 
@@ -25,11 +25,13 @@ The move changes where LUXIA runs, never what it decides.
 
 | Phase | Hosting | Allowed? | Cost |
 |---|---|---|---|
-| Now, until the first pilot (development, rehearsals, the operator's own organization) | Vercel Hobby | Yes: no commercial use yet | €0 |
-| **From the first pilot** | **Vercel Pro**, functions in `fra1` (Frankfurt, next to Neon) | Yes | About €18.5 per month, at the operator's signal |
+| Now, until the first pilot (development, rehearsals, the operator's own organization) | Vercel Hobby, **functions in `fra1`** after the switch | Yes: no commercial use yet | €0 |
+| **From the first pilot** | **Vercel Pro**: same project, same region, same domain | Yes | About €18.5 per month, at the operator's signal |
 | Fallback if Pro is refused when the pilots start | Azure Container Apps, consumption plan (monthly free grant; Germany West Central) | Yes | €0 within the grant; no hard cap, so a €1 budget alert and at most 1 replica |
 
-**Why Vercel Pro over the free fallback.** Staying on Vercel keeps `iam-azure-pme.vercel.app`, so every passkey survives (passkeys are bound to the domain). It needs no new deployment pipeline, and no new class A work. The fallback changes the domain: every user would sign in with a recovery code or Microsoft Entra and enrol again. It also needs a container build and a deploy workflow (class A). The fallback is documented here, not built.
+**Consequence: the whole move happens now, at €0, before the pilots.** G4, G6 and G7 are then proven on the final platform. The later switch from Hobby to Pro changes only the plan and its terms, not the platform, the region or the domain. So it does not void those proofs.
+
+**Why Vercel Pro over the free fallback, from the first pilot.** Staying on Vercel keeps `iam-azure-pme.vercel.app`, so every passkey survives (passkeys are bound to the domain). It needs no new deployment pipeline, and no new class A work. The fallback changes the domain: every user would sign in with a recovery code or Microsoft Entra and enrol again. It also needs a container build and a deploy workflow (class A). The fallback is documented here, not built.
 
 **Domain, later.** A domain owned by LUXIA (about €10 a year) would make passkeys independent of any host. It is the first item to buy under the cap, at the operator's signal. It must happen **before** the pilots: changing the domain later forces every pilot user to enrol again.
 
@@ -55,7 +57,7 @@ Each gate follows the [Production gate template](../engineering/templates/PRODUC
 | **EU-0** Plan approval | This runbook and its tools reviewed | Yes | Operator; tools reviewed (class A where they touch Production) |
 | **EU-1** Target project | A Neon Free project in Frankfurt. No payment | Yes (delete the empty project) | None beyond this runbook |
 | **EU-2** Target and rehearsal | A new Neon project in Frankfurt; roles created (`app_user`, `luxia_backup`); the latest independent backup restored into it; checks EU-I2 to EU-I4; the application tested against it **outside Production** (a preview deployment pointed at the target). Timed, to measure the downtime the switch will need | Yes (delete the target) | Operator GO; new role passwords (secrets) |
-| **EU-3** Code | `vercel.json` sets the functions region to `fra1` (class A: Production configuration), applied with Vercel Pro at the operator's signal; reviewed and merged, not yet deployed | Yes | Independent review; Vercel Pro active |
+| **EU-3** Code | `vercel.json` sets the functions region to `fra1` (class A: Production configuration); reviewed and merged, deployed only at the switch (EU-4). Works on Hobby | Yes | Independent review |
 | **EU-4** Switch | Section 4 | Yes, within the window of section 6 | Operator GO; maintenance window announced |
 | **EU-5** After-checks and G4 | Section 5 | — | — |
 | **EU-6** Decommission US | The US project returned to Free or deleted, after the rollback window | **No** (deletion) | Separate operator GO, never before EU-5 is closed |
@@ -107,3 +109,4 @@ No secret, connection string, IP address or user agent appears in the evidence o
 - [Azure Container Apps pricing](https://azure.microsoft.com/en-us/pricing/details/container-apps/) (monthly free grant, fallback only)
 - [Neon regions](https://neon.com/docs/introduction/regions)
 - [Vercel pricing](https://vercel.com/pricing)
+- [Vercel Functions regions](https://vercel.com/docs/functions/configuring-functions/region) (Hobby: a single region of choice)
