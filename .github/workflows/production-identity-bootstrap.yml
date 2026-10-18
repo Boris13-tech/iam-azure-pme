@@ -45,6 +45,10 @@ jobs:
 
       - name: Validate connection posture and requested mode
         shell: bash
+        # Inputs reach the shell as environment variables only, never by direct expression interpolation in the script.
+        env:
+          BOOTSTRAP_MODE: ${{ inputs.mode }}
+          BOOTSTRAP_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
           test -n "$DATABASE_URL" || { echo "Missing Production DATABASE_URL"; exit 1; }
@@ -53,8 +57,8 @@ jobs:
           [[ "$DATABASE_URL" == *-pooler.* ]] || { echo "Runtime URL is not pooled"; exit 1; }
           [[ "$DATABASE_MIGRATION_URL" == postgresql://neondb_owner:* ]] || { echo "Migration URL is not neondb_owner"; exit 1; }
           [[ "$DATABASE_MIGRATION_URL" != *-pooler.* ]] || { echo "Migration URL must be direct"; exit 1; }
-          if [ "${{ inputs.mode }}" = "apply" ]; then
-            test "${{ inputs.confirmation }}" = "APPLY_CANONICAL_IDENTITY_BOOTSTRAP_PRODUCTION" || {
+          if [ "$BOOTSTRAP_MODE" = "apply" ]; then
+            test "$BOOTSTRAP_CONFIRMATION" = "APPLY_CANONICAL_IDENTITY_BOOTSTRAP_PRODUCTION" || {
               echo "Apply confirmation phrase missing";
               exit 1;
             }
@@ -158,7 +162,9 @@ jobs:
           echo "Post-bootstrap invariants PASS: canonical=1/1/1/1/1 demo_bridges=0 assignments=0"
 
       - name: Evidence summary
+        env:
+          BOOTSTRAP_MODE: ${{ inputs.mode }}
         run: |
-          echo "Mode: ${{ inputs.mode }}"
+          echo "Mode: $BOOTSTRAP_MODE"
           echo "Commit: $GITHUB_SHA"
           echo "No Vercel deployment performed"
