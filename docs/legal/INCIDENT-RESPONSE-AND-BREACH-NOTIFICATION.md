@@ -44,16 +44,16 @@
 5. **Notify** (section 3).
 6. **Recover.** Restore the service, from backups if needed (`docs/operations/BACKUP-RESTORE-PLAN.md`).
 7. **Learn.**
-   - Within **[TO BE DECIDED, for example 10 working days]**, write a post-incident report: cause, impact, timeline, fixes.
+   - Within **10 working days (PROPOSED)**, write a post-incident report: cause, impact, timeline, fixes.
    - Track every fix to a release.
 
 ## 3. Notification
 
 | Who | When (proposal for counsel) | How |
 |---|---|---|
-| **Affected customer organizations** (controllers), when LUXIA acts as their processor | **Without undue delay**, with a first notice within **[TO BE DECIDED, for example 24 hours]** of confirming a personal data breach that affects them | Direct contact with their administrators **[TO BE COMPLETED: channel; e-mail is not in place yet]** |
+| **Affected customer organizations** (controllers), when LUXIA acts as their processor | **Without undue delay**, with a first notice within **48 hours (PROPOSED)** of confirming a personal data breach that affects them | Direct contact with their administrators **PROPOSED:** an e-mail from the operator to the security contacts the customer names in the pilot agreement, confirmed by a call when the breach is serious (the product has no e-mail channel yet) |
 | **Supervisory authority**, when LUXIA is the controller (its own data) | Within the delay of the applicable law. Under the GDPR, 72 hours after becoming aware, unless the breach is unlikely to result in a risk | **[TO BE COMPLETED: competent authority, depending on the LUXIA entity]** |
-| **Affected people**, when LUXIA is the controller and the risk is high | Without undue delay | **[TO BE COMPLETED]** |
+| **Affected people**, when LUXIA is the controller and the risk is high | Without undue delay | **PROPOSED:** directly to each affected person (e-mail or in-product notice), in clear language: what happened, the likely consequences, what LUXIA did, what the person can do |
 
 **Content of a notice:**
 - the nature of the breach;
@@ -66,7 +66,7 @@ When something is not known yet, the notice says so, and follows up.
 
 ## 4. Records
 
-Every incident and every breach, notified or not, is recorded with its facts, effects and remedies **[TO BE COMPLETED: register location]**.
+Every incident and every breach, notified or not, is recorded with its facts, effects and remedies in LUXIA's private evidence store, sealed with SHA-256 manifests (PROPOSED).
 
 ## Gaps to close before the commercial beta
 
