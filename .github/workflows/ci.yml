@@ -37,6 +37,8 @@ jobs:
       DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public
       DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
+      # CI exercises the authorization mode Production runs (P5); tests of the other modes set it themselves.
+      AUTHZ_MODE: native
 
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -136,6 +138,8 @@ jobs:
       DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       LUXIA_RESOURCE_RLS: 'true'
+      # CI exercises the authorization mode Production runs (P5); tests of the other modes set it themselves.
+      AUTHZ_MODE: native
 
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
