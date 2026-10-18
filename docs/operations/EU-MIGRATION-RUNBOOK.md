@@ -1,11 +1,11 @@
-# EU migration runbook: Production from US East to Frankfurt (repeatable)
+# EU migration runbook: Production from US East to Frankfurt (repeatable, within a €40 monthly cap)
 
 | Item | State |
 |---|---|
 | Status | **DESIGNED**, 2026-10-18. Class C document. It extends the nine-step sequence of [HOSTING-EU-AND-COSTS.md](HOSTING-EU-AND-COSTS.md), section 4 |
-| Operator decisions (2026-10-18) | Target **Vercel Pro** (functions in `fra1`) and **Neon Scale** in AWS Frankfurt (`aws-eu-central-1`): same cloud provider as today, so fewer variables change at once. Planning envelope for Beta infrastructure and monitoring: **at most €120 per month**; more needs a new GO |
+| Operator decisions (2026-10-18) | **Budget cap: €40 per month for everything, and €0 until the operator gives the signal.** This supersedes the earlier €120 envelope and the Neon Scale target. **Database:** a new **Neon Free** project in AWS Frankfurt (`aws-eu-central-1`): €0, no credit card. **Hosting:** stays on Vercel, so the domain and every passkey stay; **Vercel Pro** (about €18.5 per month) is activated at the operator's signal, **before the first pilot**, because Hobby forbids commercial use |
 | Nothing is created by this document | Every resource, secret, payment and Production change below happens only at its own gate (section 3) |
-| Private Beta criteria served | G4 (recovery and switch rehearsed on the final platform), G8 (commercial tier, EU region); G6 and G7 are proven after the move |
+| Private Beta criteria served | G4 (recovery and switch rehearsed on the final platform), G8 (hosting terms that allow the pilots, EU region); G6 and G7 are proven after the move |
 
 ## 1. Invariants of the move
 
@@ -21,18 +21,30 @@ The move changes where LUXIA runs, never what it decides.
 | EU-I6 | **Backups never stop.** The backup chain points to the target before the freeze is lifted, and a verified backup of the target exists within 2 hours | Backup inventory; freshness alert stays green |
 | EU-I7 | **A way back.** Until the decommission gate, the US project stays intact and the previous Vercel configuration is recorded | Section 6 |
 
-## 2. Cost at Beta size (ASSUMPTIONS, prices of 2026-10-18)
+## 1b. Hosting under the budget cap
 
-| Item | Basis | Monthly |
+| Phase | Hosting | Allowed? | Cost |
+|---|---|---|---|
+| Now, until the first pilot (development, rehearsals, the operator's own organization) | Vercel Hobby | Yes: no commercial use yet | €0 |
+| **From the first pilot** | **Vercel Pro**, functions in `fra1` (Frankfurt, next to Neon) | Yes | About €18.5 per month, at the operator's signal |
+| Fallback if Pro is refused when the pilots start | Azure Container Apps, consumption plan (monthly free grant; Germany West Central) | Yes | €0 within the grant; no hard cap, so a €1 budget alert and at most 1 replica |
+
+**Why Vercel Pro over the free fallback.** Staying on Vercel keeps `iam-azure-pme.vercel.app`, so every passkey survives (passkeys are bound to the domain). It needs no new deployment pipeline, and no new class A work. The fallback changes the domain: every user would sign in with a recovery code or Microsoft Entra and enrol again. It also needs a container build and a deploy workflow (class A). The fallback is documented here, not built.
+
+**Domain, later.** A domain owned by LUXIA (about €10 a year) would make passkeys independent of any host. It is the first item to buy under the cap, at the operator's signal. It must happen **before** the pilots: changing the domain later forces every pilot user to enrol again.
+
+## 2. Cost (prices of 2026-10-18)
+
+| Item | Now | From the first pilot |
 |---|---|---|
-| Vercel Pro, 1 seat | $20, with a $20 usage credit | $20 |
-| Neon Scale, Frankfurt | $0.222 per CU-hour, $0.35 per GB-month, no minimum. 0.25 CU with scale-to-zero (about 60 CU-hours) up to always-on (about 182 CU-hours), under 1 GB | **$14 to $41** |
-| Neon US project during the rollback window | Usage only while kept; returned to Free or deleted at decommission (gate) | $0 to a few $ |
-| Monitoring, option A ([design](MINIMUM-APPLICATION-MONITORING-DESIGN.md)) | Better Stack seat, Sentry Developer | $29 to $34 |
-| Independent backups | Existing | < €1 |
-| **Total** | | **about $65 to $95, within €120** |
+| Neon Free, Frankfurt | €0 (limits: 100 compute-hours, 1 GB, 6-hour history; the database suspends until the next month if the compute-hours run out) | €0 |
+| Vercel | €0 (Hobby) | About €18.5 (Pro) |
+| Monitoring, option Z ([design](MINIMUM-APPLICATION-MONITORING-DESIGN.md)) | €0 | €0 |
+| Independent backups and their alerts (Azure, existing) | About €0.17 (measured: €0.10 month to date on 2026-10-18) | About €0.17 |
+| Domain (optional, recommended) | — | About €1 per month equivalent |
+| **Total** | **About €0.17** | **About €20, under the €40 cap** |
 
-Scale-to-zero adds a cold start to the first sign-in after an idle period. Always-on removes it for about $27 more per month; decide from the measured sign-in latency (SLI-02) once monitoring exists.
+**Compute-hours:** the hourly backup and the hourly database probes share one wake-up (5 minutes idle before suspension), well within 100 hours. Usage is watched read-only, with an alert at 70 %. Scale-to-zero cannot be disabled on Free: the first sign-in after an idle period waits for the database to wake (measured in EU-2).
 
 ## 3. Gates
 
@@ -41,9 +53,9 @@ Each gate follows the [Production gate template](../engineering/templates/PRODUC
 | Gate | What happens | Reversible | Needs |
 |---|---|---|---|
 | **EU-0** Plan approval | This runbook and its tools reviewed | Yes | Operator; tools reviewed (class A where they touch Production) |
-| **EU-1** Spend | Vercel Pro and the Neon Scale plan activated | Yes (downgrade) | Operator GO and payment, within the envelope |
+| **EU-1** Target project | A Neon Free project in Frankfurt. No payment | Yes (delete the empty project) | None beyond this runbook |
 | **EU-2** Target and rehearsal | A new Neon project in Frankfurt; roles created (`app_user`, `luxia_backup`); the latest independent backup restored into it; checks EU-I2 to EU-I4; the application tested against it **outside Production** (a preview deployment pointed at the target). Timed, to measure the downtime the switch will need | Yes (delete the target) | Operator GO; new role passwords (secrets) |
-| **EU-3** Code | `vercel.json` sets the functions region to `fra1` (class A: Production configuration); reviewed and merged, not yet deployed | Yes | Independent review |
+| **EU-3** Code | `vercel.json` sets the functions region to `fra1` (class A: Production configuration), applied with Vercel Pro at the operator's signal; reviewed and merged, not yet deployed | Yes | Independent review; Vercel Pro active |
 | **EU-4** Switch | Section 4 | Yes, within the window of section 6 | Operator GO; maintenance window announced |
 | **EU-5** After-checks and G4 | Section 5 | — | — |
 | **EU-6** Decommission US | The US project returned to Free or deleted, after the rollback window | **No** (deletion) | Separate operator GO, never before EU-5 is closed |
@@ -91,6 +103,7 @@ No secret, connection string, IP address or user agent appears in the evidence o
 
 ## Sources
 
-- [Neon pricing](https://neon.com/pricing) (Scale $0.222 per CU-hour, no minimum, consulted 2026-10-18)
+- [Neon pricing](https://neon.com/pricing) (Free plan limits, consulted 2026-10-18)
+- [Azure Container Apps pricing](https://azure.microsoft.com/en-us/pricing/details/container-apps/) (monthly free grant, fallback only)
 - [Neon regions](https://neon.com/docs/introduction/regions)
 - [Vercel pricing](https://vercel.com/pricing)
