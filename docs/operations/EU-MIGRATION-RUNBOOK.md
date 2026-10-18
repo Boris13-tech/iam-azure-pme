@@ -90,6 +90,27 @@ Measured in the EU-2 rehearsal first. While no pilot is live, the expected impac
 
 The rollback window is **14 days**. The US project is untouched and unwritten during it, and the decommission (EU-6) waits for its end.
 
+## 6b. Rehearsal results
+
+### EU-2, 2026-10-18 15:05Z: PASS
+
+The real backup and restore tools were used. Production was only read.
+
+| Step | Result |
+|---|---|
+| Target | A Neon Free branch in Frankfurt, created with an expiry of 24 hours, **read back before any copy** |
+| Key | An ephemeral age key pair for the run, deleted at the end. The operator's backup key was not used |
+| Backup of Production (read-only snapshot, `backup.mjs`) | 48.1 s |
+| Restore into Frankfurt (`restore.mjs`; the clear dump exists only in memory) | 39.3 s; **identical to the backup's own inventory: 52 tables, 1,609 rows** |
+| Behaviour checks (`verify-restored.mjs`) | **6 of 6 pass**: runtime role without BYPASSRLS; 35 tenant tables, 3 scopes; no scope means no row; each organization sees exactly its own rows (105 table×scope pairs, 1,036 rows); journal and sign-in evidence append-only (owner refused too) |
+| Migrations | 28 found, schema up to date |
+| One query, workstation to Frankfurt | 35 ms (indicative only) |
+| Cleanup | Runtime role back to no login; ephemeral key and encrypted dump deleted; the branch expires by itself |
+
+**What it tells the switch (EU-4):** the final copy (backup, restore, checks) takes about **105 s**. The write freeze therefore lasts a few minutes, plus the smoke tests and sign-ins of section 4, step 5.
+
+**Not yet rehearsed:** the application switch, meaning a deployment in `fra1` pointed at the Frankfurt copy (G4 asks for it). Planned with EU-3.
+
 ## 7. Evidence per gate
 
 Sealed like the earlier Production gates (manifest with SHA-256, read-only copy in the evidence store):
