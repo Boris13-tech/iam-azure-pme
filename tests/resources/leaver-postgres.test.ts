@@ -89,7 +89,7 @@ describe.runIf(enabled)("Private Beta G1: a person who leaves is cut off at once
 
     // The administrator disables the leaver.
     const result = await updateSubject({ ...scope(org), subjectId: admin.subjectId }, leaver.subjectId, { lifecycleState: "DISABLED" }, change());
-    expect(result).toMatchObject({ value: { lifecycleState: "DISABLED" } });
+    expect(result).toMatchObject({ id: leaver.subjectId, lifecycleState: "DISABLED" });
 
     // 1. Every open session of the leaver ended in the same transaction, and resolves nothing.
     expect(await owner.session.count({ where: { subjectId: leaver.subjectId, revokedAt: null } })).toBe(0);
