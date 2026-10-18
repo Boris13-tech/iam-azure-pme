@@ -1,0 +1,3 @@
+# Reviewed false positives only (fingerprint = commit:file:rule:line). Never add a real secret here: rotate it instead.
+# Prose in an ADR ("signature/encryption" next to "key purposes"), entropy 3.68; reviewed 2026-10-18.
+5f831354288d10d65a8735c87d41e9fd8b23e171:docs/architecture/ADR-POST-6C-IDENTITY-REALIGNMENT.md:generic-api-key:203
