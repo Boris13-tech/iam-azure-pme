@@ -33,16 +33,36 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      ci_run_id: ${{ steps.verify.outputs.ci_run_id }}
+      ci_run_url: ${{ steps.verify.outputs.ci_run_url }}
     steps:
       - name: Dispatched from main, on a commit whose CI passed
+        id: verify
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then echo "REFUSED: dispatch from main only (got $GITHUB_REF)"; exit 1; fi
-          conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main&event=push&status=completed&per_page=1" --jq '.workflow_runs[0].conclusion // "none"')
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main&event=push&status=completed&per_page=1" \
+            --jq '.workflow_runs[0] // {} | [(.id // "" | tostring), (.head_sha // ""), (.name // ""), (.html_url // ""), (.conclusion // "none")] | join("\u001f")')
+          # A non-blank separator: empty fields keep their place (blank separators would merge them).
+          IFS=$'\x1f' read -r run_id run_sha run_name run_url conclusion <<< "$run"
           if [ "$conclusion" != "success" ]; then echo "REFUSED: CI on $GITHUB_SHA is '$conclusion', not success"; exit 1; fi
-          echo "CI on $GITHUB_SHA: success"
+          if [ "$run_sha" != "$GITHUB_SHA" ]; then echo "REFUSED: the accepted run is for $run_sha, not $GITHUB_SHA"; exit 1; fi
+          # Evidence of the accepted CI run: in the log, in the job summary, and as outputs for the Production jobs.
+          echo "Accepted CI run: id=$run_id sha=$run_sha workflow=\"$run_name\" url=$run_url"
+          {
+            echo "### CI run accepted for this Production operation"
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| CI run ID | $run_id |"
+            echo "| Head SHA | $run_sha |"
+            echo "| Workflow | $run_name |"
+            echo "| Run URL | $run_url |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "ci_run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "ci_run_url=$run_url" >> "$GITHUB_OUTPUT"
 
   database-activation:
     needs: ci-verified
