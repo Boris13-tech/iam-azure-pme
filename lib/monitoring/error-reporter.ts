@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 // Minimum application monitoring, slice 2 (MINIMUM-APPLICATION-MONITORING-DESIGN.md, M-C and SLI-03).
 // A minimal client of the Sentry envelope protocol, without an SDK: LUXIA builds every event itself, so no
 // request, user, header, cookie, query string or body can leave (I5, E15). Any Sentry-protocol backend works
@@ -52,7 +50,7 @@ export function buildEvent(error: unknown, component: ErrorComponent, routePath?
   const release = process.env.VERCEL_GIT_COMMIT_SHA;
   const route = routePath && /^[\w/[\].-]{1,120}$/.test(routePath) ? routePath : undefined;
   return {
-    event_id: randomBytes(16).toString("hex"),
+    event_id: Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join(""),
     timestamp: Date.now() / 1000,
     platform: "node",
     level: "error",

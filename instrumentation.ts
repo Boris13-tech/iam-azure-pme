@@ -3,7 +3,9 @@
 export function register() {}
 
 export async function onRequestError(error: unknown, _request: unknown, context: { routePath?: string }) {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  const { reportError } = await import("./lib/monitoring/error-reporter");
-  await reportError(error, "request", context?.routePath);
+  // Next.js pattern: the import sits in a branch the bundler drops for the edge runtime.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { reportError } = await import("./lib/monitoring/error-reporter");
+    await reportError(error, "request", context?.routePath);
+  }
 }

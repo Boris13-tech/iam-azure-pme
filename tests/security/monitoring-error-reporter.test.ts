@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Monitoring slice 2 (M-C, SLI-03): errors leave LUXIA only as events it builds itself, scrubbed, to a
@@ -91,6 +92,17 @@ describe("Monitoring slice 2: scrubbed error events, Sentry envelope protocol, n
     vi.mocked(SessionStore.getSession).mockResolvedValueOnce(null);
     expect(await getAuthContext()).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("stays buildable for the edge runtime: no Node-only import, and the reporter is loaded only on Node", () => {
+    // instrumentation.ts is bundled for edge too; a "node:" import there failed the Next.js build (CI #371).
+    const reporter = readFileSync("lib/monitoring/error-reporter.ts", "utf8");
+    expect(reporter).not.toMatch(/from "node:|require\("node:/);
+    const instrumentation = readFileSync("instrumentation.ts", "utf8").replace(/
+/g, "
+");
+    expect(instrumentation).toMatch(/if \(process\.env\.NEXT_RUNTIME === "nodejs"\) \{
+\s+const \{ reportError \} = await import\("\.\/lib\/monitoring\/error-reporter"\);/);
   });
 
   it("instrumentation reports unhandled server errors with the route pattern only", async () => {
