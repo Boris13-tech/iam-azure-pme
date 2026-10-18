@@ -61,9 +61,9 @@ These keep their state (standard, section 18). The missing intermediate states a
 | Backup schedule gate (#68) | Catch-up path never observed in Production |
 | F4 S1–S5 (#76–#80, not in Production) | THREAT-MODELED, traceability tables, INDEPENDENTLY REVIEWED (required before merging #76, decision F4-13), STAGING VERIFIED, gates |
 
-## 3b. Exceptions in force (standard, section 19)
+## 3b. Exception register (standard, section 19)
 
-Every exception is written, approved by the operator, limited in time, and listed here until it expires.
+Every exception is written, approved by the operator and limited in time. An exception that has ended (expired, closed or revoked) **stays listed**, with its state, the date and time (UTC) it ended, and the reason. None is ever deleted (standard section 19, amendment 2).
 
 | ID | Rule waived | Scope (exact) | Granted | Expires | Conditions | State |
 |---|---|---|---|---|---|---|

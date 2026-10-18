@@ -351,8 +351,10 @@ As for every state (section 2), each point needs its evidence, and the state is 
 ## 19. Ownership and amendment
 
 - The operator owns this standard. Amendments are class C changes with the operator's approval, recorded with their date.
+- An exception to any rule is written, approved by the operator and time-limited, and recorded in the **exception register** of the gap analysis.
+- When an exception ends (expired, closed or revoked), it **stays in the register**. Its entry gives its state, the date and time (UTC) it ended, and the reason. An exception is never deleted from the register.
 
 | Amendment | Date | Decided by | Change |
 |---|---|---|---|
 | 1 | 2026-10-17 | Operator | OPERATIONALLY PROVEN also requires the required SLIs measured continuously, without a significant gap: no uncovered interval over 15 minutes and no more than 0.1% uncovered in total; independent equivalent telemetry may cover an interval; planned maintenance without replacement telemetry is a gap (section 17, point 6). Evidence store: mandatory age encryption to two independent recipients (detailed manifest and payload encrypted, only a minimal outer integrity manifest in clear); 7-year retention of gate evidence; WORM, with an unlocked trial and then a lock by separate decision; workload identity or Entra preferred; no long-lived SAS, a short user-delegation SAS only if indispensable; Shared Key disabled if the architecture allows it (section 12). No resource is created by this amendment |
-- An exception to any rule is written, approved by the operator, time-limited, and listed in the gap analysis until it expires.
+| 2 | 2026-10-18 | Operator | Ended exceptions (expired, closed or revoked) stay in the exception register with their state, the date and time they ended, and the reason; none is deleted (this section, and the gap analysis section 3b) |
