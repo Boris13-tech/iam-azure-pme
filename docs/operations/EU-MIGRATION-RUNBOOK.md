@@ -109,7 +109,31 @@ The real backup and restore tools were used. Production was only read.
 
 **What it tells the switch (EU-4):** the final copy (backup, restore, checks) takes about **105 s**. The write freeze therefore lasts a few minutes, plus the smoke tests and sign-ins of section 4, step 5.
 
-**Not yet rehearsed:** the application switch, meaning a deployment in `fra1` pointed at the Frankfurt copy (G4 asks for it). Planned with EU-3.
+### G4 application switch, 2026-10-18: PASS (synthetic data)
+
+**Previews are treated as public and untrusted.** No Production data, secret or copy ever reaches a preview. The switch was therefore rehearsed on **synthetic** databases in Frankfurt, through the preview of EU-3 (#104), redeployed with functions in `fra1` (verified on the deployment).
+
+| Run | Database behind the preview | Result |
+|---|---|---|
+| A | A blank Frankfurt branch, migrated like CI (28 migrations) with the runtime role and its Production grants | **9 of 9 pass** |
+| B | **A restore:** run A's database backed up and restored into a blank Frankfurt branch with the real tools and an ephemeral key (identical to its inventory, 50 s), then the preview switched to it | **9 of 9 pass**; the organization created in run A is present |
+
+The 9 checks:
+- the public page answers;
+- the protected API refuses without a session;
+- sign-up starts: the code is reserved in Frankfurt;
+- sign-up completes: organization, founder and passkey in one transaction;
+- sign-in starts;
+- sign-in completes with the passkey: a session and its sign-in evidence;
+- an authenticated read works;
+- the session is visible to its owner;
+- an unknown organization gets the same generic answer.
+
+Each request took 120 to 670 ms, measured from the operator's workstation.
+
+**Cleanup:** the branch-scoped preview variables were removed (0 left), the runtime role lost its login, and the synthetic branches expire by themselves.
+
+**G4 status:** the restore (EU-2, real data) and the application switch (synthetic, to a restored database) are now rehearsed on the target platform. Both are **repeated after the Production switch (EU-4)**, because a change of region voids them (standard, section 17b).
 
 ## 7. Evidence per gate
 
