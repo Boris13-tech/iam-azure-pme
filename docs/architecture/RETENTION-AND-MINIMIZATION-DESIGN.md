@@ -16,7 +16,7 @@
 | F-4 | Journal metadata names people by internal identifiers and types, not by names | `writeAudit` call sites | Pseudonymizing a person changes the `Subject` and account rows only; the journal is never rewritten |
 | F-5 | Abuse counters are already purged after 2 days | `lib/security/rate-limit.ts` | No change |
 | F-6 | Expired sign-in challenges and Microsoft sign-in transactions are kept with no limit | `LocalAuthChallenge`, `AuthTransaction` | First purge target (no audit value) |
-| F-7 | The GitHub scheduler is unreliable for this repository (E4 diagnosis) | E4 certification | Scheduling uses the hosting platform's cron after the EU move (Vercel Pro) |
+| F-7 | The GitHub scheduler is unreliable for this repository (E4 diagnosis) | E4 certification | Scheduling uses the hosting platform's cron, which costs nothing: Vercel Cron (daily jobs are included in every plan) |
 
 ## 2. Mechanisms
 
@@ -33,7 +33,7 @@
 
 ## 3. Running the purges
 
-- **Schedule:** daily, from the hosting platform's cron (Vercel Pro, after the EU move) to an internal endpoint. The endpoint is protected by its own secret, like the monitoring readiness check (#102): without the secret, it answers like any unauthenticated path.
+- **Schedule:** daily, from the hosting platform's cron (Vercel Cron, at no cost, budget cap of €40 per month and €0 until the operator's signal) to an internal endpoint. It runs in the same minutes as the hourly backup, so Neon Free's compute is woken once (100 compute-hours a month). The endpoint is protected by its own secret, like the monitoring readiness check (#102): without the secret, it answers like any unauthenticated path.
 - **Dry run first:** for 7 days, the job records only the counts it would purge. Then it enforces.
 - **Bounded:** each call handles a fixed batch and stops. A backlog drains over several days rather than locking tables.
 - **Alerting:** a failed run raises an error event (monitoring M-C). A purge that has not run for 3 days raises a heartbeat alert (M-E pattern).
