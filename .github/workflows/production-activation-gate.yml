@@ -16,16 +16,6 @@ on:
         description: Required only for identity-apply
         required: false
         type: string
-  workflow_call:
-    inputs:
-      operation:
-        required: false
-        type: string
-        default: activation
-      confirmation:
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -35,7 +25,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Replaces the former `needs: test-and-build` of the commit-message triggers in ci.yml (removed): a Production
+  # operation starts only when dispatched from main, on a commit whose CI run on main (push) succeeded. The Production
+  # environment still requires its reviewer and allows main only.
+  ci-verified:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Dispatched from main, on a commit whose CI passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then echo "REFUSED: dispatch from main only (got $GITHUB_REF)"; exit 1; fi
+          conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&branch=main&event=push&status=completed&per_page=1" --jq '.workflow_runs[0].conclusion // "none"')
+          if [ "$conclusion" != "success" ]; then echo "REFUSED: CI on $GITHUB_SHA is '$conclusion', not success"; exit 1; fi
+          echo "CI on $GITHUB_SHA: success"
+
   database-activation:
+    needs: ci-verified
     if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
     runs-on: ubuntu-latest
     environment: Production
@@ -322,6 +332,7 @@ jobs:
           echo "Rollback branch: $PRODUCTION_BACKUP_BRANCH_ID"
 
   canonical-identity-bootstrap:
+    needs: ci-verified
     if: ${{ inputs.operation == 'identity-preflight' || inputs.operation == 'identity-apply' }}
     uses: ./.github/workflows/production-identity-bootstrap.yml
     with:
