@@ -98,11 +98,8 @@ describe("Monitoring slice 2: scrubbed error events, Sentry envelope protocol, n
     // instrumentation.ts is bundled for edge too; a "node:" import there failed the Next.js build (CI #371).
     const reporter = readFileSync("lib/monitoring/error-reporter.ts", "utf8");
     expect(reporter).not.toMatch(/from "node:|require\("node:/);
-    const instrumentation = readFileSync("instrumentation.ts", "utf8").replace(/
-/g, "
-");
-    expect(instrumentation).toMatch(/if \(process\.env\.NEXT_RUNTIME === "nodejs"\) \{
-\s+const \{ reportError \} = await import\("\.\/lib\/monitoring\/error-reporter"\);/);
+    const instrumentation = readFileSync("instrumentation.ts", "utf8").replace(/\r\n/g, "\n");
+    expect(instrumentation).toMatch(/if \(process\.env\.NEXT_RUNTIME === "nodejs"\) \{\n\s+const \{ reportError \} = await import\("\.\/lib\/monitoring\/error-reporter"\);/);
   });
 
   it("instrumentation reports unhandled server errors with the route pattern only", async () => {
