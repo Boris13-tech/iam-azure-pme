@@ -32,6 +32,21 @@
 | An e-mail or notification provider | Invitations, security notices | EU preferred | Not chosen (`docs/architecture/NOTIFICATION-CONTRACT.md`) |
 | A monitoring provider | Availability and error alerts | EU preferred | Not chosen |
 
+## Transfer facts (consulted 2026-10-18, to confirm at signature)
+
+These facts come from each provider's own pages, consulted on 2026-10-18. Before any signature, confirm each certification on the official list (dataprivacyframework.gov) and in the provider's current data processing addendum. Counsel chooses the transfer mechanism once the entity's country and the pilots' location are known.
+
+| Provider | Entity | Transfer basis it states | Data processing addendum | Note |
+|---|---|---|---|---|
+| Vercel | US company | Certified under the EU–US Data Privacy Framework; also standard contractual clauses | vercel.com/legal/dpa | Functions move to Frankfurt (`fra1`) with the EU switch |
+| Neon | US company (Databricks group) | States that it relies on the EU–US Data Privacy Framework (its own listing not yet confirmed) | neon.com/dpa; subprocessors at neon.com/subprocessors, changes announced 30 days before | Production moves to Frankfurt |
+| Microsoft (Azure, Entra) | US company | Microsoft's data protection addendum (certification to confirm) | Microsoft Products and Services DPA | Backups in France Central, encrypted with LUXIA's key |
+| GitHub | US company (Microsoft) | To confirm | GitHub DPA | CI holds no customer data |
+| Sentry (planned, monitoring option Z) | US company, EU representative in the Netherlands | Self-certified under the EU–US Data Privacy Framework | Click-through DPA | **EU data region** to be chosen at setup; events are scrubbed by LUXIA before they leave |
+| UptimeRobot (planned, monitoring option Z) | **EU company** (Slovakia) | No transfer outside the EU for the provider itself | DPA version 2.0 (April 2026); countersigned copy through sales | Probes public pages and protected health answers only: no personal data |
+
+**Legal context (2026-10-18):** the EU–US Data Privacy Framework stands. The General Court upheld the Commission's adequacy decision on 3 September 2025. An appeal is pending before the Court of Justice (C-703/25 P). If the decision falls, transfers to US providers fall back on standard contractual clauses and a transfer impact assessment.
+
 ## Changes
 
 LUXIA tells its customers before adding or replacing a subprocessor that processes customer data. The notice period is **[TO BE COMPLETED]**, and the customer may object as the DPA sets out.
