@@ -10,29 +10,58 @@ import { CanonicalAdminError } from "./canonical-admin-error";
 // (20261014090000): allowed transitions only, under the governance lock, LUXIA_LOCAL always ACTIVE, and a
 // quarantine that leaves no open session. This module adds the dry run (D3), the plan digest and the journal.
 // Every refusal is decided before the first write, so its DENIED event commits alone.
-// TESTING to ACTIVE follows a real connection test (F4) and is not offered here.
+// F4 (S5): the first activation, TESTING to ACTIVE, also needs activation evidence (see activationEvidence).
 export const CONNECTION_ACTIONS = {
   DISABLE: { from: ["ACTIVE"], to: "DISABLED" },
-  ACTIVATE: { from: ["DISABLED"], to: "ACTIVE" },
+  ACTIVATE: { from: ["DISABLED", "TESTING"], to: "ACTIVE" },
   QUARANTINE: { from: ["ACTIVE", "DISABLED"], to: "QUARANTINED" },
   RELEASE: { from: ["QUARANTINED"], to: "DISABLED" },
 } as const satisfies Record<string, { from: readonly ProviderConnectionStatus[]; to: ProviderConnectionStatus }>;
 export type ConnectionAction = keyof typeof CONNECTION_ACTIONS;
 
 type Target = { id: string; providerType: string; status: ProviderConnectionStatus; statusChangedAt: Date | null };
+/**
+ * F4 (S5): what a first activation (TESTING to ACTIVE) stands on, all on the connection's CURRENT configuration hash:
+ * the latest connection test (DISCOVERY) passed within 60 minutes, the latest proof sign-in (PROOF) passed within
+ * 15 minutes, made with the secret version still in force (operator decisions 2026-10-16). "Latest" is the database's
+ * monotonic order of runs and freshness the database's clock: the definition is the SQL function
+ * luxia_provider_activation_evidence (migration 20261016110000), which the database also enforces on its own.
+ * The prover and the activating administrator are both recorded, for a future separation-of-duties policy.
+ */
+export type ActivationEvidence = {
+  configurationHash: string; discoveryRunId: string; proofRunId: string; proofActorSubjectId: string; secretVersion: string;
+};
 export type ConnectionPlan = {
   providerConnectionId: string; action: ConnectionAction; from: ProviderConnectionStatus; to: ProviderConnectionStatus;
   /** Open sessions opened through this connection; a quarantine revokes them all, other actions none. */
   openSessions: number; sessionsToRevoke: number; planDigest: string;
+  /** First activation only (from TESTING). */
+  activationEvidence?: ActivationEvidence;
 };
 export type ConnectionTransition = Omit<ConnectionPlan, "planDigest" | "sessionsToRevoke"> & { revokedSessions: number; statusChangedAt: string };
 
 /** Digest of the exact state a plan was computed on. Applying requires the same state: no blind, no stale change. */
-export function connectionPlanDigest(auth: Pick<AuthContext, "organizationId" | "tenantId">, target: Pick<Target, "id" | "status" | "statusChangedAt">, action: ConnectionAction): string {
+export function connectionPlanDigest(auth: Pick<AuthContext, "organizationId" | "tenantId">, target: Pick<Target, "id" | "status" | "statusChangedAt">, action: ConnectionAction,
+  evidence?: ActivationEvidence): string {
   return createHash("sha256").update(JSON.stringify({
     v: 1, organizationId: auth.organizationId, tenantId: auth.tenantId, providerConnectionId: target.id, action,
     from: target.status, statusChangedAt: target.statusChangedAt?.toISOString() ?? null,
+    // Absent for every F2 action, so their digests are unchanged.
+    ...(evidence ? { evidence } : {}),
   })).digest("hex");
+}
+
+/**
+ * F4 (S5): the evidence a first activation needs, from the database's own definition, read in the caller's transaction
+ * (the apply holds the governance lock and the connection's row lock). Refuses with the database's reason otherwise.
+ */
+async function activationEvidence(tx: Prisma.TransactionClient, auth: AuthContext, target: Target): Promise<ActivationEvidence> {
+  if (target.providerType !== "OIDC_GENERIC") throw new CanonicalAdminError("ACTIVATION_UNSUPPORTED", 409);
+  const [row] = await tx.$queryRaw<Array<{ reason: string | null } & { [K in keyof ActivationEvidence]: string | null }>>`
+    SELECT * FROM luxia_provider_activation_evidence(${auth.organizationId}, ${target.id})`;
+  if (!row || row.reason) throw new CanonicalAdminError(row?.reason ?? "ACTIVATION_EVIDENCE_UNAVAILABLE", 409);
+  return { configurationHash: row.configurationHash!, discoveryRunId: row.discoveryRunId!, proofRunId: row.proofRunId!,
+    proofActorSubjectId: row.proofActorSubjectId!, secretVersion: row.secretVersion! };
 }
 
 /** The connection of this organization, in the administrator's tenant scope; row-locked when it is about to change. */
@@ -72,18 +101,21 @@ async function openSessions(tx: Prisma.TransactionClient, auth: AuthContext, id:
 
 const metadataOf = (target: Target, action: ConnectionAction, to: ProviderConnectionStatus, extra: Record<string, number | string>) =>
   ({ providerConnectionId: target.id, providerType: target.providerType, action, from: target.status, to, ...extra });
+const firstActivation = (target: Target, to: ProviderConnectionStatus) => target.status === "TESTING" && to === "ACTIVE";
 
 /** Dry run (D3): what the action would do, nothing changed. Journaled as a plan; a refusal is journaled as denied. */
 export function planConnectionTransition(auth: AuthContext, changeId: string, providerConnectionId: string, action: ConnectionAction): Promise<ConnectionPlan> {
   return operation(auth, changeId, "PROVIDER.CONNECTION.PLAN", "providers.manage", async (tx) => {
     const target = await readTarget(tx, auth, providerConnectionId, false);
     const to = assertAllowed(target, action);
+    const evidence = firstActivation(target, to) ? await activationEvidence(tx, auth, target) : undefined;
     const open = await openSessions(tx, auth, target.id);
     const sessionsToRevoke = to === "QUARANTINED" ? open : 0;
-    const planDigest = connectionPlanDigest(auth, target, action);
+    const planDigest = connectionPlanDigest(auth, target, action, evidence);
     return {
-      value: { providerConnectionId: target.id, action, from: target.status, to, openSessions: open, sessionsToRevoke, planDigest },
-      metadata: metadataOf(target, action, to, { openSessions: open, sessionsToRevoke, planDigest }),
+      value: { providerConnectionId: target.id, action, from: target.status, to, openSessions: open, sessionsToRevoke, planDigest,
+        ...(evidence ? { activationEvidence: evidence } : {}) },
+      metadata: metadataOf(target, action, to, { openSessions: open, sessionsToRevoke, planDigest, ...(evidence ?? {}) }),
     };
   });
 }
@@ -98,7 +130,10 @@ export function applyConnectionTransition(auth: AuthContext, changeId: string, p
     if (!(action in CONNECTION_ACTIONS)) throw new CanonicalAdminError("INVALID_CONNECTION_ACTION", 400);
     const target = await readTarget(tx, auth, providerConnectionId, true);
     const to = assertAllowed(target, action);
-    if (planDigest !== connectionPlanDigest(auth, target, action)) throw new CanonicalAdminError("CONNECTION_PLAN_STALE", 409);
+    // First activation: the evidence is read again here, under the governance lock and the row lock, at apply time (so
+    // it may also have become too old since the plan), and it is part of the digest.
+    const evidence = firstActivation(target, to) ? await activationEvidence(tx, auth, target) : undefined;
+    if (planDigest !== connectionPlanDigest(auth, target, action, evidence)) throw new CanonicalAdminError("CONNECTION_PLAN_STALE", 409);
     const open = await openSessions(tx, auth, target.id);
     await tx.$executeRaw`UPDATE "ProviderConnection" SET "status" = ${to}::"ProviderConnectionStatus"
       WHERE "organizationId" = ${auth.organizationId} AND "id" = ${target.id}`;
@@ -108,8 +143,10 @@ export function applyConnectionTransition(auth: AuthContext, changeId: string, p
     const [changed] = await tx.$queryRaw<Array<{ statusChangedAt: Date }>>`
       SELECT "statusChangedAt" FROM "ProviderConnection" WHERE "organizationId" = ${auth.organizationId} AND "id" = ${target.id}`;
     return {
-      value: { providerConnectionId: target.id, action, from: target.status, to, openSessions: open, revokedSessions, statusChangedAt: changed.statusChangedAt.toISOString() },
-      metadata: metadataOf(target, action, to, { openSessions: open, revokedSessions, planDigest }),
+      value: { providerConnectionId: target.id, action, from: target.status, to, openSessions: open, revokedSessions, statusChangedAt: changed.statusChangedAt.toISOString(),
+        ...(evidence ? { activationEvidence: evidence } : {}) },
+      metadata: metadataOf(target, action, to, { openSessions: open, revokedSessions, planDigest,
+        ...(evidence ? { ...evidence, activationActorSubjectId: auth.subjectId } : {}) }),
     };
   });
 }

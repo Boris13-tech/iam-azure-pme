@@ -9,15 +9,28 @@ export type SignInIdentity = Readonly<{ organizationId: string; tenantId: string
   identityAccountId: string; providerConnectionId: string }>;
 
 export const ENTRA_ASSURANCE_PROFILE = "ENTRA_OIDC_PROVIDER_ATTESTED";
+/** F4 (S4): a generic OIDC sign-in, attested by the provider only, exactly like the profile above. */
+export const GENERIC_OIDC_ASSURANCE_PROFILE = "OIDC_GENERIC_PROVIDER_ATTESTED";
 
 /** Evidence for a Microsoft Entra OIDC sign-in, success (VERIFIED) or refusal (REJECTED). */
 export function entraSignInEvidence(identity: SignInIdentity, outcome: "VERIFIED" | "REJECTED", reasonCode: string,
   now = new Date()): Prisma.AuthenticationEvidenceUncheckedCreateInput {
+  return federatedSignInEvidence(ENTRA_ASSURANCE_PROFILE, identity, outcome, reasonCode, now);
+}
+
+/** Evidence for a generic OIDC sign-in (F4), success (VERIFIED) or refusal (REJECTED). */
+export function genericOidcSignInEvidence(identity: SignInIdentity, outcome: "VERIFIED" | "REJECTED", reasonCode: string,
+  now = new Date()): Prisma.AuthenticationEvidenceUncheckedCreateInput {
+  return federatedSignInEvidence(GENERIC_OIDC_ASSURANCE_PROFILE, identity, outcome, reasonCode, now);
+}
+
+function federatedSignInEvidence(assuranceProfile: string, identity: SignInIdentity, outcome: "VERIFIED" | "REJECTED",
+  reasonCode: string, now: Date): Prisma.AuthenticationEvidenceUncheckedCreateInput {
   const operationId = randomUUID();
   return {
     id: randomUUID(), ...identity,
     method: "FEDERATED_OIDC", outcome, source: "EXTERNAL_PROVIDER",
-    assuranceLevel: "LOW", assuranceProfile: ENTRA_ASSURANCE_PROFILE, assuranceProfileVersion: 1,
+    assuranceLevel: "LOW", assuranceProfile, assuranceProfileVersion: 1,
     userVerification: "PROVIDER_ASSERTED", phishingResistant: false, hardwareBound: false,
     // Reference to our own callback operation, never to provider token material.
     sourceRef: `oidc-callback:${operationId}`, verifierPolicyVersion: 1, operationId,

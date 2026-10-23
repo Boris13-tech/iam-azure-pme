@@ -4,3 +4,4 @@ export * from "./federated-token";
 export * from "./caching";
 export * from "./runtime-guard";
 export * from "./connection-references";
+export * from "./unconfigured";
