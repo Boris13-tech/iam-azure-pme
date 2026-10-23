@@ -30,7 +30,7 @@
 | Journal and sign-in records | **PROPOSED: 1 year by default**, in line with the CNIL's recommendation for access logs (6 months to 1 year, deliberation 2021-122). A customer may extend it **up to 3 years** with a documented justification (internal control, legal obligation). LUXIA operator interventions are kept as long as the customer's journal, and at least 1 year | Removal of whole time periods (for example monthly partitions) by a reviewed, journaled procedure, never row by row by the application. This keeps T0's rule: the application can never delete history (R5) |
 | Deleted or retired person | **PROPOSED: pseudonymized 30 days after the person is retired** (time to correct a mistaken retirement). A disabled person stays until the customer retires them. A customer's erasure request (the customer is the controller) is executed within 30 days. The journal keeps the pseudonymous identifier | Erasure request procedure (`DATA-SUBJECT-REQUESTS.md`), mechanism R6 |
 | Closed organization | **PROPOSED: everything deleted 90 days after closure** (a reversible quarantine for mistakes and disputes), except what the law requires to keep. **The end of a pilot follows the same rule, after the export window.** The deletion is recorded in the operator journal | Operator procedure after the quarantine, mechanism R7 |
-| Independent backups | **PROPOSED: 30 days (in place), and no monthly copies** (minimization). Deleted data therefore disappears from the backups within 30 days of its deletion. They are protected against deletion during that time | Immutability and a lifecycle rule (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`), mechanism R8 |
+| Independent backups | **PROPOSED: 30 days of protection (in place), and no monthly copies** (minimization). Deleted data then disappears from the backups within **[46] days** of its deletion: 30 days protected, about 1 day for the lifecycle rule, then the storage's recycle bin (14 days today; **[33] days** in total if the operator shortens it to 1 day). They are protected against deletion during the first 30 days | Immutability and a lifecycle rule (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`), mechanism R8 |
 
 ## 3. Tension to resolve with counsel: append-only versus erasure
 
@@ -41,7 +41,7 @@ The proposed answer:
 2. During that time, a person's identity can be **pseudonymized**. The journal refers to people by internal identifiers, and the names live in other tables, so erasing the name does not rewrite the journal.
 3. At the end of the period, whole periods are removed by a reviewed procedure.
 
-**Backups:** deleted data stays in the backups until they expire (30 days today; they cannot be deleted earlier, by design). Counsel must confirm that this is acceptable, and how to say it.
+**Backups:** deleted data stays in the backups until they expire: they cannot be deleted during their first 30 days, by design, and are gone within [46] days (or [33] days with a 1-day recycle bin; `docs/operations/BACKUP-RUNBOOK.md`, section 8). Counsel must confirm that this is acceptable, and how to say it.
 
 ## Gaps to close before publication
 

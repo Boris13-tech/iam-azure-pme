@@ -225,3 +225,51 @@ At today's size (encrypted dump under 1 MB, 24 backups a day kept 30 days, about
 - Freshness alert: Log Analytics (a few MB of logs a month) and one log alert rule evaluated every 15 minutes, about €1.50 a month.
 
 The authorized ceiling is €10 a month (operator decision, 2026-10-13).
+
+## 8. Expiry of backups (R8)
+
+| Item | State |
+|---|---|
+| Purpose | Backups disappear after their retention period, so that data deleted in Production (an erased organization, R7; a purge, R2 to R6) also leaves the backups. Retention design R8 |
+| Status | **Prepared, not applied** (2026-10-23). Applying it is an operator gate (Production storage configuration) |
+| Policy | [`BACKUP-LIFECYCLE-POLICY.json`](BACKUP-LIFECYCLE-POLICY.json): one rule, `luxia-backup-expiry`, on `prod-backups/prod/` and `prod-backups/drill/`: delete the blob and its versions more than 31 days after creation |
+| Cost | No charge for the rule; delete operations are free; the storage shrinks |
+
+**State read on 2026-10-23 (read only):** versioning on; version-level immutability 30 days, **locked**; blob soft delete 14 days; container soft delete 14 days; no lifecycle policy.
+
+### 8.1 How a backup ends
+
+1. Days 0 to 30: the version is immutable. Nobody can delete it, the lifecycle rule included (the lock wins).
+2. Day 31: the rule is due. Azure runs lifecycle rules about once a day, so the deletion happens within about a day after that.
+3. The deleted version then stays in the storage's recycle bin (blob soft delete) for its period, and is purged.
+
+**Worst case after a deletion in Production:** the last backup taken before the deletion is gone after about **31 + 1 + 14 = 46 days** with the soft delete at 14 days, or **33 days** with it at 1 day.
+
+**Decision for the operator (recommended: 1 day).** After day 30, the soft delete only keeps backups that the policy says are expired; the 30-day locked immutability is the protection that matters. One day still covers a mistaken rule. The legal drafts say 30 days today: they must state the real figure (46 or 33 days), or the soft delete must be shortened. Changing the soft delete is a storage setting change, so it is an operator gate.
+
+### 8.2 Apply (operator gate)
+
+```bash
+az storage account management-policy create --resource-group luxia-backup-rg --account-name luxiabackupfrd325 --policy @docs/operations/BACKUP-LIFECYCLE-POLICY.json
+```
+
+If the operator chooses the 1-day soft delete:
+
+```bash
+az storage account blob-service-properties update --resource-group luxia-backup-rg --account-name luxiabackupfrd325 --enable-delete-retention true --delete-retention-days 1
+```
+
+### 8.3 Verify (read only)
+
+1. The policy read back equals the file:
+   `az storage account management-policy show --resource-group luxia-backup-rg --account-name luxiabackupfrd325 --query policy`
+2. Two days after applying it, no version older than 33 days remains (counts only, no names printed):
+   `az storage blob list --account-name luxiabackupfrd325 --container-name prod-backups --include v --auth-mode login --num-results "*" --query "length([?properties.creationTime < '<now minus 33 days, ISO 8601>'])"`
+3. The freshness alert stays green (section 2): the rule never touches a backup younger than 31 days.
+
+Record the three results in the evidence store, then mark the pilot agreement's backup line (section 14) as met.
+
+### 8.4 Roll back
+
+`az storage account management-policy delete --resource-group luxia-backup-rg --account-name luxiabackupfrd325`. Nothing already deleted comes back (by design); the immutability keeps every backup younger than 30 days in any case.
+
