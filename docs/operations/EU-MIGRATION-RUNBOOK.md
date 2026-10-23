@@ -56,7 +56,7 @@ Each gate follows the [Production gate template](../engineering/templates/PRODUC
 |---|---|---|---|
 | **EU-0** Plan approval | This runbook and its tools reviewed | Yes | Operator; tools reviewed (class A where they touch Production) |
 | **EU-1** Target project | A Neon Free project in Frankfurt. No payment | Yes (delete the empty project) | None beyond this runbook |
-| **EU-2** Target and rehearsal | A new Neon project in Frankfurt; roles created (`app_user`, `luxia_backup`); the latest independent backup restored into it; checks EU-I2 to EU-I4; the application tested against it **outside Production** (a preview deployment pointed at the target). Timed, to measure the downtime the switch will need | Yes (delete the target) | Operator GO; new role passwords (secrets) |
+| **EU-2** Target and rehearsal | A new Neon project in Frankfurt; roles created (`app_user`, `luxia_backup`); the latest independent backup restored into it; checks EU-I2 to EU-I4; the application tested against a **synthetic** restored database (previews are public: no Production data ever reaches one). Timed, to measure the downtime the switch will need | Yes (delete the target) | Operator GO; new role passwords (secrets) |
 | **EU-3** Code | `vercel.json` sets the functions region to `fra1` (class A: Production configuration); reviewed and merged, deployed only at the switch (EU-4). Works on Hobby | Yes | Independent review |
 | **EU-4** Switch | Section 4 | Yes, within the window of section 6 | Operator GO; maintenance window announced |
 | **EU-5** After-checks and G4 | Section 5 | — | — |
@@ -76,7 +76,7 @@ Measured in the EU-2 rehearsal first. While no pilot is live, the expected impac
 ## 5. After-checks and the G4 proof (EU-5)
 
 - Within 2 hours: a scheduled backup of the target exists and is verified; freshness alert green.
-- **G4:** restore that backup into a fresh, empty Frankfurt branch, and **switch a preview deployment of the application to it**, then run the smoke tests and a sign-in. This proves the database restore and the application switch on the final platform (standard, section 17b).
+- **G4:** restore that backup into a fresh, empty Frankfurt branch and prove it with the restore tools (inventory identical, behaviour checks), **never through a preview**. Then repeat the application switch on a **synthetic** restored database, as in G4 run B (section 6b). Together they prove the restore and the application switch on the final platform (standard, section 17b), without any Production data on a public preview.
 - **G6 and G7:** the monitoring slice 5 is set up on the final platform, and every alert is tested end to end.
 - Update the readiness documents with the new region and plan.
 
