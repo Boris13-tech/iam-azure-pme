@@ -3,5 +3,8 @@
     "deploymentEnabled": {
       "main": false
     }
-  }
+  },
+  "crons": [
+    { "path": "/api/internal/retention", "schedule": "7 3 * * *" }
+  ]
 }
