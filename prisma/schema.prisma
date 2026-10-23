@@ -108,6 +108,7 @@ enum ProviderType {
   GOOGLE_WORKSPACE
   GITHUB
   CUSTOM
+  OIDC_GENERIC // F4: generic OIDC connection (20261016090000)
 }
 
 enum ProviderConnectionStatus {
@@ -223,10 +224,52 @@ model ProviderConnection {
   identityCollisions     ProviderIdentityCollision[]
   tenantScopes           ProviderConnectionTenantScope[]
   secretReferences       ProviderSecretReference[]
+  oidcConfiguration      ProviderOidcConfiguration?
+  testRuns               ProviderTestRun[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, providerType, externalScopeId])
   @@index([organizationId])
+}
+
+/// F4 (20261016090000): the OIDC configuration of one OIDC_GENERIC connection. No secret (the client secret is a
+/// ProviderSecretReference, F3). Writable only while the connection is DRAFT or TESTING, under the governance lock;
+/// never deleted; configurationHash is computed by the database. Forced row-level security.
+model ProviderOidcConfiguration {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  providerConnectionId String   @unique
+  issuer               String
+  clientId             String
+  clientAuthMethod     String   @default("client_secret_basic")
+  idTokenAlgorithm     String   @default("RS256")
+  scopes               String   @default("openid profile email")
+  configurationHash    String   @default("")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @default(now())
+
+  providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict, map: "ProviderOidcConfiguration_connection_fkey")
+
+  @@unique([organizationId, providerConnectionId])
+  @@index([organizationId])
+}
+
+/// F4 (20261016090000): a connection test (DISCOVERY) or proof sign-in (PROOF). Append-only, safe codes only.
+model ProviderTestRun {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  providerConnectionId String
+  kind                 String
+  outcome              String
+  reasonCode           String
+  configurationHash    String
+  metadata             Json     @default("{}")
+  actorSubjectId       String
+  occurredAt           DateTime @default(now())
+
+  providerConnection ProviderConnection @relation(fields: [organizationId, providerConnectionId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict, map: "ProviderTestRun_connection_fkey")
+
+  @@index([organizationId, providerConnectionId, occurredAt], map: "ProviderTestRun_connection_idx")
 }
 
 model Subject {
@@ -1127,6 +1170,11 @@ model AuthTransaction {
   expectedOrganizationId       String
   expectedTenantId             String
   expectedProviderConnectionId String
+  /// F4: SIGN_IN (default), LINK or ACTIVATION_PROOF; LINK and ACTIVATION_PROOF carry the subject that started it.
+  purpose                      String    @default("SIGN_IN")
+  subjectId                    String?
+  /// F4 (S4): the configurationHash a generic OIDC round trip started with; NULL for Microsoft transactions.
+  expectedConfigurationHash    String?
   returnTo                     String?
   expiresAt                    DateTime
   consumedAt                   DateTime?

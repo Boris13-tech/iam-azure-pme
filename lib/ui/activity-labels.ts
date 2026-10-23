@@ -20,6 +20,7 @@ export const OPERATION_LABELS: Readonly<Record<string, string>> = Object.freeze(
   "PROVIDER.CONNECTION.PLAN": "Changement de fournisseur préparé", "PROVIDER.CONNECTION.DISABLE": "Fournisseur désactivé",
   "PROVIDER.CONNECTION.ACTIVATE": "Fournisseur réactivé", "PROVIDER.CONNECTION.QUARANTINE": "Fournisseur mis en quarantaine, sessions révoquées",
   "PROVIDER.CONNECTION.RELEASE": "Fournisseur sorti de quarantaine (reste désactivé)",
+  "PROVIDER.CONNECTION.TEST": "Fournisseur testé (découverte et clés)",
   "RESOURCE.CREATE": "Ressource créée", "RESOURCE.UPDATE": "Ressource modifiée", "RESOURCE.CATALOG.CREATE": "Ressource créée",
   "RESOURCE.CATALOG.UPDATE": "Ressource modifiée", "RESOURCE.SCOPE.CREATE": "Périmètre créé", "RESOURCE.ENTITLEMENT.CREATE": "Droit créé",
   "RESOURCE.ENTITLEMENT.REVOKE": "Droit retiré", "SOD.POLICY.CREATE": "Politique de séparation créée", "SOD.POLICY.UPDATE": "Politique de séparation modifiée",

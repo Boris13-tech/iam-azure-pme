@@ -40,3 +40,6 @@ REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEv
 REVOKE DELETE, TRUNCATE ON "ProviderConnection" FROM app_user;
 -- F3: secret references are revoked, never deleted (same as the migration gives app_user in Production).
 REVOKE DELETE, TRUNCATE ON "ProviderSecretReference" FROM app_user;
+-- F4: OIDC configurations are never deleted and test runs are append-only (same as the migration gives app_user in Production).
+REVOKE DELETE, TRUNCATE ON "ProviderOidcConfiguration" FROM app_user;
+REVOKE UPDATE, DELETE, TRUNCATE ON "ProviderTestRun" FROM app_user;
