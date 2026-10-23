@@ -48,7 +48,7 @@ These are taken from `SECURITY-OVERVIEW.md`, and only measures that are in place
 ## Annex 3: end of service
 
 - **Return:** an export of the organization's data **[TO BE BUILT: readiness E9]**.
-- **Deletion:** after **[TO BE DECIDED]** days, as set out in `DATA-RETENTION-AND-DELETION.md` section 2, recorded in the operator journal.
+- **Deletion:** after **90 days (PROPOSED)**, as set out in `DATA-RETENTION-AND-DELETION.md` section 2, recorded in the operator journal.
 - **Backups:** deleted data expires from locked backups within their retention period.
 
 ## Annex 4: subprocessors

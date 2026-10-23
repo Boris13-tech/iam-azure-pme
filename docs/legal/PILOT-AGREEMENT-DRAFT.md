@@ -96,7 +96,7 @@ LUXIA keeps all rights in LUXIA Identity. The Customer keeps all rights in its d
 | Promise | Operable today? | Needed |
 |---|---|---|
 | Production in the EU before the Pilot (8.3) | Rehearsed, not done | Gate EU-4 |
-| Export on request (9.2) | **Manual only** (no export feature yet, E9) | A written, tested export procedure |
+| Export on request (9.2) | **Operator tool drafted and tested on synthetic data** (2026-10-22; evidence held privately, not yet verifiable from this repository): one organization, read-only consistent snapshot, one JSON file per table, security material removed (hashes, passkey keys, tokens, session identifiers), manifest with SHA-256; 17 of 17 checks. No product feature yet (E9) | Independent review of the tool before any use on Production (it reads Production) |
 | Deletion within 90 days and written confirmation (9.2) | **Designed** (R7) | Implemented and tested, or a tested manual operator procedure |
 | Breach notification within 48 hours (8.4) | Partly: backup alerting exists; application monitoring is in review | Monitoring active (G6), alert path tested (G7), runbook exercised |
 | Removal of network identifiers (DPA annex A) | In review (R1) | R1 merged and deployed |
