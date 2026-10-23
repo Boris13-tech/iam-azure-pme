@@ -1,0 +1,56 @@
+name: Backup image
+
+# Builds the backup job image (infra/backup/Dockerfile) for Azure Container Apps and pushes it to GHCR with a build
+# provenance attestation (docs/operations/BACKUP-ON-AZURE.md). The image holds public code and the backup PUBLIC key
+# only. No Production data and no Production secret ever reach this workflow: the job runs in Azure.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/backup/**'
+      - 'infra/backup/Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/backup-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/boris13-tech/luxia-backup
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Build and push
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker build -f infra/backup/Dockerfile -t "$IMAGE:$GITHUB_SHA" .
+          docker push "$IMAGE:$GITHUB_SHA"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")"
+          echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
+          echo "Image: $IMAGE@${digest#*@}"
+          docker logout ghcr.io
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/boris13-tech/luxia-backup
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
