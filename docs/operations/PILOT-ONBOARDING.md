@@ -3,7 +3,7 @@
 | Item | State |
 |---|---|
 | Purpose | How a pilot organization is brought onto LUXIA Identity, step by step, and who does what |
-| Scope | The [Private Beta scope](../engineering/PRIVATE-BETA-SCOPE.md): passkey sign-in. Microsoft Entra for a pilot's own tenant is **not available yet** (no activation path; see the scope) |
+| Scope | The [Private Beta scope](../engineering/PRIVATE-BETA-SCOPE.md): the first pilots sign in with **passkeys** and recovery codes. Microsoft Entra for a pilot's own tenant comes after the Beta (decision of 2026-10-23; no activation path exists yet) |
 | Preconditions | The Private Beta gate is passed ([PRIVATE_BETA_READINESS.md](../../PRIVATE_BETA_READINESS.md)). The pilot agreement and its data processing agreement are signed |
 | Roles | **Operator** (LUXIA), **founder** (the pilot's first administrator), **administrators**, **members** |
 
@@ -11,8 +11,11 @@
 
 1. Agreement and DPA signed; the pilot's **security contacts** recorded (named people, e-mail and phone), for incident notices (pilot agreement, section 8.4).
 2. Pilot recorded in the operator's register: organization name, contacts, start and end dates, user limit (the Beta allows at most 50 users across all pilots).
-3. **Signup code** issued. This is a Production write, so it goes through the operator's gate:
-   `npx tsx scripts/operators/signup-codes.ts issue --by "<operator>" --days 14 --note "<pilot>"`
+3. **Signup code** issued. This is a Production write (standard, section 10), done in two steps with the operator's tool once #121 is merged:
+   - `npx tsx scripts/operators/signup-codes.ts plan --by "<operator>" --days 14 --note "<pilot>"` writes nothing, binds the request to the database and the tool commit, and prints a digest valid 15 minutes;
+   - `npx tsx scripts/operators/signup-codes.ts issue --plan <plan.json> --confirm <digest>` issues one code for that plan, and refuses a changed, expired, re-targeted or reused plan.
+
+   **Until #121 is merged, the tool on `main` writes the code at once, with no confirmation: it is not used for a pilot.**
    The code is printed once and only its hash is stored. It reaches the founder through a channel other than the one carrying the sign-up link.
 
 ## 2. Sign-up (founder, about 5 minutes)
