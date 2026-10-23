@@ -58,7 +58,7 @@ See `DATA-RESIDENCY.md`. **Today, Production is hosted in the United States**, a
 See `DATA-RETENTION-AND-DELETION.md`. In short:
 - sessions expire after 24 hours, but their records are kept;
 - abuse counters are kept 2 days;
-- the journal and the sign-in records are append-only and kept for **1 year by default (PROPOSED)**; an organization may extend this up to 3 years when it documents a justification ([retention](DATA-RETENTION-AND-DELETION.md)).
+- the journal and the sign-in records are append-only. **Today they are kept without a time limit: no automatic deletion exists yet.** The proposed policy, pending legal review and the retention mechanisms, is 1 year by default, extendable up to 3 years when an organization documents a justification ([retention](DATA-RETENTION-AND-DELETION.md)). This notice will state the period only once it is enforced.
 
 ## 8. Your rights
 

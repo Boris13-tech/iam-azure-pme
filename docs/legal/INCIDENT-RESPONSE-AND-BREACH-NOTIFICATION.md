@@ -44,7 +44,7 @@
 5. **Notify** (section 3).
 6. **Recover.** Restore the service, from backups if needed (`docs/operations/BACKUP-RESTORE-PLAN.md`).
 7. **Learn.**
-   - Within **10 working days (PROPOSED)**, write a post-incident report: cause, impact, timeline, fixes.
+   - Within **5 working days**, as the engineering standard requires for S1 and S2 incidents (section 16), write a post-incident report: cause, impact, timeline, fixes.
    - Track every fix to a release.
 
 ## 3. Notification
