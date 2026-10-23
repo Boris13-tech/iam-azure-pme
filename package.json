@@ -19,7 +19,7 @@
     "soak:staging": "tsx scripts/soak/run-soak.ts"
   },
   "dependencies": {
-    "@azure/msal-node": "^3.8.10",
+    "@azure/msal-node": "^7.1.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@prisma/client": "^5.20.0",
     "isomorphic-fetch": "^3.0.0",
