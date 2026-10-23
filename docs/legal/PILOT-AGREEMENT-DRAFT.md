@@ -100,7 +100,7 @@ LUXIA keeps all rights in LUXIA Identity. The Customer keeps all rights in its d
 | Deletion within 90 days and written confirmation (9.2) | **Designed** (R7) | Implemented and tested, or a tested manual operator procedure |
 | Breach notification within 48 hours (8.4) | Partly: backup alerting exists; application monitoring is in review | Monitoring active (G6), alert path tested (G7), runbook exercised |
 | Removal of network identifiers (DPA annex A) | In review (R1) | R1 merged and deployed |
-| Retention periods enforced (9.1) | **No**: purge and pseudonymization are designed (R3 to R6), not built | R3 to R6 built, reviewed and running, or the periods stated as not yet enforced |
+| Retention periods enforced (9.1) | **No**: purge and pseudonymization are designed (R3 to R6), not built | R3 to R6 built, reviewed and running (G8 requires enforcement; a disclosure does not replace it) |
 | Backups expire after 30 days (9.2) | **No**: immutability stops early deletion, but no lifecycle rule deletes expired versions | R8 lifecycle rule in place and verified |
 | A tested channel to the Customer's security contacts (8.4) | **No** product channel (E6) | The named contacts recorded, and a test notice sent and acknowledged |
 | Hosting terms that allow the Pilot | **No** (Vercel Hobby is non-commercial) | Vercel Pro: `BLOCKED_BY_BUDGET` |

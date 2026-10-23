@@ -37,6 +37,6 @@
 | Area | Requirement before the first pilot |
 |---|---|
 | Legal | The pilot agreement, its data processing agreement and the privacy notice, reviewed by counsel. The entity that signs them exists |
-| Retention | The periods agreed with counsel are enforced for the data the pilot creates, or stated as not yet enforced |
+| Retention | The periods agreed with counsel are **enforced** for the data the pilot creates: purge, pseudonymization and deletion mechanisms built, reviewed and running (standard, section 17b, G8). Disclosing that they are not enforced does not meet this requirement |
 | Hosting | Hosting terms that allow commercial use. Production in the EU |
 | Operability | Every promise listed in section 14 of the pilot agreement is operable |
