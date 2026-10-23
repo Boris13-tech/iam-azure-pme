@@ -65,7 +65,7 @@ The Pilot is provided **without any availability, performance or support-time co
 2. **At the end of the Pilot:**
    - on request made within **[15] days**, LUXIA provides an export of the Customer's data in a machine-readable format within **[15] days**;
    - LUXIA then deletes the Customer's organization and its data within **[90] days**, and confirms it in writing;
-   - encrypted backups expire within 30 days after that deletion.
+   - encrypted backups that still contain the data are deleted within **[46]** days after that deletion (they cannot be deleted during their first 30 days, by design).
 3. Data that a law requires LUXIA to keep is kept only for that purpose and that time.
 
 ## 10. Confidentiality
@@ -100,7 +100,7 @@ LUXIA keeps all rights in LUXIA Identity. The Customer keeps all rights in its d
 | Breach notification within 48 hours (8.4) | Partly: backup alerting exists; application monitoring is in review | Monitoring active (G6), alert path tested (G7), runbook exercised |
 | Removal of network identifiers (DPA annex A) | In review (R1) | R1 merged and deployed |
 | Retention periods enforced (9.1) | **No**: purge and pseudonymization are designed (R3 to R6), not built | R3 to R6 built, reviewed and running (G8 requires enforcement; a disclosure does not replace it) |
-| Backups expire after 30 days (9.2) | **No**: immutability stops early deletion, but no lifecycle rule deletes expired versions | R8 lifecycle rule in place and verified |
+| Backups deleted within the agreed period (9.2) | **No**: immutability stops early deletion, but no lifecycle rule deletes expired versions. The rule is prepared (R8, runbook section 8) | R8 applied and verified (operator gate); the period in 9.2 set to the real worst case (46 days, or 33 with a 1-day recycle bin) |
 | A tested channel to the Customer's security contacts (8.4) | **No** product channel (E6) | The named contacts recorded, and a test notice sent and acknowledged |
 | Hosting terms that allow the Pilot | **No** (Vercel Hobby is non-commercial) | Vercel Pro: `BLOCKED_BY_BUDGET` |
 | Counsel review of this agreement | No | Free consultation, or a budget |
