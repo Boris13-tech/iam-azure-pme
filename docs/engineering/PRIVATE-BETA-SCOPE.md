@@ -13,7 +13,7 @@
 | Organizations | 1 to 3, invited by the operator. No public self-service sign-up, no broad deployment |
 | People | At most 50 users in total, across all pilots |
 | Sign-in | Passkeys, recovery codes, and Microsoft Entra. Each pilot may use passkeys only |
-| Microsoft Entra for a pilot's own tenant | Through LUXIA's multi-tenant app registration, with the pilot administrator's consent (no per-pilot secret). Per pilot tenant, **one real sign-in is verified read-only before the pilot uses it**, and a tenant that is not connected is refused |
+| Microsoft Entra for a pilot's own tenant | Through LUXIA's multi-tenant app registration, with the pilot administrator's consent (no per-pilot secret). **Not available yet:** a new Entra connection starts DRAFT and no path activates it on `main` or in F4 (finding, 2026-10-23). It needs an Entra activation path (class A), then one real sign-in verified read-only per pilot tenant, and a refused sign-in from a tenant that is not connected. Until then, pilots use passkeys |
 | Out of scope | Generic OpenID Connect providers (F4), Google, SAML, SCIM, e-mail notifications (E6), access requests |
 
 ## 2. Beta-critical capabilities
@@ -29,7 +29,7 @@
 | Leaver: disabling a person ends their sessions and accesses | Proven on PostgreSQL in CI (`tests/resources/leaver-postgres.test.ts`), on mechanisms already PRODUCTION VERIFIED |
 | Resources, entitlements, separation of duties, access reviews | PRODUCTION VERIFIED |
 | Security journal (append-only) and dashboard | PRODUCTION VERIFIED |
-| Microsoft Entra sign-in | PRODUCTION VERIFIED for the operator's tenant; per pilot tenant, see section 1 |
+| Microsoft Entra sign-in | PRODUCTION VERIFIED for the operator's tenant; not yet available for a pilot's tenant (section 1) |
 | Encrypted independent backups and a verified restore | PRODUCTION VERIFIED on the current platform; rehearsed on the target platform (EU-2, G4) |
 
 ## 3. Requirements that apply to the pilots
