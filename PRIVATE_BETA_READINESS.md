@@ -15,7 +15,7 @@
 |---|---|---|---|---|---|
 | 1 | Core IAM in Production | **DONE** | Certifications in `docs/certification/` (identity baseline, resources and governance, SoD, access reviews, dashboard, security journal) | — | — |
 | 2 | First admin and break-glass B1 to B5 | **DONE** | `docs/certification/FIRST-ADMIN-BREAK-GLASS-V1-B*-RELEASE-*.md` | — | — |
-| 3 | Providers needed by the pilot | **PARTIAL** | Passkeys and Microsoft Entra PRODUCTION VERIFIED (operator tenant, F1, F2). The Entra app is multi-tenant | One verified sign-in per pilot tenant (scope, section 1) | A pilot |
+| 3 | Providers needed by the pilot | **PARTIAL** | Passkeys PRODUCTION VERIFIED. Microsoft Entra PRODUCTION VERIFIED for the operator's tenant only (F1, F2) | **Finding (2026-10-23): no path activates a new Entra connection for a pilot's tenant.** On `main`, a new MICROSOFT_ENTRA connection starts DRAFT and the lifecycle only activates from DISABLED; F4 S5 (#80) activates OIDC_GENERIC connections only (`ACTIVATION_UNSUPPORTED` otherwise). Passkey-only pilots are unaffected. Entra pilots need an Entra activation path (class A) | Operator decision: passkey-only first pilots, or build the Entra activation path |
 | 4 | Row-level security, cross-tenant isolation, anti-enumeration | **DONE** | Production certifications; PostgreSQL suites on every PR; the restore drills re-check isolation (each organization sees exactly its own rows) | — | — |
 | 5 | Backup and restore drill | **DONE** | Drill B (2026-10-13, Production); EU-2 (2026-10-18, Frankfurt, identical); the CI backup and restore round trip runs on every PR | The quarterly drill (next by 2027-01-13), and again after the EU switch | — |
 | 6 | Monitoring and alerting | **NOT DONE** | Design (zero cost) merged; slices 1 (#102) and 2 (#108) written, CI green | Review and merge; slices 3 (sign-in success SLI-01) and 4 (backup heartbeat); free accounts; one alert test per signal | Review (G2); accounts created by the operator |
@@ -33,7 +33,7 @@
 
 | # | Criterion | Status | What turns it green |
 |---|---|---|---|
-| G1 | Beta-critical capabilities PRODUCTION VERIFIED | **PARTIAL** | One verified sign-in per pilot Entra tenant |
+| G1 | Beta-critical capabilities PRODUCTION VERIFIED | **PARTIAL** | Passkey-only pilots: met. Entra pilots: an Entra activation path (DRAFT → TESTING → ACTIVE with a fresh proof sign-in), then one verified sign-in per pilot tenant |
 | G2 | Relevant class A changes independently reviewed | **BLOCKED** (no human reviewer yet; automated reviews complement but never replace one) | A reviewer: per-PR reviews, then one consolidated review at an exact SHA |
 | G3 | No unresolved critical finding in the Beta scope | **PARTIAL** | #89, #91, #86 merged; `main` protection |
 | G4 | Rollback and recovery verified | **PARTIAL**: rehearsed on the target platform (EU-2, G4 runs A and B) | Repeat after the Production switch (EU-4) |
@@ -59,7 +59,7 @@
 | #94 | msal-node 3 → 7 (major) | Dependencies | **REQUIRED AFTER BETA** |
 | #95 | tailwindcss 3 → 4 (major; CI fails) | Dependencies | **REQUIRED AFTER BETA** |
 | #97 | next 16 (major; CI fails) | Dependencies | **REQUIRED AFTER BETA** |
-| #76 to #80 | Generic OIDC connections, F4 S1 to S5 | A | **REQUIRED AFTER BETA**: the approved scope excludes generic OIDC for the first pilots. Kept current and green |
+| #76 to #80 | Generic OIDC connections, F4 S1 to S5 | A | **REQUIRED AFTER BETA** for passkey-only pilots. **The base of the Entra activation path** if Entra pilots are wanted: S3 (connection test) and S5 (proof and first activation) would be extended to the Entra profile |
 | #117 | Corrections from automated reviews | C | **DOCUMENTATION ONLY** |
 
 ## 4. Critical path (single)
