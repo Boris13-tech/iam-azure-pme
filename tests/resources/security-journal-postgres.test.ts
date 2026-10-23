@@ -59,26 +59,29 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Security Journal v1 â
   afterAll(async () => { await owner?.$disconnect(); await rawPrisma.$disconnect(); });
 
   it("W1: Entra sign-in evidence is written atomically with the session, attested by the provider only (S1)", async () => {
-    const { session } = await SessionStore.createSession(sessionCtx(S, accS), MARK.ip, MARK.ua, { evidence: entraSignInEvidence(ident(S, accS), "VERIFIED", "ENTRA_OIDC_VERIFIED") });
+    const { session } = await SessionStore.createSession(sessionCtx(S, accS), { evidence: entraSignInEvidence(ident(S, accS), "VERIFIED", "ENTRA_OIDC_VERIFIED") });
     const rows = await readEvidence({ subjectId: S, method: "FEDERATED_OIDC" });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ outcome: "VERIFIED", source: "EXTERNAL_PROVIDER", assuranceLevel: "LOW", userVerification: "PROVIDER_ASSERTED",
       phishingResistant: false, hardwareBound: false, identityAccountId: accS, reasonCode: "ENTRA_OIDC_VERIFIED" });
     expect(JSON.stringify(rows[0])).not.toContain(MARK.ip);
     expect(await withTenantDb(A, tx => tx.session.count({ where: { id: session.id } }))).toBe(1);
+    // E15 / R1: the stored session carries no network identifier.
+    expect(await owner.session.findUniqueOrThrow({ where: { id: session.id }, select: { ipHash: true, userAgentHash: true } }))
+      .toEqual({ ipHash: null, userAgentHash: null });
   });
 
   it("W1 fail closed: if the evidence cannot be written, no session exists", async () => {
     const before = await withTenantDb(A, tx => tx.session.count({ where: { subjectId: S } }));
     const broken = { ...entraSignInEvidence(ident(S, accS), "VERIFIED", "ENTRA_OIDC_VERIFIED"), assuranceProfileVersion: 0 }; // violates a DB check
-    await expect(SessionStore.createSession(sessionCtx(S, accS), undefined, undefined, { evidence: broken })).rejects.toBeDefined();
+    await expect(SessionStore.createSession(sessionCtx(S, accS), { evidence: broken })).rejects.toBeDefined();
     const mismatch = entraSignInEvidence(ident(O, accO), "VERIFIED", "ENTRA_OIDC_VERIFIED");
-    await expect(SessionStore.createSession(sessionCtx(S, accS), undefined, undefined, { evidence: mismatch })).rejects.toThrow("SIGN_IN_EVIDENCE_MISMATCH");
+    await expect(SessionStore.createSession(sessionCtx(S, accS), { evidence: mismatch })).rejects.toThrow("SIGN_IN_EVIDENCE_MISMATCH");
     expect(await withTenantDb(A, tx => tx.session.count({ where: { subjectId: S } }))).toBe(before);
   });
 
   it("W2/W3: refusal of a known identity creates no session and one REJECTED evidence", async () => {
-    await expect(SessionStore.createSession(sessionCtx(X, accX), undefined, undefined, { evidence: entraSignInEvidence(ident(X, accX), "VERIFIED", "ENTRA_OIDC_VERIFIED") }))
+    await expect(SessionStore.createSession(sessionCtx(X, accX), { evidence: entraSignInEvidence(ident(X, accX), "VERIFIED", "ENTRA_OIDC_VERIFIED") }))
       .rejects.toBeInstanceOf(SessionCreationDeniedError);
     expect(await readEvidence({ subjectId: X })).toHaveLength(0);
     await recordRejectedSignIn(entraSignInEvidence(ident(X, accX), "REJECTED", "SUBJECT_NOT_ACTIVE"));
@@ -140,7 +143,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Security Journal v1 â
   });
 
   it("R1: tenant isolation", async () => {
-    await SessionStore.createSession(sessionCtx(SB, accSB, B), undefined, undefined, { evidence: entraSignInEvidence(ident(SB, accSB, B), "VERIFIED", "ENTRA_OIDC_VERIFIED") });
+    await SessionStore.createSession(sessionCtx(SB, accSB, B), { evidence: entraSignInEvidence(ident(SB, accSB, B), "VERIFIED", "ENTRA_OIDC_VERIFIED") });
     const a = await listSecurityJournal({ ...A, subjectId: S }, { limit: 100, includeReads: true });
     expect(a.entries.some(e => e.actorName === "Tenant B person")).toBe(false);
     const b = await listSecurityJournal({ ...B, subjectId: SB }, { limit: 100 });
