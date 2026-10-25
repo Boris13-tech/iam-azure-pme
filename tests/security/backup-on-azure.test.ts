@@ -58,7 +58,12 @@ describe("Backup on Azure: image and its build", () => {
 
   it("the build runs on main or by hand, with the narrowest permissions, pinned actions, and no Production secret", () => {
     expect(workflow).toMatch(/^on:\n  push:\n    branches: \[main\]\n    paths:\n/m);
-    expect(workflow).not.toMatch(/pull_request|schedule:/);
+    expect(workflow).not.toMatch(/schedule:|pull_request_target/);
+    // Pull requests build only: read-only token, no login, no push.
+    const check = workflow.slice(workflow.indexOf("\n  build-check:\n"), workflow.indexOf("\n  image:\n"));
+    expect(check).toMatch(/if: github.event_name == 'pull_request'\n    runs-on: ubuntu-24.04\n    permissions:\n      contents: read\n    steps:/);
+    expect(check).not.toMatch(/docker (login|push)|GH_TOKEN|packages:/);
+    expect(workflow.slice(workflow.indexOf("\n  image:\n"))).toMatch(/^\n  image:\n    if: github.event_name != 'pull_request'\n/);
     expect(workflow).toMatch(/^permissions:\n  contents: read\n/m);
     expect(workflow).toMatch(/permissions:\n      contents: read\n      packages: write\n      id-token: write\n      attestations: write\n/);
     for (const uses of workflow.match(/uses: \S+/g)!) expect(uses).toMatch(/@[0-9a-f]{40}$/);

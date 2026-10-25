@@ -11,6 +11,13 @@ on:
       - 'infra/backup/Dockerfile'
       - '.dockerignore'
       - '.github/workflows/backup-image.yml'
+  # Pull requests only build the image, to prove it builds: no login, no push, read-only token.
+  pull_request:
+    paths:
+      - 'scripts/backup/**'
+      - 'infra/backup/Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/backup-image.yml'
   workflow_dispatch:
 
 permissions:
@@ -21,7 +28,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  build-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Build only
+        run: |
+          docker build -f infra/backup/Dockerfile -t luxia-backup:check .
+          docker run --rm --entrypoint sh luxia-backup:check -c 'id -un; "$PG_BIN/pg_dump" --version; age --version; ls /app/scripts/backup'
+
   image:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
