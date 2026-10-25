@@ -27,15 +27,22 @@ export function OnboardingChecklist() {
   }, []);
   const applicable = items ? ITEMS.filter(item => items[item.key] !== null && items[item.key] !== undefined) : [];
   if (!items || applicable.every(item => items[item.key])) return null;
+  const done = applicable.filter(item => items[item.key]).length;
   return <section className="luxia-panel posture-section" aria-label="Mise en route">
     <header><h2><ListChecks size={18} aria-hidden /> Mise en route</h2></header>
-    <ul className="space-y-2">
-      {applicable.map(item => <li key={item.key} className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-2">
-          {items[item.key] ? <CheckCircle2 size={16} className="text-green-700" aria-label="Fait" /> : <Circle size={16} className="text-slate-400" aria-label="À faire" />}
-          <span className={items[item.key] ? "text-slate-500" : "text-slate-900"}>{item.label}</span>
+    <div className="luxia-progress">
+      <span role="progressbar" aria-valuemin={0} aria-valuemax={applicable.length} aria-valuenow={done} aria-label="Étapes terminées">
+        <span style={{ width: `${Math.round((done / applicable.length) * 100)}%` }} />
+      </span>
+      <span>{done} sur {applicable.length} terminée{done > 1 ? "s" : ""}</span>
+    </div>
+    <ul className="luxia-checklist">
+      {applicable.map(item => <li key={item.key} className={items[item.key] ? "is-done" : undefined}>
+        <span>
+          {items[item.key] ? <CheckCircle2 size={18} aria-label="Fait" /> : <Circle size={18} aria-label="À faire" />}
+          {item.label}
         </span>
-        {!items[item.key] && <Link href={item.href} className="font-medium text-[#1f5fbf] hover:underline">Ouvrir</Link>}
+        {!items[item.key] && <Link href={item.href}>Ouvrir</Link>}
       </li>)}
     </ul>
   </section>;

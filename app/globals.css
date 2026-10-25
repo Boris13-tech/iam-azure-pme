@@ -51,45 +51,91 @@ h1, h2, h3 { font-family: var(--font-display), var(--font-text), ui-sans-serif, 
 * { box-sizing: border-box; }
 button, input, select, textarea { font: inherit; }
 
-/* Application shell */
+/* Application shell (components/app-shell/app-shell.tsx): the brand's night sidebar, a light work surface */
 .luxia-shell { min-height: 100vh; display: flex; background: var(--bg); color: var(--text); font-size: var(--fs-base); }
-.luxia-sidebar { position: fixed; inset: 0 auto 0 0; width: 232px; display: flex; flex-direction: column; z-index: 30;
-  background: var(--surface); border-right: 1px solid var(--border); }
-.luxia-logo { height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 20px; text-decoration: none;
-  color: var(--text); border-bottom: 1px solid var(--border); }
+.luxia-sidebar { position: fixed; inset: 0 auto 0 0; width: 256px; display: flex; flex-direction: column; z-index: 40;
+  background: linear-gradient(180deg, #0a1122 0%, var(--brand-night) 100%); color: var(--brand-ink-2); border-right: 1px solid var(--brand-line); }
+.luxia-logo { height: 68px; flex: 0 0 68px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 20px;
+  border-bottom: 1px solid var(--brand-line); }
+.luxia-logo a { text-decoration: none; }
+.luxia-nav-close { display: none; border: 0; background: none; color: var(--brand-ink-2); padding: 6px; border-radius: 8px; cursor: pointer; }
+.luxia-nav-close:hover { background: rgba(255, 255, 255, .06); color: var(--brand-ink); }
 .luxia-nav { flex: 1; padding: 12px; overflow-y: auto; }
-.luxia-nav-link { height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; margin: 2px 0; border-radius: 6px;
-  color: var(--text-secondary); font-size: var(--fs-md); font-weight: 500; text-decoration: none; }
-.luxia-nav-link:hover { background: #f3f4f6; color: var(--text); }
-.luxia-sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
-.luxia-sidebar-footer button { border: 0; background: none; padding: 6px 0; color: var(--text-secondary); font-size: var(--fs-md); cursor: pointer; }
-.luxia-sidebar-footer button:hover { color: var(--text); text-decoration: underline; }
-.luxia-workspace { width: calc(100% - 232px); margin-left: 232px; min-width: 0; }
-.luxia-topbar { height: 60px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px;
-  background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
-.luxia-contexts, .luxia-top-actions { display: flex; align-items: center; gap: 12px; }
-.luxia-contexts > div { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border);
-  border-radius: 6px; font-size: var(--fs-md); color: var(--text); }
+.luxia-nav-group + .luxia-nav-group { margin-top: 14px; }
+.luxia-nav-group > p { margin: 8px 12px 6px; font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: #6b7a96; }
+.luxia-nav-link { position: relative; height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; margin: 2px 0; border-radius: 8px;
+  color: var(--brand-ink-2); font-size: var(--fs-md); font-weight: 500; text-decoration: none; transition: background-color .15s, color .15s; }
+.luxia-nav-link:hover { background: rgba(255, 255, 255, .05); color: var(--brand-ink); }
+.luxia-nav-link:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--brand-blue-light); }
+.luxia-nav-link.is-active { background: rgba(47, 111, 224, .2); color: #fff; }
+.luxia-nav-link.is-active::before { content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--brand-blue-light); }
+.luxia-nav-link.is-active svg { color: var(--brand-link); }
+.luxia-sidebar-footer { padding: 14px 16px 16px; border-top: 1px solid var(--brand-line); }
+.luxia-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.luxia-person > span:last-child { min-width: 0; }
+.luxia-person b, .luxia-person small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.luxia-person b { font-size: var(--fs-md); font-weight: 600; color: var(--brand-ink); }
+.luxia-person small { font-size: var(--fs-xs); color: var(--brand-ink-3); }
+.luxia-avatar { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand-blue), #8db3e8); color: #fff; font-size: var(--fs-sm); font-weight: 700; }
+.luxia-signout { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; padding: 6px 8px; border: 0; border-radius: 8px; background: none;
+  color: var(--brand-ink-2); font-size: var(--fs-md); cursor: pointer; }
+.luxia-signout:hover { background: rgba(255, 255, 255, .06); color: var(--brand-ink); }
+.luxia-scrim { display: none; }
+.luxia-workspace { width: calc(100% - 256px); margin-left: 256px; min-width: 0; }
+.luxia-topbar { height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 28px; background: var(--surface);
+  border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
+.luxia-menu-button { display: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 7px; border-radius: 9px; cursor: pointer; }
+.luxia-contexts { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.luxia-contexts > div { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); font-size: var(--fs-md); color: var(--text); white-space: nowrap; min-width: 0; }
 .luxia-contexts > div span { color: var(--text-muted); }
-.luxia-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
-.luxia-profile { display: flex; align-items: center; gap: 10px; }
-.luxia-profile > span { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
-  background: var(--accent-soft); color: var(--accent); font-size: var(--fs-sm); font-weight: 600; }
-.luxia-profile b, .luxia-profile small { display: block; white-space: nowrap; }
-.luxia-profile b { font-size: var(--fs-md); font-weight: 600; }
-.luxia-profile small { font-size: var(--fs-xs); color: var(--text-muted); }
-.luxia-main { padding: 24px 28px 40px; }
+.luxia-contexts > div b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.luxia-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+.luxia-main { padding: 28px 32px 48px; }
+@media (max-width: 1023px) {
+  .luxia-sidebar { transform: translateX(-100%); transition: transform .2s ease; box-shadow: none; }
+  .luxia-shell[data-nav-open="true"] .luxia-sidebar { transform: none; box-shadow: 0 0 40px rgba(0, 0, 0, .35); }
+  .luxia-shell[data-nav-open="true"] .luxia-scrim { display: block; position: fixed; inset: 0; z-index: 30; background: rgba(7, 9, 13, .45); }
+  .luxia-nav-close, .luxia-menu-button { display: inline-flex; }
+  .luxia-workspace { width: 100%; margin-left: 0; }
+  .luxia-topbar { padding: 0 16px; }
+  .luxia-main { padding: 20px 16px 40px; }
+}
+@media (max-width: 640px) {
+  .luxia-contexts > div span { display: none; }
+  .luxia-contexts > div:nth-child(2) { display: none; }
+}
 
 /* Page structure */
 .luxia-dashboard { max-width: 1400px; margin: 0 auto; }
-.luxia-page-header { margin-bottom: 20px; }
-.luxia-page-header h1 { margin: 0; font-size: var(--fs-xl); font-weight: 600; line-height: 1.25; color: var(--text); }
+.luxia-page-header { margin-bottom: 24px; }
+.luxia-page-header h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.02em; color: var(--text); }
 .luxia-page-header p { margin: 6px 0 0; font-size: var(--fs-md); color: var(--text-muted); }
-.luxia-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.luxia-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
 .luxia-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 14px 16px; border-bottom: 1px solid var(--border); }
 .luxia-panel header h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
 .luxia-panel header a { font-size: var(--fs-md); font-weight: 500; color: var(--accent); }
+
+/* Panels and widgets: an icon chip on section titles, a hover on widgets */
+.luxia-panel header h2 svg { box-sizing: content-box; padding: 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.posture-widget:hover { border-color: var(--border-strong); box-shadow: 0 4px 14px -8px rgba(16, 24, 40, .18); }
+.posture-widget.is-attention:hover { border-color: #fdb022; }
+
+/* Getting started (app/dashboard/onboarding-checklist.tsx) */
+.luxia-progress { display: flex; align-items: center; gap: 12px; padding: 14px 16px 4px; font-size: var(--fs-sm); color: var(--text-secondary); }
+.luxia-progress > span:first-child { flex: 1; height: 6px; border-radius: 999px; background: #eef1f5; overflow: hidden; }
+.luxia-progress > span:first-child > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand-blue), var(--brand-blue-light)); }
+.luxia-checklist { list-style: none; margin: 0; padding: 8px 16px 14px; }
+.luxia-checklist li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-md); }
+.luxia-checklist li:last-child { border-bottom: 0; }
+.luxia-checklist li > span { display: flex; align-items: center; gap: 10px; color: var(--text); }
+.luxia-checklist li.is-done > span { color: var(--text-muted); text-decoration: line-through; text-decoration-color: #c4c9d2; }
+.luxia-checklist li.is-done svg { color: var(--success); }
+.luxia-checklist li svg { flex: 0 0 auto; color: #9ca3af; }
+.luxia-checklist a { flex: 0 0 auto; font-size: var(--fs-md); font-weight: 500; color: var(--accent); text-decoration: none; }
+.luxia-checklist a:hover { text-decoration: underline; }
 
 /* Identity security posture (dashboard) */
 .posture-alert { margin: 12px 0; padding: 12px 16px; border: 1px solid #fecdca; border-radius: var(--radius);
@@ -102,13 +148,14 @@ button, input, select, textarea { font: inherit; }
 .posture-attention li span { flex: 1; color: var(--text); }
 .posture-attention li a { font-size: var(--fs-md); font-weight: 500; color: var(--accent); }
 .posture-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; padding: 16px; }
-.posture-widget { min-width: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.posture-widget { min-width: 0; padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); transition: border-color .15s, box-shadow .15s; }
 .posture-widget.is-attention { border-color: #fedf89; border-left: 3px solid var(--warning); background: var(--warning-soft); }
 .posture-widget.is-wide { grid-column: 1 / -1; }
 .posture-widget header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .posture-widget h3 { margin: 0 0 8px; font-size: var(--fs-md); font-weight: 500; color: var(--text-secondary); line-height: 1.4; }
 .posture-widget header a { font-size: var(--fs-sm); font-weight: 500; color: var(--accent); white-space: nowrap; }
-.posture-number, .posture-breakdown > strong { display: block; font-size: var(--fs-figure); font-weight: 600; color: var(--text); line-height: 1.2; }
+.posture-number, .posture-breakdown > strong { display: block; font-family: var(--font-display), var(--font-text), sans-serif; font-size: 32px; font-weight: 600;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--text); line-height: 1.15; }
 .posture-breakdown ul { list-style: none; margin: 8px 0 0; padding: 0; }
 .posture-breakdown li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: var(--fs-md); color: var(--text-secondary); }
 .posture-breakdown li b { color: var(--text); font-weight: 600; }
