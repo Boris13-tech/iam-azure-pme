@@ -23,6 +23,16 @@ describe("Signed-in frame (app shell)", () => {
     expect(shell).toMatch(/aria-controls="luxia-navigation"\s+aria-expanded=\{open\}/);
   });
 
+  it("narrow screens: the closed menu is hidden from keyboard and screen readers; focus moves in and back; Escape closes", () => {
+    const css = read("app/globals.css");
+    expect(css).toMatch(/\.luxia-sidebar \{ transform: translateX\(-100%\); visibility: hidden;/);
+    expect(css).toMatch(/data-nav-open="true"\] \.luxia-sidebar \{ transform: none; visibility: visible;/);
+    expect(shell).toContain("if (open) closeButton.current?.focus();");
+    expect(shell).toContain("else if (wasOpen.current) menuButton.current?.focus();");
+    expect(shell).toContain('if (event.key === "Escape") setOpen(false);');
+    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+  });
+
   it("the Identities page never shows an empty organization while loading or after a failure", () => {
     const page = read("app/dashboard/users/page.tsx");
     expect(page).toContain('status === "ready" && subjects.length === 0');

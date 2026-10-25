@@ -93,9 +93,12 @@ button, input, select, textarea { font: inherit; }
 .luxia-contexts > div b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .luxia-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
 .luxia-main { padding: 28px 32px 48px; }
+@media (prefers-reduced-motion: reduce) { .luxia-sidebar, .luxia-nav-link, .lx-btn, .lx-input { transition: none !important; } }
 @media (max-width: 1023px) {
-  .luxia-sidebar { transform: translateX(-100%); transition: transform .2s ease; box-shadow: none; }
-  .luxia-shell[data-nav-open="true"] .luxia-sidebar { transform: none; box-shadow: 0 0 40px rgba(0, 0, 0, .35); }
+  /* Closed: off screen AND hidden, so nothing in it is reachable by keyboard or announced (visibility switches
+     after the slide-out, and at once on opening). */
+  .luxia-sidebar { transform: translateX(-100%); visibility: hidden; box-shadow: none; transition: transform .2s ease, visibility 0s linear .2s; }
+  .luxia-shell[data-nav-open="true"] .luxia-sidebar { transform: none; visibility: visible; box-shadow: 0 0 40px rgba(0, 0, 0, .35); transition: transform .2s ease; }
   .luxia-shell[data-nav-open="true"] .luxia-scrim { display: block; position: fixed; inset: 0; z-index: 30; background: rgba(7, 9, 13, .45); }
   .luxia-nav-close, .luxia-menu-button { display: inline-flex; }
   .luxia-workspace { width: 100%; margin-left: 0; }

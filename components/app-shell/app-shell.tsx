@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Boxes, Building2, ClipboardCheck, Fingerprint, Gauge, LogOut, Menu, Scale, ShieldCheck, Users, X } from "lucide-react";
@@ -23,7 +23,21 @@ export function AppShell({ items, organization, environment, person, children }:
 }) {
   const pathname = usePathname() ?? "";
   const [open, setOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
   useEffect(() => { setOpen(false); }, [pathname]);
+  // Keyboard and screen-reader users: focus moves into the menu when it opens and back to its trigger when it
+  // closes; Escape closes it. Closed on a narrow screen, the menu is hidden (globals.css), so it is out of the tab order.
+  useEffect(() => {
+    if (open) closeButton.current?.focus();
+    else if (wasOpen.current) menuButton.current?.focus();
+    wasOpen.current = open;
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
   const groups = items.reduce<Array<{ name: string; items: NavItem[] }>>((all, item) => {
     const group = all.find(g => g.name === item.group);
     if (group) group.items.push(item); else all.push({ name: item.group, items: [item] });
@@ -35,7 +49,7 @@ export function AppShell({ items, organization, environment, person, children }:
       <aside className="luxia-sidebar" id="luxia-navigation">
         <div className="luxia-logo">
           <Link href="/dashboard" aria-label="LUXIA Identity, vue d’ensemble"><LuxiaLogo onDark product="LUXIA Identity" /></Link>
-          <button type="button" className="luxia-nav-close" onClick={() => setOpen(false)} aria-label="Fermer le menu"><X size={20} aria-hidden /></button>
+          <button type="button" ref={closeButton} className="luxia-nav-close" onClick={() => setOpen(false)} aria-label="Fermer le menu"><X size={20} aria-hidden /></button>
         </div>
         <nav className="luxia-nav" aria-label="Navigation principale">
           {groups.map(group => (
@@ -66,7 +80,7 @@ export function AppShell({ items, organization, environment, person, children }:
       <div className="luxia-scrim" onClick={() => setOpen(false)} aria-hidden />
       <section className="luxia-workspace">
         <header className="luxia-topbar">
-          <button type="button" className="luxia-menu-button" onClick={() => setOpen(true)} aria-label="Ouvrir le menu"
+          <button type="button" ref={menuButton} className="luxia-menu-button" onClick={() => setOpen(true)} aria-label="Ouvrir le menu"
             aria-controls="luxia-navigation" aria-expanded={open}><Menu size={20} aria-hidden /></button>
           <div className="luxia-contexts">
             <div><Building2 size={15} aria-hidden /><span>Organisation</span><b>{organization}</b></div>
