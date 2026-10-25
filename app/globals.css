@@ -2,9 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
-/* LUXIA visual system: light, neutral, one accent blue. Colour is reserved for actions and statuses.
-   Type scale: 15px body, 14px labels, 13px secondary, 12px minimum. No gradients, glows or blur. */
+/* LUXIA visual system, aligned with luxia-it.com. Work surfaces stay light and neutral, one accent blue, colour
+   reserved for actions and statuses. The brand (logo, night panel, network motif) frames the pages before sign-in.
+   Type: Roboto for text, Inter Tight for titles (self-hosted by next/font). Scale: 15px body, 14px labels, 13px
+   secondary, 12px minimum. Motion: short state transitions only. */
 :root {
+  --brand-night: #07090d;
+  --brand-ink: #eef2f8;
+  --brand-ink-2: #b9c3d4;
+  --brand-ink-3: #8d99ae;
+  --brand-line: #1d2638;
+  --brand-blue: #2f6fe0;
+  --brand-blue-hover: #2560c8;
+  --brand-blue-light: #5b9bff;
+  --brand-link: #8cb8ff;
+  --focus-ring: 0 0 0 3px rgba(47, 111, 224, .28);
+  --shadow-panel: 0 1px 2px rgba(16, 24, 40, .04), 0 12px 32px -12px rgba(16, 24, 40, .14);
   --bg: #f7f8fa;
   --surface: #ffffff;
   --border: #e5e7eb;
@@ -32,7 +45,9 @@
 }
 
 /* Root stays at 16px so Tailwind rem sizes keep their 12px minimum (text-xs). */
-body { color: var(--text); background: var(--bg); font-size: var(--fs-base); font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { color: var(--text); background: var(--bg); font-size: var(--fs-base);
+  font-family: var(--font-text), Roboto, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+h1, h2, h3 { font-family: var(--font-display), var(--font-text), ui-sans-serif, system-ui, sans-serif; letter-spacing: -.01em; }
 * { box-sizing: border-box; }
 button, input, select, textarea { font: inherit; }
 
@@ -42,12 +57,6 @@ button, input, select, textarea { font: inherit; }
   background: var(--surface); border-right: 1px solid var(--border); }
 .luxia-logo { height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 20px; text-decoration: none;
   color: var(--text); border-bottom: 1px solid var(--border); }
-.luxia-logo strong { display: block; font-size: var(--fs-lg); font-weight: 700; letter-spacing: .06em; line-height: 1.1; }
-.luxia-logo small { display: block; font-size: var(--fs-sm); color: var(--text-muted); }
-.luxia-brand-mark { position: relative; width: 26px; height: 28px; flex: 0 0 26px; }
-.luxia-brand-mark span { position: absolute; display: block; border-radius: 2px; }
-.luxia-mark-left { width: 8px; height: 26px; left: 4px; top: 1px; background: var(--accent); transform: skew(-24deg); }
-.luxia-mark-right { width: 8px; height: 21px; right: 3px; top: 6px; background: #8db3e8; transform: skew(24deg); }
 .luxia-nav { flex: 1; padding: 12px; overflow-y: auto; }
 .luxia-nav-link { height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; margin: 2px 0; border-radius: 6px;
   color: var(--text-secondary); font-size: var(--fs-md); font-weight: 500; text-decoration: none; }
@@ -122,3 +131,83 @@ button, input, select, textarea { font: inherit; }
 .posture-activity b { font-size: var(--fs-base); font-weight: 500; }
 .posture-activity small { margin-top: 2px; font-size: var(--fs-sm); color: var(--text-muted); }
 .posture-activity time { font-size: var(--fs-sm); color: var(--text-muted); white-space: nowrap; }
+
+/* Brand logo (components/brand/luxia-logo.tsx), as on luxia-it.com */
+.lx-logo { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; }
+.lx-logo__text { display: flex; flex-direction: column; line-height: 1.05; }
+.lx-logo__name { font-family: var(--font-text), Roboto, sans-serif; font-size: 19px; font-weight: 700; letter-spacing: .05em; }
+.lx-logo__tagline { margin-top: 3px; font-size: 10px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+.lx-logo--on-dark { color: var(--brand-ink); }
+.lx-logo--on-dark .lx-logo__tagline { color: var(--brand-link); }
+
+/* Pages before sign-in (components/auth/auth-shell.tsx) */
+.lx-auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr); background: var(--bg); }
+.lx-auth__brand { display: none; position: relative; overflow: hidden; background: var(--brand-night); color: var(--brand-ink-2); }
+.lx-auth__brand::before { content: ""; position: absolute; inset: 0;
+  background: radial-gradient(60% 50% at 20% 0%, rgba(47, 111, 224, .22), transparent 70%), radial-gradient(50% 40% at 100% 100%, rgba(91, 155, 255, .12), transparent 70%); }
+.lx-auth__network { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .55; }
+/* Keeps the text readable: the network fades out behind the pitch and the proofs. */
+.lx-auth__brand::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, transparent 30%, rgba(7, 9, 13, .82) 62%, var(--brand-night) 100%); }
+.lx-auth__network line { stroke: var(--brand-line); stroke-width: 1; }
+.lx-auth__network circle { fill: var(--brand-blue-light); opacity: .7; }
+.lx-auth__brand-inner { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 40px; min-height: 100%; padding: 40px 48px; }
+.lx-auth__pitch { margin-top: auto; }
+.lx-auth__eyebrow { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 16px; padding: 6px 12px; border: 1px solid var(--brand-line);
+  border-radius: 999px; background: rgba(17, 24, 39, .6); font-size: var(--fs-sm); color: var(--brand-ink-2); }
+.lx-dot { width: 7px; height: 7px; border-radius: 50%; background: #e8b04f; }
+.lx-auth__headline { margin: 0; max-width: 18ch; font-family: var(--font-display), var(--font-text), sans-serif; font-size: clamp(30px, 2.6vw, 42px);
+  font-weight: 600; line-height: 1.12; letter-spacing: -.02em; color: var(--brand-ink); }
+.lx-auth__proofs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 24px; }
+.lx-auth__proofs li { display: flex; gap: 12px; align-items: flex-start; }
+.lx-auth__proof-icon { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 9px;
+  border: 1px solid var(--brand-line); background: rgba(19, 35, 74, .55); color: var(--brand-link); }
+.lx-auth__proofs b { display: block; font-size: var(--fs-md); font-weight: 600; color: var(--brand-ink); }
+.lx-auth__proofs small { display: block; margin-top: 2px; font-size: var(--fs-sm); line-height: 1.45; color: var(--brand-ink-3); }
+.lx-auth__legal { margin: 0; font-size: var(--fs-xs); color: var(--brand-ink-3); }
+.lx-auth__main { display: flex; align-items: center; justify-content: center; padding: 32px 16px; }
+.lx-auth__panel { width: 100%; max-width: 420px; padding: 32px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface); box-shadow: var(--shadow-panel); }
+.lx-auth__mobile-logo { margin-bottom: 28px; }
+.lx-auth__header { margin-bottom: 24px; }
+.lx-auth__header h1 { margin: 0; font-size: 26px; font-weight: 600; line-height: 1.2; color: var(--text); }
+.lx-auth__header p { margin: 8px 0 0; font-size: var(--fs-base); line-height: 1.5; color: var(--text-secondary); }
+.lx-auth__footer { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; font-size: var(--fs-md); color: var(--text-secondary); }
+.lx-auth__footer p { margin: 0; }
+.lx-auth__footer p + p { margin-top: 8px; }
+@media (min-width: 1024px) {
+  .lx-auth { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); }
+  .lx-auth__brand { display: block; }
+  .lx-auth__mobile-logo { display: none; }
+  .lx-auth__panel { border: 0; box-shadow: none; background: transparent; padding: 0; }
+}
+@media (max-width: 480px) { .lx-auth__panel { padding: 24px 20px; } }
+
+/* Form primitives: pages before sign-in first, then the rest of the application */
+.lx-stack { display: flex; flex-direction: column; gap: 16px; }
+.lx-field { display: flex; flex-direction: column; gap: 6px; }
+.lx-label { font-size: var(--fs-md); font-weight: 500; color: var(--text); }
+.lx-hint { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.lx-input { width: 100%; height: 44px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface);
+  font-size: var(--fs-base); color: var(--text); transition: border-color .15s, box-shadow .15s; }
+.lx-input::placeholder { color: #9ca3af; }
+.lx-input:hover { border-color: #9ca3af; }
+.lx-input:focus { outline: none; border-color: var(--brand-blue); box-shadow: var(--focus-ring); }
+.lx-input--mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .04em; }
+.lx-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 46px; padding: 0 18px;
+  border-radius: 10px; font-size: var(--fs-base); font-weight: 600; text-decoration: none; cursor: pointer; transition: background-color .15s, border-color .15s, box-shadow .15s; }
+.lx-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.lx-btn:disabled { opacity: .5; cursor: not-allowed; }
+.lx-btn--primary { border: 1px solid var(--brand-blue); background: var(--brand-blue); color: #fff; }
+.lx-btn--primary:hover:not(:disabled) { background: var(--brand-blue-hover); border-color: var(--brand-blue-hover); }
+.lx-btn--secondary { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
+.lx-btn--secondary:hover:not(:disabled) { background: #f3f4f6; }
+.lx-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.lx-divider::before, .lx-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.lx-link { font-weight: 500; color: var(--accent); text-decoration: none; }
+.lx-link:hover { text-decoration: underline; }
+.lx-status { margin: 0; font-size: var(--fs-md); text-align: center; color: var(--text-secondary); }
+.lx-alert { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px; font-size: var(--fs-md); line-height: 1.45; overflow-wrap: anywhere; }
+.lx-alert--danger { border: 1px solid #fecdca; background: var(--danger-soft); color: var(--danger); }
+.lx-alert--success { border: 1px solid #abefc6; background: var(--success-soft); color: var(--success); }
+.lx-error { margin: 0; font-size: var(--fs-sm); color: var(--danger); }
