@@ -14,7 +14,7 @@ describe("Production canary", () => {
 
   it("checks that the domain serves LUXIA: the login page, the redirect to it, and a refused API call", () => {
     expect(workflow).toContain("BASE: https://iam-azure-pme.vercel.app");
-    expect(workflow).toContain(`grep -q '<title>LUXIA</title>' login.html`);
+    expect(workflow).toContain(`grep -q '<title>LUXIA' login.html`); // "LUXIA" or "LUXIA Identity" (#134)
     expect(workflow).toContain(`[ "$root" = "307 $BASE/login" ]`);
     expect(workflow).toContain(`[ "$api" = "401" ] && grep -q '"error":"Unauthorized"' api.json`);
     expect(workflow).toMatch(/exit 1\n$/);

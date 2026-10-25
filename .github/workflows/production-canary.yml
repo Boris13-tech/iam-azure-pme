@@ -28,7 +28,7 @@ jobs:
             login_code=$(curl -s -o login.html -w '%{http_code}' --max-time 20 "$BASE/login") || login_code=000
             root=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "$BASE/") || root="000 -"
             api=$(curl -s -o api.json -w '%{http_code}' --max-time 20 "$BASE/api/canonical/sessions") || api=000
-            [ "$login_code" = "200" ] && grep -q '<title>LUXIA</title>' login.html \
+            [ "$login_code" = "200" ] && grep -q '<title>LUXIA' login.html \
               && [ "$root" = "307 $BASE/login" ] \
               && [ "$api" = "401" ] && grep -q '"error":"Unauthorized"' api.json
           }
