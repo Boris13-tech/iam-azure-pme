@@ -48,6 +48,7 @@ describe("R7 organization erasure: migration architecture", () => {
     const allowed = fn(migration, "luxia_erasure_allowed");
     expect(allowed).toContain("current_setting('luxia.erasure_organization', true) = p_organization_id");
     expect(allowed).toContain("c.relowner WHERE c.oid = p_relation AND r.rolname = current_user");
+    expect(allowed).toContain("AND current_user = session_user");
     expect(allowed).toContain(`o."status" = 'CLOSED'`);
     expect(allowed).not.toMatch(/SECURITY DEFINER/);
     expect(GATE).toMatch(/^ {2}IF TG_OP = 'DELETE' AND /m);
@@ -71,6 +72,21 @@ describe("R7 organization erasure: migration architecture", () => {
       expect(migration).toContain(`REVOKE ALL ON FUNCTION ${name} FROM app_user;`);
     }
     expect(migration).toContain('REVOKE ALL ON "OrganizationErasure" FROM app_user;');
+  });
+
+  it("no SECURITY DEFINER function deletes from a table whose guard has the erasure gate (defence in depth)", () => {
+    const guarded = ["AccessReviewCampaign", "AccessReviewItem", "CanonicalAdminAuditEvent", "SignupCode", "Invitation", "OrganizationDomain",
+      "LocalRecoveryCode", "AuthenticationEvidence", "ProviderConnection", "ProviderSecretReference"];
+    const latest = new Map<string, string>();
+    for (const dir of readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()) {
+      const sql = read(`prisma/migrations/${dir}/migration.sql`);
+      for (const m of sql.matchAll(/CREATE (OR REPLACE )?FUNCTION (public\.)?(\w+)\(/g)) latest.set(m[3], fn(sql, m[3]));
+    }
+    for (const [name, body] of latest) {
+      if (!/SECURITY DEFINER/.test(body.slice(0, body.indexOf("$$")))) continue;
+      expect(body, name).not.toMatch(/EXECUTE\s+format\(\s*'DELETE/i);
+      for (const table of guarded) expect(body, `${name} deletes from ${table}`).not.toContain(`DELETE FROM "${table}"`);
+    }
   });
 
   it("the rollback restores every guard exactly, refuses once an erasure is recorded, and removes the rest", () => {

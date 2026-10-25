@@ -135,13 +135,30 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
     expect(left.rows).toBe(0);
     expect(await owner.organizationErasure.findUniqueOrThrow({ where: { organizationId: a.organizationId } })).toMatchObject({ counts: plan.counts });
     expect(await fingerprint(b.organizationId)).toEqual(before);
-    // The marker does not outlive the erasure.
-    expect(await codeOf(owner.$executeRawUnsafe(`DELETE FROM "CanonicalAdminAuditEvent" WHERE "organizationId" = $1`, b.organizationId))).toBe("AUDIT_APPEND_ONLY");
+    // The marker does not outlive the erasure: another organization's append-only rows (it has two) stay protected.
+    expect(await owner.authenticationEvidence.count({ where: { organizationId: b.organizationId } })).toBe(2);
+    expect(await codeOf(owner.$executeRawUnsafe(`DELETE FROM "AuthenticationEvidence" WHERE "organizationId" = $1`, b.organizationId))).toBe("AUDIT_APPEND_ONLY");
   }, 120_000);
 
   it("a plan made stale by any new row is refused, and nothing is deleted", async () => {
     const c = await organization();
     await close(c);
+    // Attack: the runtime role sets the marker for a CLOSED organization and reaches a DELETE through a SECURITY
+    // DEFINER function owned by the table owner. current_user is then the owner, session_user is not: refused.
+    const probe = `r7_probe_${suffix}`;
+    await owner.$executeRawUnsafe(`CREATE FUNCTION ${probe}(p TEXT) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
+      AS $$ DELETE FROM "AuthenticationEvidence" WHERE "organizationId" = p $$`);
+    try {
+      await owner.$executeRawUnsafe(`GRANT EXECUTE ON FUNCTION ${probe}(TEXT) TO app_user`);
+      expect(await owner.authenticationEvidence.count({ where: { organizationId: c.organizationId } })).toBe(2);
+      expect(await codeOf(rawPrisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT set_config('luxia.erasure_organization', ${c.organizationId}, true)`;
+        await tx.$executeRawUnsafe(`SELECT ${probe}($1)`, c.organizationId);
+      }))).toBe("AUDIT_APPEND_ONLY");
+      expect(await owner.authenticationEvidence.count({ where: { organizationId: c.organizationId } })).toBe(2);
+    } finally {
+      await owner.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${probe}(TEXT)`);
+    }
     const { plan } = await planErasure(owner, c.slug, target, TOOL);
     await owner.authTransaction.create({ data: { id: randomUUID(), stateHash: sha(randomUUID()), nonce: "n", codeVerifier: "v", expectedOrganizationId: c.organizationId,
       expectedTenantId: c.tenantId, expectedProviderConnectionId: c.local, expiresAt: new Date(Date.now() + 60_000) } });

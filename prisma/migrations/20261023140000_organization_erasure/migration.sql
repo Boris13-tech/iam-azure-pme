@@ -16,12 +16,15 @@ CREATE TABLE "OrganizationErasure" (
 ALTER TABLE "OrganizationErasure" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "OrganizationErasure" FORCE ROW LEVEL SECURITY;
 
--- True only inside the operator's erasure of this organization: marker, table owner, CLOSED organization.
+-- True only inside the operator's erasure of this organization: marker, table owner, CLOSED organization. The
+-- owner is checked on both current_user and session_user: a SECURITY DEFINER function changes current_user but
+-- never session_user, so a runtime role that sets the marker and calls a definer function still gets nothing.
 CREATE FUNCTION luxia_erasure_allowed(p_organization_id TEXT, p_relation OID) RETURNS boolean
 LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $$
 BEGIN
   RETURN p_organization_id IS NOT NULL
     AND current_setting('luxia.erasure_organization', true) = p_organization_id
+    AND current_user = session_user
     AND EXISTS (SELECT 1 FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE c.oid = p_relation AND r.rolname = current_user)
     AND EXISTS (SELECT 1 FROM "Organization" o WHERE o."id" = p_organization_id AND o."status" = 'CLOSED');
 END $$;
