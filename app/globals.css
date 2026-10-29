@@ -128,8 +128,9 @@ button, input, select, textarea { font: inherit; }
 
 /* Getting started (app/dashboard/onboarding-checklist.tsx) */
 .luxia-progress { display: flex; align-items: center; gap: 12px; padding: 14px 16px 4px; font-size: var(--fs-sm); color: var(--text-secondary); }
-.luxia-progress > span:first-child { flex: 1; height: 6px; border-radius: 999px; background: #eef1f5; overflow: hidden; }
-.luxia-progress > span:first-child > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand-blue), var(--brand-blue-light)); }
+.luxia-steps { flex: 1; display: flex; gap: 4px; }
+.luxia-steps > span { flex: 1; height: 6px; border-radius: 999px; background: #eef1f5; }
+.luxia-steps > span.is-done { background: linear-gradient(90deg, var(--brand-blue), var(--brand-blue-light)); }
 .luxia-checklist { list-style: none; margin: 0; padding: 8px 16px 14px; }
 .luxia-checklist li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-md); }
 .luxia-checklist li:last-child { border-bottom: 0; }

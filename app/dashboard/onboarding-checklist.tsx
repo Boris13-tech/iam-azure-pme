@@ -30,9 +30,10 @@ export function OnboardingChecklist() {
   const done = applicable.filter(item => items[item.key]).length;
   return <section className="luxia-panel posture-section" aria-label="Mise en route">
     <header><h2><ListChecks size={18} aria-hidden /> Mise en route</h2></header>
+    {/* One segment per step, done or not: facts only. */}
     <div className="luxia-progress">
-      <span role="progressbar" aria-valuemin={0} aria-valuemax={applicable.length} aria-valuenow={done} aria-label="Étapes terminées">
-        <span style={{ width: `${Math.round((done / applicable.length) * 100)}%` }} />
+      <span className="luxia-steps" role="img" aria-label={`${done} étape${done > 1 ? "s" : ""} terminée${done > 1 ? "s" : ""} sur ${applicable.length}`}>
+        {applicable.map(item => <span key={item.key} className={items[item.key] ? "is-done" : undefined} />)}
       </span>
       <span>{done} sur {applicable.length} terminée{done > 1 ? "s" : ""}</span>
     </div>
