@@ -77,15 +77,32 @@ describe("R7 organization erasure: migration architecture", () => {
   it("no SECURITY DEFINER function deletes from a table whose guard has the erasure gate (defence in depth)", () => {
     const guarded = ["AccessReviewCampaign", "AccessReviewItem", "CanonicalAdminAuditEvent", "SignupCode", "Invitation", "OrganizationDomain",
       "LocalRecoveryCode", "AuthenticationEvidence", "ProviderConnection", "ProviderSecretReference"];
+    // The one exception, by name and table. R4 (20261025120000) is the daily invitation purge, a SECURITY DEFINER
+    // runtime entry point that deletes from "Invitation". It is safe: its DELETE passes the guard only through the
+    // data-based R4 gate (an invitation finished for more than 30 days, the function's own predicate and clock), and
+    // it cannot use R7's erasure gate, which requires session_user to be the table owner (a definer call by app_user
+    // changes current_user only). Its body is checked here to delete from that one table, with that predicate.
+    const allowed: Record<string, string> = { luxia_retention_purge_invitations: "Invitation" };
     const latest = new Map<string, string>();
     for (const dir of readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()) {
       const sql = read(`prisma/migrations/${dir}/migration.sql`);
       for (const m of sql.matchAll(/CREATE (OR REPLACE )?FUNCTION (public\.)?(\w+)\(/g)) latest.set(m[3], fn(sql, m[3]));
     }
+    for (const [name, table] of Object.entries(allowed)) {
+      const body = latest.get(name);
+      expect(body, name).toBeDefined();
+      expect(body!.match(/DELETE FROM "\w+"/g), name).toEqual([`DELETE FROM "${table}"`]);
+      expect(body, name).toContain(`WHERE LEAST("acceptedAt", "revokedAt", "expiresAt") < v_now - interval '30 days'`);
+      expect(fn(read("prisma/migrations/20261025120000_retention_invitations_pseudonymization/migration.sql"), "luxia_invitation_guard"))
+        .toContain(`IF TG_OP = 'DELETE' AND LEAST(OLD."acceptedAt", OLD."revokedAt", OLD."expiresAt") < v_now - interval '30 days'`);
+    }
     for (const [name, body] of latest) {
       if (!/SECURITY DEFINER/.test(body.slice(0, body.indexOf("$$")))) continue;
       expect(body, name).not.toMatch(/EXECUTE\s+format\(\s*'DELETE/i);
-      for (const table of guarded) expect(body, `${name} deletes from ${table}`).not.toContain(`DELETE FROM "${table}"`);
+      for (const table of guarded) {
+        if (allowed[name] === table) continue;
+        expect(body, `${name} deletes from ${table}`).not.toContain(`DELETE FROM "${table}"`);
+      }
     }
   });
 
