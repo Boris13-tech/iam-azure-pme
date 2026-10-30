@@ -22,13 +22,21 @@ let owner: PrismaClient;
 let orgs = 0;
 
 type Counts = Record<string, number | boolean>;
-const call = (fn: "luxia_retention_purge_invitations" | "luxia_retention_pseudonymize_retired", batch: number | null, enforce: boolean | null, db: PrismaClient = rawPrisma) =>
+const call = (fn: "luxia_retention_purge_invitations" | "luxia_retention_pseudonymize_retired", batch: number | null, // R6 enforces as the owner only, until #148; everything else as the runtime role.
+  enforce: boolean | null, db: PrismaClient = fn === "luxia_retention_pseudonymize_retired" && enforce === true ? owner : rawPrisma) =>
   db.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT ${fn}(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
 const settle = (promise: Promise<unknown>) => promise.then(() => "ACCEPTED", (error: unknown) => String(error instanceof Error ? error.message : error));
 /** Runs enforced calls until one selects nothing: the shared test database may hold rows of earlier runs. */
 async function drain(fn: "luxia_retention_purge_invitations" | "luxia_retention_pseudonymize_retired", key: string) {
   for (let i = 0; i < 20; i++) if ((await call(fn, 5000, true))[key] === 0) return;
   throw new Error("DRAIN_DID_NOT_CONVERGE");
+}
+
+/** These tests call global purges: they run only against a local test database, never one reachable by a URL elsewhere. */
+function requireTestDatabase() {
+  for (const url of [process.env.DATABASE_MIGRATION_URL, process.env.DATABASE_URL]) {
+    if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw new Error("ISOLATED_DB_REQUIRED");
+  }
 }
 
 type Org = { organizationId: string; tenantId: string; local: string; entra: string; admin: string };
@@ -95,7 +103,7 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
   const present = async (ids: string[]) => (await owner.invitation.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((r) => r.id).sort();
 
   beforeAll(async () => {
-    if (!process.env.DATABASE_MIGRATION_URL || !process.env.DATABASE_URL) throw new Error("ISOLATED_DB_REQUIRED");
+    requireTestDatabase();
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
     a = await organization();
     b = await organization();
@@ -341,7 +349,7 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
   });
 
   beforeAll(async () => {
-    if (!process.env.DATABASE_MIGRATION_URL || !process.env.DATABASE_URL) throw new Error("ISOLATED_DB_REQUIRED");
+    requireTestDatabase();
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
     a = await organization();
     b = await organization();
@@ -401,6 +409,46 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
     });
     expect(result).toMatch(/RETENTION_ALREADY_RUNNING/);
   }, 120_000);
+
+  it("the runtime role may run R6 as a dry run only: an enforcing call is refused and changes nothing", async () => {
+    const before = await tableDigest("Subject");
+    expect(await settle(call("luxia_retention_pseudonymize_retired", 5000, true, rawPrisma))).toMatch(/RETENTION_R6_ENFORCE_NOT_ACTIVATED/);
+    expect(await tableDigest("Subject")).toBe(before);
+    expect(await call("luxia_retention_pseudonymize_retired", 1, false, rawPrisma)).toMatchObject({ enforced: false });
+    expect(await tableDigest("Subject")).toBe(before);
+  });
+
+  it("a definer's owner without BYPASSRLS is refused in both entry points; with it they work (non-superuser owner, scratch database)", () => {
+    const admin = process.env.DATABASE_MIGRATION_URL!;
+    const name = `luxia_r46_owner_${suffix}`, role = `luxia_r46_owner_${suffix}`;
+    psqlOk(admin, ["-c", `CREATE DATABASE ${name}`]);
+    psqlOk(admin, ["-c", `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS`]);
+    const scratch = new URL(admin); scratch.pathname = `/${name}`;
+    const superuser = scratch.toString();
+    const runtime = new URL(process.env.DATABASE_URL!); runtime.pathname = `/${name}`;
+    const calls = ["-c", "SELECT luxia_retention_purge_invitations(10, false)::text", "-c", "SELECT luxia_retention_pseudonymize_retired(10, false)::text"];
+    try {
+      for (const dir of readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()) psqlOk(superuser, ["-1", "-f", `prisma/migrations/${dir}/migration.sql`]);
+      // Everything LUXIA owns moves to that role, as in Production.
+      psqlOk(superuser, ["-1", "-c", `DO $o$ DECLARE r RECORD; BEGIN
+        FOR r IN SELECT c.oid::regclass::text AS n FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace WHERE s.nspname = 'public' AND c.relkind IN ('r', 'p') LOOP
+          EXECUTE format('ALTER TABLE %s OWNER TO ${role}', r.n); END LOOP;
+        FOR r IN SELECT p.oid::regprocedure::text AS n FROM pg_proc p JOIN pg_namespace s ON s.oid = p.pronamespace WHERE s.nspname = 'public' LOOP
+          EXECUTE format('ALTER FUNCTION %s OWNER TO ${role}', r.n); END LOOP;
+      END $o$`]);
+      psqlOk(superuser, ["-c", `GRANT USAGE ON SCHEMA public TO app_user`, "-c", `GRANT EXECUTE ON FUNCTION luxia_retention_purge_invitations(integer, boolean), luxia_retention_pseudonymize_retired(integer, boolean) TO app_user`]);
+      expect(psqlOk(runtime.toString(), calls).replace(/\r/g, "")).toContain('"enforced": false');
+      psqlOk(superuser, ["-c", `ALTER ROLE ${role} NOBYPASSRLS`]);
+      for (const statement of [calls[1], calls[3]]) {
+        const refused = psql(runtime.toString(), ["-c", statement]);
+        expect(refused.status, statement).not.toBe(0);
+        expect(refused.stderr, statement).toMatch(/RETENTION_OWNER_REQUIRES_BYPASSRLS/);
+      }
+    } finally {
+      psql(admin, ["-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`]);
+      psql(admin, ["-c", `DROP ROLE IF EXISTS ${role}`]);
+    }
+  }, 240_000);
 
   it("the runtime role may execute the two entry points and nothing more; anonymous roles and PUBLIC may not", async () => {
     const rows = await owner.$queryRaw<Array<{ proname: string; runtime: boolean; public_execute: boolean; definer: boolean }>>`

@@ -116,6 +116,7 @@ describe("R4/R6 retention: migration architecture", () => {
       expect(body, name).toContain("RETENTION_OWNER_REQUIRES_BYPASSRLS");
       expect(body, name).toMatch(/IF NOT pg_try_advisory_xact_lock\(hashtextextended\('luxia-retention-[a-z-]+', 0\)\) THEN\n\s+RAISE EXCEPTION 'RETENTION_ALREADY_RUNNING'/);
       expect(body, name).toContain("IF p_enforce THEN");
+      if (name === "luxia_retention_pseudonymize_retired") expect(body.indexOf("IF p_enforce AND session_user <> current_user THEN")).toBeGreaterThan(-1);
       expect(body, name).not.toMatch(/EXECUTE |format\(|\|\| *p_/);
       expect(body.match(/RETURN [^;]+;/g), name).toHaveLength(1);
       expect(body.match(/RETURN [^;]+;/g)![0], name).toMatch(/^RETURN jsonb_build_object\(/);

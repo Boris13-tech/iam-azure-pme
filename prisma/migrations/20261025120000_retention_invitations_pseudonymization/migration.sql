@@ -138,6 +138,11 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolbypassrls OR rolsuper)) THEN
     RAISE EXCEPTION 'RETENTION_OWNER_REQUIRES_BYPASSRLS' USING ERRCODE = '42501';
   END IF;
+  -- Dry run only for the runtime role, until #148 is closed and a reviewed migration lifts this. The owner in its own
+  -- session may enforce: a definer call changes current_user, never session_user.
+  IF p_enforce AND session_user <> current_user THEN
+    RAISE EXCEPTION 'RETENTION_R6_ENFORCE_NOT_ACTIVATED' USING ERRCODE = '42501';
+  END IF;
   -- One run at a time.
   IF NOT pg_try_advisory_xact_lock(hashtextextended('luxia-retention-pseudonymize-retired', 0)) THEN
     RAISE EXCEPTION 'RETENTION_ALREADY_RUNNING' USING ERRCODE = '55P03';
