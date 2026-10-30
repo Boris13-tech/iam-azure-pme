@@ -298,11 +298,13 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     const fromA = await inContext(a.organizationId, a.tenantId), forged = await inContext(randomUUID(), randomUUID());
     expect(fromA).toEqual(forged);
     expect(fromA.invitations).toBeGreaterThanOrEqual(2);
-    await rawPrisma.$transaction(async (tx) => {
+    // One enforced call from A's context, nothing after it: it alone removes A's and B's eligible rows.
+    const enforced = await rawPrisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT set_config('app.organization_id', ${a.organizationId}, true), set_config('app.tenant_id', ${a.tenantId}, true)`;
-      await tx.$queryRawUnsafe(`SELECT luxia_retention_purge_invitations(5000, true)::text`);
+      const [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
+      return counts;
     });
-    await drain("luxia_retention_purge_invitations", "invitations");
+    expect(enforced).toEqual({ invitations: 2, enforced: true });
     expect(await present([inA, inB, youngB])).toEqual([youngB]);
   });
 });
