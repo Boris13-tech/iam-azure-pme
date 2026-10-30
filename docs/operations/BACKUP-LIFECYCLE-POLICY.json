@@ -1,0 +1,19 @@
+{
+  "rules": [
+    {
+      "enabled": true,
+      "name": "luxia-backup-expiry",
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["prod-backups/prod/", "prod-backups/drill/"]
+        },
+        "actions": {
+          "baseBlob": { "delete": { "daysAfterCreationGreaterThan": 31 } },
+          "version": { "delete": { "daysAfterCreationGreaterThan": 31 } }
+        }
+      }
+    }
+  ]
+}
