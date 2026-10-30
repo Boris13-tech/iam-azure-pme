@@ -51,9 +51,9 @@ describe("Onboarding checklist: per-item read rights", () => {
     expect((await run(["assignments.manage", "identity_accounts.read"])).touched).toContain("localRecoveryCode");
   });
 
-  it("every item declares its rights, from the catalog (read_all arrives with its own change)", () => {
+  it("every item declares its rights, from the catalog", () => {
     expect(Object.keys(CHECKLIST_ITEM_RIGHTS).sort()).toEqual([...CHECKLIST_ITEMS].sort());
-    const known = new Set<string>([...ENTITLEMENT_CATALOG_V1, "access_reviews.read_all"]);
+    const known = new Set<string>(ENTITLEMENT_CATALOG_V1);
     for (const key of Object.values(CHECKLIST_ITEM_RIGHTS).flat(2)) expect(known.has(key), key).toBe(true);
   });
 });
