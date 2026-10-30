@@ -32,6 +32,21 @@
 | An e-mail or notification provider | Invitations, security notices | EU preferred | Not chosen (`docs/architecture/NOTIFICATION-CONTRACT.md`) |
 | A monitoring provider | Availability and error alerts | EU preferred | Not chosen |
 
+## Transfer facts (consulted 2026-10-18, to confirm at signature)
+
+These facts come from each provider's own pages, consulted on 2026-10-18. Before any signature, confirm each certification on the official list (dataprivacyframework.gov) and in the provider's current data processing addendum. Counsel chooses the transfer mechanism once the entity's country and the pilots' location are known.
+
+| Provider | Entity | Transfer basis it states | Data processing addendum | Note |
+|---|---|---|---|---|
+| Vercel | US company | Certified under the EU–US Data Privacy Framework | **Its DPA applies only to Pro and Enterprise customers** (vercel.com/legal/dpa). **On Hobby, today, there is no DPA**: a contractual gap that closes with Vercel Pro | Functions move to Frankfurt (`fra1`) with the EU switch |
+| Neon | **Contracting entity: Databricks, Inc.**, parent of Neon, LLC (terms updated 2026-10-14) | States that it relies on the EU–US Data Privacy Framework (listing to confirm for the contracting entity) | neon.com/dpa; subprocessors at neon.com/subprocessors, changes announced 30 days before | Production moves to Frankfurt |
+| Microsoft (Azure, Entra) | US company | Microsoft's data protection addendum (certification to confirm) | Microsoft Products and Services DPA | Backups in France Central, encrypted with LUXIA's key |
+| GitHub | US company (Microsoft) | To confirm | **Its DPA covers GitHub Enterprise Cloud, Enterprise (Unified), Teams and Copilot only.** The operator's free account is not listed | **Gap:** the backup job runs on GitHub-hosted runners, where Production data passes in clear, in memory, before encryption. Options: a paid plan with the DPA, or moving the backup job to a platform under a DPA (for example the Azure subscription that already holds the backups) |
+| Sentry (planned, monitoring option Z) | US company, EU representative in the Netherlands | Self-certified under the EU–US Data Privacy Framework | Click-through DPA | **EU data region** to be chosen at setup; events are scrubbed by LUXIA before they leave |
+| UptimeRobot (planned, monitoring option Z) | EU company (Slovakia) | **Processes customer data "in multiple locations worldwide"** (DPA v2.2, 2026-08-28), the United States included, under the standard contractual clauses (2021/914); many US subprocessors | DPA v2.2; countersigned copy through sales | Probes public pages and protected health answers only: no personal data of the customer's people |
+
+**Legal context (2026-10-18):** the EU–US Data Privacy Framework stands. The General Court upheld the Commission's adequacy decision on 3 September 2025. An appeal is pending before the Court of Justice (C-703/25 P). If the decision falls, transfers to US providers fall back on standard contractual clauses and a transfer impact assessment.
+
 ## Changes
 
 LUXIA tells its customers before adding or replacing a subprocessor that processes customer data. The notice period is **[TO BE COMPLETED]**, and the customer may object as the DPA sets out.
