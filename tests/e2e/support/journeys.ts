@@ -20,19 +20,29 @@ export const MESSAGE = {
 } as const;
 
 /**
- * The page's own alert. Next.js also renders a route announcer with role="alert" (#__next-route-announcer__,
- * empty, for screen readers on navigation); it is excluded by its fixed id, not by position.
+ * The page's own error message, selected for what it is: the role="alert" paragraph of the page's form (signup,
+ * recovery sign-in, invitation). Next.js also renders a page-wide route announcer with role="alert"
+ * (#__next-route-announcer__); it is never a candidate here. A second form on the page fails loudly (strict mode).
  */
-export const pageAlert = (page: Page) => page.getByRole("alert").and(page.locator(":not(#__next-route-announcer__)"));
+export const pageAlert = (page: Page) => page.locator("form").getByRole("alert");
 
 /** The signed-in frame's top bar (organization, environment, person): the one <header> with this role in the layout. */
 export const topBar = (page: Page) => page.locator("header.luxia-topbar");
 
+/**
+ * A dashboard panel found by its heading: the nearest <section> around that heading. The panels have no
+ * accessible name, and the workspace itself is a <section> that contains every heading.
+ */
+export const dashboardSection = (page: Page, heading: string) =>
+  page.getByRole("heading", { name: heading, exact: true }).locator("xpath=ancestor::section[1]");
+
 export const newClientAddress = () => `2001:db8:${randomBytes(2).toString("hex")}::${randomBytes(2).toString("hex")}`;
 
+// Playwright's fixture callback is named `provide` (not the conventional `use`) so the React hooks lint rule does not
+// mistake it for a hook.
 export const test = base.extend<{ clientAddress: string }>({
-  clientAddress: async ({}, use) => { await use(newClientAddress()); },
-  extraHTTPHeaders: async ({ clientAddress }, use) => { await use({ "x-real-ip": clientAddress }); },
+  clientAddress: async ({}, provide) => { await provide(newClientAddress()); },
+  extraHTTPHeaders: async ({ clientAddress }, provide) => { await provide({ "x-real-ip": clientAddress }); },
 });
 export { expect };
 

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { addVirtualAuthenticator } from "./support/virtual-authenticator";
-import { MESSAGE, expect, freshOrganization, navigationEntries, newDevice, signInWithPasskey, signUpThroughUi, test, pageAlert, topBar } from "./support/journeys";
+import { MESSAGE, dashboardSection, expect, freshOrganization, navigationEntries, newDevice, signInWithPasskey, signUpThroughUi, test, pageAlert, topBar } from "./support/journeys";
 
 // Journey 4: an administrator creates a MEMBER invitation on the Organization page; the link is shown
 // once. The invitee opens it in another browser (own context and passkey device), creates a passkey,
@@ -42,7 +42,9 @@ test("an invited member joins with a passkey and has no administration access", 
     // Hidden is not the control: the server refuses the administration data to this member.
     expect((await invitee.page.request.get("/api/onboarding/invitations")).status()).toBe(403);
     await invitee.page.goto("/dashboard/organization");
-    await expect(invitee.page.getByText("Accès restreint.").first()).toBeVisible();
+    for (const heading of ["Domaines", "Invitations"])
+      await expect(dashboardSection(invitee.page, heading).getByText("Accès restreint.", { exact: true }), heading).toBeVisible();
+    await expect(invitee.page.getByRole("button", { name: "Créer l’invitation" })).toHaveCount(0);
   } finally {
     await invitee.context.close();
   }
