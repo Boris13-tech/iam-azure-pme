@@ -25,7 +25,7 @@ The image build runs on GitHub but never sees Production data or a Production se
 ## 2. Cutover (operator gates, in order)
 
 1. **Merge** this change after independent review (class A: backup chain, CI/CD, Production configuration).
-2. The image workflow runs on `main`. Note the digest it prints. Make the GHCR package `luxia-backup` **public** (package settings; it holds public code only), so that the job pulls it without a registry credential. Verify the attestation: `gh attestation verify oci://ghcr.io/boris13-tech/luxia-backup@sha256:<digest> --repo Boris13-tech/iam-azure-pme`.
+2. The image workflow runs on `main`. Note the digest it prints. Make the GHCR package `luxia-backup` **public** (package settings; it holds public code only), so that the job pulls it without a registry credential. Verify the attestation: `gh attestation verify oci://ghcr.io/boris13-tech/luxia-backup@sha256:<digest> --repo Boris13-tech/iam-azure-pme --source-ref refs/heads/main --signer-workflow Boris13-tech/iam-azure-pme/.github/workflows/backup-image.yml --source-digest <the reviewed commit>`.
 3. Register the resource provider (free, subscription setting): `az provider register -n Microsoft.App`.
 4. Put the database URL of `luxia_backup` (direct endpoint, from the Neon console) into the vault as `backup-database-url`. Never print it; type it through a prompt, not a command line.
 5. Deploy: `az deployment group create -g luxia-backup-rg -f infra/backup/backup-job.bicep -p image=ghcr.io/boris13-tech/luxia-backup@sha256:<digest>`. The output `jobDeployed` must be `true` (the template refuses an image that is not pinned by digest).
