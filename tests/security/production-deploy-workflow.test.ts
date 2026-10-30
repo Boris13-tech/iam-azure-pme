@@ -38,6 +38,21 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(deployJob).toContain("GITHUB_STEP_SUMMARY");
   });
 
+  it("a deployment not ready in time is cancelled before the run fails", () => {
+    const deploy = deployJob.slice(deployJob.indexOf("id: deploy"), deployJob.indexOf("id: checks"));
+    expect(deploy.indexOf('/deployments/$id/cancel')).toBeGreaterThan(-1);
+    expect(deploy.indexOf('/deployments/$id/cancel')).toBeLessThan(deploy.indexOf("not ready after 10 minutes"));
+  });
+
+  it("the rollback finishes the new deployment first, and succeeds only when Production serves the previous one", () => {
+    const rollback = deployJob.slice(deployJob.indexOf("id: rollback"), deployJob.indexOf("Record the change"));
+    const order = ["/deployments/$DEPLOYMENT/cancel", "ROLLBACK NOT CONFIRMED: deployment", "/promote/$PREVIOUS", ".targets.production.id", '[[ "$current" == "$PREVIOUS" ]]', "ROLLBACK NOT CONFIRMED: Production serves"];
+    const at = order.map((text) => rollback.indexOf(text));
+    expect(at.every((i) => i >= 0), order.filter((_, i) => at[i] < 0).join()).toBe(true);
+    expect([...at].sort((x, y) => x - y)).toEqual(at);
+    expect(deployJob).toContain("ROLLBACK: ${{ steps.rollback.outcome }}");
+  });
+
   it("no expression is interpolated inside a shell script: inputs reach shells through env only", () => {
     for (const block of workflow.matchAll(/run: \|\n((?: {10}.*\n?)+)/g)) expect(block[1]).not.toContain("${{");
   });

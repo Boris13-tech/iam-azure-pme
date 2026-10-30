@@ -82,7 +82,11 @@ jobs:
             [[ "$state" == "ERROR" || "$state" == "CANCELED" ]] && { echo "::error::deployment $id ended $state"; exit 1; }
             sleep 10
           done
-          [[ "$state" == "READY" ]] || { echo "::error::deployment $id not ready after 10 minutes"; exit 1; }
+          if [[ "$state" != "READY" ]]; then
+            # Stopped before failing: an unattended build must not reach Production after this run has reported failure.
+            api -X PATCH "https://api.vercel.com/v12/deployments/$id/cancel?teamId=$TEAM" > /dev/null || echo "::warning::cancel of $id was refused"
+            echo "::error::deployment $id not ready after 10 minutes"; exit 1
+          fi
           current="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
           [[ "$current" == "$id" ]] || { echo "::error::Production serves $current, not $id"; exit 1; }
           echo "Production now serves $id (previous $previous)"
@@ -105,14 +109,32 @@ jobs:
           echo "::error::after-checks failed"; exit 1
 
       - name: Promote the previous deployment back if a check failed
+        id: rollback
         if: failure() && steps.deploy.outputs.previous != ''
         env:
           PREVIOUS: ${{ steps.deploy.outputs.previous }}
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
         run: |
           set -euo pipefail
-          curl -sS --fail-with-body -X POST -H "Authorization: Bearer $VERCEL_TOKEN" \
-            "https://api.vercel.com/v10/projects/$PROJECT/promote/$PREVIOUS?teamId=$TEAM" > /dev/null
-          echo "::warning::rolled back: Production promoted back to $PREVIOUS"
+          api() { curl -sS --fail-with-body -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          # The new deployment must be finished first, or it could still reach Production after the promotion.
+          if [[ -n "$DEPLOYMENT" ]]; then
+            for i in $(seq 1 12); do
+              state="$(api "https://api.vercel.com/v13/deployments/$DEPLOYMENT?teamId=$TEAM" | jq -r .readyState)"
+              [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] && break
+              api -X PATCH "https://api.vercel.com/v12/deployments/$DEPLOYMENT/cancel?teamId=$TEAM" > /dev/null || true
+              sleep 10
+            done
+            [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] || { echo "::error::ROLLBACK NOT CONFIRMED: deployment $DEPLOYMENT is still $state"; exit 1; }
+          fi
+          api -X POST "https://api.vercel.com/v10/projects/$PROJECT/promote/$PREVIOUS?teamId=$TEAM" > /dev/null
+          # The answer only means the request was accepted: success is Production serving the previous deployment.
+          for i in $(seq 1 18); do
+            current="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
+            if [[ "$current" == "$PREVIOUS" ]]; then echo "::warning::rolled back: Production serves $PREVIOUS"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::ROLLBACK NOT CONFIRMED: Production serves ${current:-unknown}, not $PREVIOUS"; exit 1
 
       - name: Record the change (approval, commit, deployments, checks)
         if: always()
@@ -123,6 +145,7 @@ jobs:
           DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
           PREVIOUS: ${{ steps.deploy.outputs.previous }}
           CHECKS: ${{ steps.checks.outcome }}
+          ROLLBACK: ${{ steps.rollback.outcome }}
         run: |
           approvals="$(gh api "repos/$REPO/actions/runs/$RUN_ID/approvals" --jq '[.[] | "\(.user.login) \(.state) at run \(env.RUN_ID): \(.comment // "")"] | join("; ")' || echo unreadable)"
           {
@@ -134,4 +157,5 @@ jobs:
             echo "| Deployment | \`${DEPLOYMENT:-none}\` |"
             echo "| Previous (rollback target) | \`${PREVIOUS:-unknown}\` |"
             echo "| After-checks | ${CHECKS:-not run} |"
+            echo "| Rollback | ${ROLLBACK:-not needed} |"
           } >> "$GITHUB_STEP_SUMMARY"
