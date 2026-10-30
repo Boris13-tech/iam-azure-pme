@@ -45,8 +45,10 @@ const counters = async (auth: typeof manager) => {
 
 describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Access review campaign visibility and read_all (app_user PostgreSQL/RLS)", () => {
   beforeAll(async () => {
-    const url = new URL(process.env.DATABASE_URL!);
-    if (!["localhost", "127.0.0.1"].includes(url.hostname)) throw new Error("ISOLATED_DB_REQUIRED");
+    // Both connections write: each must be a local database with a test name.
+    for (const raw of [process.env.DATABASE_URL, process.env.DATABASE_MIGRATION_URL]) {
+      if (!raw || !["localhost", "127.0.0.1"].includes(new URL(raw).hostname) || !/^\/luxia_\w+$/.test(new URL(raw).pathname)) throw new Error("ISOLATED_DB_REQUIRED");
+    }
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL! } } });
     await owner.$transaction(async tx => {
       await tx.$queryRaw`SELECT set_config('app.organization_id', ${context.organizationId}, true)`;
@@ -157,6 +159,44 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Access review campaig
     expect(shape(real)).toEqual({ operation: "ACCESS_REVIEW.ITEM.KEEP.DENIED", result: "DENIED", actor: reviewer1.subjectId, target: null, assignmentIds: [], metadata: {} });
     expect(shape(missing)).toEqual(shape(real));
     expect((await review.listReviewItems(manager, second))[0].decision).toBe("PENDING");
+  });
+
+  it("6b. with hidden campaigns that would count, a limited reader's every counter differs from the tenant's", async () => {
+    // Its own tenant: every count below is exact, and each is nonzero on both sides.
+    const scope = { organizationId: randomUUID(), tenantId: randomUUID() };
+    const limited = as(randomUUID(), scope), other = as(randomUUID(), scope), wide = as(randomUUID(), scope), managing = as(randomUUID(), scope);
+    await owner.organization.create({ data: { id: scope.organizationId, name: "Review counters fixture" } });
+    await owner.tenant.create({ data: { id: scope.tenantId, organizationId: scope.organizationId, name: "Review counters fixture" } });
+    for (const auth of [limited, other, wide, managing]) await owner.subject.create({ data: { ...scope, id: auth.subjectId, type: "HUMAN", name: "Counters" } });
+    const rights: Array<[string, string[]]> = [
+      ["access_reviews.read", [limited.subjectId, managing.subjectId]], ["access_reviews.decide", [limited.subjectId]],
+      ["access_reviews.read_all", [wide.subjectId]], ["access_reviews.manage", [managing.subjectId]]];
+    for (const [key, subjectIds] of rights) {
+      const entitlement = await owner.entitlement.create({ data: { ...scope, key, action: key.split(".")[1], resource: "access_reviews" } });
+      for (const subjectId of subjectIds) await owner.assignment.create({ data: { ...scope, subjectId, entitlementId: entitlement.id, source: "DIRECT" } });
+    }
+    const past = new Date(Date.now() - 86_400_000);
+    await owner.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+      const campaign = (reviewerSubjectId: string, status: "OPEN" | "COMPLETED") => tx.accessReviewCampaign.create({ data: { ...scope, name: "Counters", scopeId: randomUUID(), scopeType: "TENANT",
+        reviewerSubjectId, createdBySubjectId: other.subjectId, startsAt: new Date(past.getTime() - 86_400_000), dueAt: past, status, completedAt: status === "COMPLETED" ? past : null } });
+      const item = (campaignId: string, reviewerSubjectId: string, reviewState: "PENDING" | "REQUIRES_REMEDIATION") => tx.accessReviewItem.create({ data: { ...scope, campaignId, reviewerSubjectId, reviewState,
+        subjectId: randomUUID(), assignmentId: randomUUID(), entitlementId: randomUUID(), scopeId: randomUUID(), resourceIds: [randomUUID()], assignmentVersion: past, entitlementVersion: past } });
+      // Visible to the limited reader: one overdue campaign, one pending item, one to remediate.
+      const own = await campaign(limited.subjectId, "OPEN");
+      await item(own.id, limited.subjectId, "PENDING");
+      await item(own.id, limited.subjectId, "REQUIRES_REMEDIATION");
+      // Hidden from it: two more overdue campaigns, one completed, and their items.
+      for (const status of ["OPEN", "OPEN", "COMPLETED"] as const) {
+        const hidden = await campaign(other.subjectId, status);
+        await item(hidden.id, other.subjectId, "PENDING");
+        await item(hidden.id, other.subjectId, "REQUIRES_REMEDIATION");
+      }
+    }, { timeout: 30_000 });
+    expect(await counters(limited)).toEqual({ byStatus: { OPEN: 1, COMPLETED: 0 }, overdue: 1, pending: 1, remediation: 1, mine: 2 });
+    const tenantWide = { byStatus: { OPEN: 3, COMPLETED: 1 }, overdue: 3, pending: 3, remediation: 4, mine: "restricted" };
+    expect(await counters(wide)).toEqual(tenantWide);
+    expect(await counters(managing)).toEqual(tenantWide);
   });
 
   it("a reviewer still decides on their own campaign", async () => {
