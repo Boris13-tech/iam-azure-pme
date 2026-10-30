@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Boxes, Building2, ClipboardCheck, Fingerprint, Gauge, Scale, ShieldCheck, Users } from "lucide-react";
 import { getAuthContext } from "@/lib/auth/auth-context";
 import { loadPlatformContext } from "@/lib/platform/context";
+import { LuxiaLogo } from "@/components/brand/luxia-logo";
 
 const navigation = [
   { href: "/dashboard", label: "Vue d’ensemble", icon: Gauge, entitlement: null },
@@ -18,10 +19,6 @@ const navigation = [
 
 const PROVIDER_LABELS: Record<string, string> = { MICROSOFT_ENTRA: "Microsoft Entra ID", LUXIA_LOCAL: "Compte local LUXIA" };
 
-function LuxiaMark() {
-  return <div className="luxia-brand-mark" aria-hidden="true"><span className="luxia-mark-left" /><span className="luxia-mark-right" /></div>;
-}
-
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const auth = await getAuthContext();
   if (!auth) redirect("/login");
@@ -30,7 +27,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="luxia-shell">
       <aside className="luxia-sidebar">
-        <Link href="/dashboard" className="luxia-logo"><LuxiaMark /><span><strong>LUXIA</strong><small>Identity</small></span></Link>
+        <Link href="/dashboard" className="luxia-logo" aria-label="LUXIA Identity, vue d’ensemble"><LuxiaLogo product="LUXIA Identity" /></Link>
         <nav className="luxia-nav" aria-label="Navigation principale">
           {allowedNavigation.map(({ href, label, icon: Icon }) => (
             <Link key={label} href={href} className="luxia-nav-link">
