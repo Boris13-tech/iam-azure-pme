@@ -11,9 +11,10 @@ const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 export function ownerDatabaseUrl(): string {
   const url = process.env.E2E_OWNER_DATABASE_URL || DEFAULT_OWNER_URL;
-  let host: string;
-  try { host = new URL(url).hostname; } catch { throw new Error("E2E_OWNER_DATABASE_URL_INVALID"); }
-  if (!LOCAL_HOSTS.has(host)) throw new Error("E2E_OWNER_DATABASE_URL_NOT_LOCAL: the end-to-end suite only writes to a local database");
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { throw new Error("E2E_OWNER_DATABASE_URL_INVALID"); }
+  // Prisma lets these parameters override the URL's host: the name checked here would not be the server reached.
+  if (!LOCAL_HOSTS.has(parsed.hostname) || parsed.searchParams.has("host") || parsed.searchParams.has("hostaddr")) throw new Error("E2E_OWNER_DATABASE_URL_NOT_LOCAL: the end-to-end suite only writes to a local database");
   return url;
 }
 

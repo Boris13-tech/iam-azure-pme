@@ -5,6 +5,8 @@ import { defineConfig, devices } from "@playwright/test";
 // AUTHZ_MODE=native and NEXT_PUBLIC_APP_URL equal to the base URL (see .github/workflows/e2e-passkeys.yml).
 // Local only: the signup codes are written with E2E_OWNER_DATABASE_URL, refused unless it is this machine.
 const baseURL = process.env.E2E_BASE_URL || "http://localhost:3200";
+// The journeys sign up and write: they run against a local server only.
+if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(baseURL).hostname)) throw new Error("E2E_BASE_URL_NOT_LOCAL");
 
 export default defineConfig({
   testDir: "tests/e2e",
