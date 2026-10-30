@@ -225,6 +225,19 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
     expect(await owner.organizationErasure.count({ where: { organizationId: i.organizationId } })).toBe(0);
   }, 120_000);
 
+  it("two CLOSED organizations: a marker naming one lets no DELETE through for the other", async () => {
+    const named = await organization(), other = await organization();
+    await close(named);
+    await close(other);
+    const before = await fingerprint(other.organizationId);
+    expect(await owner.authenticationEvidence.count({ where: { organizationId: other.organizationId } })).toBe(2);
+    expect(await codeOf(owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('luxia.erasure_organization', ${named.organizationId}, true)`;
+      await tx.$executeRawUnsafe(`DELETE FROM "AuthenticationEvidence" WHERE "organizationId" = $1`, other.organizationId);
+    }))).toBe("AUDIT_APPEND_ONLY");
+    expect(await fingerprint(other.organizationId)).toEqual(before);
+  }, 120_000);
+
   it("a bridge committed after the database's check, before Subject goes: the function fails, nothing is deleted, the link stays", async () => {
     const m = await organization();
     await close(m);
