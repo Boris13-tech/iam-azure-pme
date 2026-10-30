@@ -5,7 +5,8 @@
 -- The guard keeps every other rule of 20261011180000_organization_status_session_scope:
 -- - an active session changes only lastSeenAt and one revocation;
 -- - a revoked session is frozen, except that its hashes may be set to NULL;
--- - a hash can never be set, changed to another value, or restored.
+-- - a hash can never be set, changed to another value, or restored;
+-- - only the table owner in its own session may clear one: the runtime role goes through the operator's gate like anyone.
 
 CREATE OR REPLACE FUNCTION luxia_session_guard() RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
@@ -20,6 +21,10 @@ BEGIN
   IF (NEW."ipHash" IS DISTINCT FROM OLD."ipHash" AND NEW."ipHash" IS NOT NULL)
      OR (NEW."userAgentHash" IS DISTINCT FROM OLD."userAgentHash" AND NEW."userAgentHash" IS NOT NULL) THEN
     RAISE EXCEPTION 'SESSION_IMMUTABLE' USING ERRCODE = '23514';
+  END IF;
+  IF ROW(NEW."ipHash", NEW."userAgentHash") IS DISTINCT FROM ROW(OLD."ipHash", OLD."userAgentHash")
+     AND NOT (current_user = session_user AND EXISTS (SELECT 1 FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE c.oid = TG_RELID AND r.rolname = current_user)) THEN
+    RAISE EXCEPTION 'SESSION_REDACTION_OWNER_ONLY' USING ERRCODE = '42501';
   END IF;
   IF OLD."revokedAt" IS NOT NULL THEN
     -- A revoked session accepts the redaction and nothing else, on every column present or future.

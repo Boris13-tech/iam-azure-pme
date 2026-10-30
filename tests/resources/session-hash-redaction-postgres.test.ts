@@ -74,6 +74,14 @@ describe.runIf(enabled)("R2: one-way redaction of session network hashes (Postgr
       expect(await update(revoked, { userAgentHash: null })).toBe("ACCEPTED");
       expect(await update(revoked, { userAgentHash: "ua-forged" })).toMatch(/SESSION_IMMUTABLE/);
 
+      // The runtime role, with its usual rights and tenant context, cannot clear a hash by a direct UPDATE either.
+      const runtime = new URL(process.env.DATABASE_URL!); runtime.pathname = `/${name}`;
+      psqlOk(url, ["-c", `GRANT SELECT, UPDATE ON "Session" TO app_user`]);
+      const direct = psql(runtime.toString(), ["-1", "-c", `SELECT set_config('app.organization_id', '${org}', true), set_config('app.tenant_id', '${tenant}', true); UPDATE "Session" SET "ipHash" = NULL WHERE "id" = '${other}'`]);
+      expect(direct.status).not.toBe(0);
+      expect(direct.stderr).toMatch(/SESSION_REDACTION_OWNER_ONLY/);
+      expect((await db.session.findUniqueOrThrow({ where: { id: other } })).ipHash).toBe(`ip-${other}`);
+
       // Bounded redaction by the owner; the runtime role cannot call it.
       const redact = (batch: number) => db!.$queryRawUnsafe<Array<{ n: number }>>(`SELECT luxia_session_redact_network_hashes(${batch}) AS n`).then((rows) => rows[0].n);
       expect(await settle(redact(0))).toMatch(/REDACTION_BATCH_OUT_OF_RANGE/);
@@ -83,7 +91,6 @@ describe.runIf(enabled)("R2: one-way redaction of session network hashes (Postgr
       expect(await redact(10000)).toBe(0);
       expect(await db.session.count({ where: { OR: [{ ipHash: { not: null } }, { userAgentHash: { not: null } }] } })).toBe(0);
       expect(await db.session.count({ where: { id: { in: ids } } })).toBe(3);
-      const runtime = new URL(process.env.DATABASE_URL!); runtime.pathname = `/${name}`;
       const denied = psql(runtime.toString(), ["-c", "SELECT luxia_session_redact_network_hashes(1)"]);
       expect(denied.status).not.toBe(0);
       expect(denied.stderr).toMatch(/permission denied/);
