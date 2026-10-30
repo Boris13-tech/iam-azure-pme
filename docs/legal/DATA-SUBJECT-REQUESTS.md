@@ -4,7 +4,7 @@
 
 ## 1. Who answers
 
-- **People whose identity an organization manages in LUXIA:** the organization is the controller. The request goes to it. If LUXIA receives the request, it forwards it to the organization **[TO BE DECIDED: within N working days]** without answering on the substance, and helps the organization answer.
+- **People whose identity an organization manages in LUXIA:** the organization is the controller. The request goes to it. If LUXIA receives the request, it forwards it to the organization **within 5 working days (PROPOSED)** without answering on the substance, and helps the organization answer.
 - **People for whom LUXIA is the controller** (for example the person who signed an organization up, for LUXIA's own account data): LUXIA answers directly.
 
 ## 2. Verifying the requester
@@ -28,7 +28,7 @@ The journal and the sign-in records are append-only. An erasure therefore pseudo
 
 - Under the GDPR: one month, extendable in limited cases.
 - Other laws: **[TO BE COMPLETED by counsel]**.
-- LUXIA's commitment to its customers for help: **[TO BE DECIDED]**.
+- LUXIA's commitment to its customers for help: **PROPOSED: LUXIA gives the customer the information or action it needs within 10 working days of its request**, so that the customer can answer the person within its own legal deadline (one month under the GDPR, article 12(3)).
 
 ## 5. Records
 
@@ -40,7 +40,7 @@ Each request is recorded:
 - answer;
 - date closed.
 
-The location of the register is **[TO BE COMPLETED]**.
+The register is kept in LUXIA's private evidence store, sealed with SHA-256 manifests (PROPOSED).
 
 ## Gaps to close before publication
 
