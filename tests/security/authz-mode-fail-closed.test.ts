@@ -13,16 +13,16 @@ vi.mock("../../lib/db/scoped-client", () => ({
 
 // P5 (standard I3, fail closed): in Production a missing or unknown AUTHZ_MODE must refuse every authorization,
 // never fall back silently to legacy. Outside Production the legacy fallback is kept for development and CI.
-const PRODUCTION_MARKS: Array<Record<string, string>> = [{ VERCEL_ENV: "production" }, { APP_ENV: "production" }];
+const PRODUCTION_MARKS: Array<Record<string, string>> = [{ VERCEL_ENV: "production" }, { APP_ENV: "production" }, { NODE_ENV: "production" }];
 const INVALID_MODES = [undefined, "", "Native", "NATIVE", " native", "native ", "legacy\n", "nativ", "native-shadow", "off"];
 const VALID_MODES = ["legacy", "shadow", "native-shadow-legacy", "native"] as const;
 
 const req = { action: "read", resource: "users" };
 const auth = { organizationId: randomUUID(), tenantId: randomUUID(), subjectId: "sub-1", type: "HUMAN" } as any;
-const saved = { AUTHZ_MODE: process.env.AUTHZ_MODE, VERCEL_ENV: process.env.VERCEL_ENV, APP_ENV: process.env.APP_ENV };
+const saved = { AUTHZ_MODE: process.env.AUTHZ_MODE, VERCEL_ENV: process.env.VERCEL_ENV, APP_ENV: process.env.APP_ENV, NODE_ENV: process.env.NODE_ENV };
 
 function setEnv(values: Record<string, string | undefined>) {
-  for (const key of ["AUTHZ_MODE", "VERCEL_ENV", "APP_ENV"]) delete process.env[key];
+  for (const key of ["AUTHZ_MODE", "VERCEL_ENV", "APP_ENV", "NODE_ENV"]) delete process.env[key];
   for (const [key, value] of Object.entries(values)) if (value !== undefined) process.env[key] = value;
 }
 
@@ -77,7 +77,7 @@ describe("P5: the authorization mode fails closed in Production", () => {
 
   it("outside Production, the legacy fallback is unchanged", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (const mark of [{}, { VERCEL_ENV: "preview" }, { APP_ENV: "staging" }]) {
+    for (const mark of [{}, { VERCEL_ENV: "preview" }, { APP_ENV: "staging" }, { NODE_ENV: "production", VERCEL_ENV: "preview" }, { NODE_ENV: "production", APP_ENV: "staging" }]) {
       expect(resolveAuthorizationMode({ ...mark })).toBe("legacy");
       expect(resolveAuthorizationMode({ ...mark, AUTHZ_MODE: "unknown" })).toBe("legacy");
     }
