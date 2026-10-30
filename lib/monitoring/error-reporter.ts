@@ -36,7 +36,12 @@ export function scrub(text: string): string {
 /** The project-relative part of a stack path; any other path says nothing about the machine or a person. */
 function projectPath(raw: string) {
   const path = raw.replace(/\\/g, "/").replace(/^file:\/\//, "");
-  return /(?:^|\/)((?:app|lib|node_modules|\.next)\/[\w./()[\]@-]+)$/.exec(path)?.[1] ?? "<external>";
+  const relative = /(?:^|\/)((?:app|lib|node_modules|\.next)\/.+)$/.exec(path)?.[1];
+  if (!relative) return "<external>";
+  const parts = relative.split("/"), file = parts.pop()!;
+  // Folders hold no dot except .next, and only a package scope may hold @: a name or an address fails here.
+  const safe = parts.every((part) => /^(\.next|@?[\w()[\]-]+)$/.test(part)) && /^[\w()[\]-]+(\.[\w-]+)*$/.test(file);
+  return safe ? scrub(relative) : "<external>";
 }
 
 /** Free text can hold anything, so only a plain error code leaves; the type and the stack frames locate the rest. */

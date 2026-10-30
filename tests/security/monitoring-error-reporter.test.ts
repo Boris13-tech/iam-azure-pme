@@ -71,6 +71,13 @@ describe("Monitoring slice 2: scrubbed error events, Sentry envelope protocol, n
     const files = sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename);
     expect(files.sort()).toEqual(["<external>", "lib/auth/session.ts"]);
     expect(sentBody()).not.toContain("jane.doe");
+    fetchMock.mockClear();
+    const hidden = new Error("X_CODE");
+    hidden.stack = "Error: X_CODE\n    at a (/srv/project/lib/jane.doe@example.com.ts:1:1)\n    at b (/home/lib/jane.doe@example.com/x.js:1:1)\n    at c (/app/jane.doe/worker.js:1:1)\n    at d (/x/node_modules/@scope/pkg/index.js:1:1)";
+    await reportError(hidden, "session");
+    expect(sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename).sort())
+      .toEqual(["<external>", "<external>", "<external>", "node_modules/@scope/pkg/index.js"]);
+    expect(sentBody()).not.toContain("jane.doe");
   });
 
   it("scrubs connection strings, e-mails, IP addresses and tokens from the message", async () => {
