@@ -69,7 +69,7 @@ export async function loadIdentitySecurityPosture(auth: AuthContext, options: Po
       if (def.kind === "not_implemented") { out.push({ id, state: "not_implemented", reason: def.reason! }); continue; }
       await tx.$executeRawUnsafe("SAVEPOINT posture_widget");
       try {
-        const value = await queries[id as keyof PostureQueries]({ tx, scope, viewerSubjectId: auth.subjectId, now });
+        const value = await queries[id as keyof PostureQueries]({ tx, scope, viewerSubjectId: auth.subjectId, held, now });
         await tx.$executeRawUnsafe("RELEASE SAVEPOINT posture_widget");
         if (value instanceof Unavailable) out.push({ id, state: "unavailable", reason: value.reason });
         else if (value instanceof Since) out.push({ id, state: "ok", value: value.value, since: value.since });
