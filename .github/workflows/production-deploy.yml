@@ -68,18 +68,22 @@ jobs:
         run: |
           set -euo pipefail
           for v in VERCEL_TOKEN TEAM PROJECT REPO_ID; do [[ -n "${!v}" ]] || { echo "::error::$v is not configured on the Production environment"; exit 1; }; done
-          api() { curl -sS --fail-with-body -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
           previous="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
           [[ -n "$previous" ]] || { echo "::error::cannot read the current Production deployment"; exit 1; }
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
-          body="$(jq -n --arg sha "$SHA" --argjson repo "$REPO_ID" \
-            '{name: "iam-azure-pme", project: "iam-azure-pme", target: "production", gitSource: {type: "github", repoId: $repo, ref: "main", sha: $sha}}')"
-          id="$(api -X POST "https://api.vercel.com/v13/deployments?forceNew=1&teamId=$TEAM" -d "$body" | jq -r .id)"
+          # The run is recorded on the deployment: if the answer to this request is lost, the rollback still finds it.
+          body="$(jq -n --arg sha "$SHA" --argjson repo "$REPO_ID" --arg project "$PROJECT" --arg run "$GITHUB_RUN_ID" \
+            '{name: "iam-azure-pme", project: $project, target: "production", meta: {luxiaRun: $run}, gitSource: {type: "github", repoId: $repo, ref: "main", sha: $sha}}')"
+          created="$(api -X POST "https://api.vercel.com/v13/deployments?forceNew=1&teamId=$TEAM" -d "$body")"
+          id="$(jq -r .id <<< "$created")"
           echo "deployment=$id" >> "$GITHUB_OUTPUT"
+          [[ "$(jq -r .projectId <<< "$created")" == "$PROJECT" ]] || { echo "::error::deployment $id is not in the configured project"; exit 1; }
           for i in $(seq 1 60); do
             state="$(api "https://api.vercel.com/v13/deployments/$id?teamId=$TEAM" | jq -r .readyState)"
             [[ "$state" == "READY" ]] && break
             [[ "$state" == "ERROR" || "$state" == "CANCELED" ]] && { echo "::error::deployment $id ended $state"; exit 1; }
+            (( SECONDS < 600 )) || break
             sleep 10
           done
           if [[ "$state" != "READY" ]]; then
@@ -110,23 +114,26 @@ jobs:
 
       - name: Promote the previous deployment back if a check failed
         id: rollback
-        if: failure() && steps.deploy.outputs.previous != ''
+        if: (failure() || cancelled()) && steps.deploy.outputs.previous != ''
         env:
           PREVIOUS: ${{ steps.deploy.outputs.previous }}
           DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
         run: |
           set -euo pipefail
-          api() { curl -sS --fail-with-body -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
-          # The new deployment must be finished first, or it could still reach Production after the promotion.
-          if [[ -n "$DEPLOYMENT" ]]; then
+          api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          # Every deployment of this run must be finished first, or it could still reach Production after the promotion.
+          # By metadata when the answer to its creation was lost.
+          ids="$DEPLOYMENT"
+          [[ -n "$ids" ]] || ids="$(api "https://api.vercel.com/v6/deployments?projectId=$PROJECT&teamId=$TEAM&limit=10&meta-luxiaRun=$GITHUB_RUN_ID" | jq -r '.deployments[].uid')"
+          for one in $ids; do
             for i in $(seq 1 12); do
-              state="$(api "https://api.vercel.com/v13/deployments/$DEPLOYMENT?teamId=$TEAM" | jq -r .readyState)"
+              state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r .readyState)"
               [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] && break
-              api -X PATCH "https://api.vercel.com/v12/deployments/$DEPLOYMENT/cancel?teamId=$TEAM" > /dev/null || true
+              api -X PATCH "https://api.vercel.com/v12/deployments/$one/cancel?teamId=$TEAM" > /dev/null || true
               sleep 10
             done
-            [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] || { echo "::error::ROLLBACK NOT CONFIRMED: deployment $DEPLOYMENT is still $state"; exit 1; }
-          fi
+            [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] || { echo "::error::ROLLBACK NOT CONFIRMED: deployment $one is still $state"; exit 1; }
+          done
           api -X POST "https://api.vercel.com/v10/projects/$PROJECT/promote/$PREVIOUS?teamId=$TEAM" > /dev/null
           # The answer only means the request was accepted: success is Production serving the previous deployment.
           for i in $(seq 1 18); do
