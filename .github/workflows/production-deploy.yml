@@ -1,8 +1,8 @@
 name: Production deploy
 
 # The only way to change the code running in Production (docs/operations/PRODUCTION-CHANGE-RECORD.md, GOV-001).
-# A person starts it with the exact commit; the deploy job waits in the protected "Production" environment until the
-# operator approves it in GitHub, which records who approved, when, and for which run. The job then deploys that
+# It starts with the exact commit; the deploy job waits in the protected "Production" environment until an account
+# holding the approval right approves it in GitHub, which records that account, when, and for which run. The job then deploys that
 # commit through the Vercel API (gitSource), checks Production from outside, and promotes back the previous
 # deployment if a check fails. No local command line and no personal credential is involved.
 on:
@@ -48,7 +48,7 @@ jobs:
   deploy:
     needs: verify
     runs-on: ubuntu-24.04
-    # Required reviewer: the operator. Nothing below runs before that approval.
+    # A required reviewer on the environment. Nothing below runs before that approval.
     environment: Production
     timeout-minutes: 20
     permissions:
