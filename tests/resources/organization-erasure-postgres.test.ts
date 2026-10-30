@@ -225,6 +225,33 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
     expect(await owner.organizationErasure.count({ where: { organizationId: i.organizationId } })).toBe(0);
   }, 120_000);
 
+  it("a bridge committed after the database's check, before Subject goes: the function fails, nothing is deleted, the link stays", async () => {
+    const m = await organization();
+    await close(m);
+    const user = await owner.user.create({ data: { email: `r7-${randomUUID()}@example.test`, name: "Legacy person" } });
+    const before = await fingerprint(m.organizationId);
+    // A lock on a row of the first table the function deletes holds it right after its check, deterministically.
+    let held!: () => void, release!: () => void;
+    const isHeld = new Promise<void>((resolve) => { held = resolve; });
+    const releasing = new Promise<void>((resolve) => { release = resolve; });
+    const holder = owner.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT "id" FROM "AccessReviewItem" WHERE "organizationId" = $1 FOR UPDATE`, m.organizationId);
+      held();
+      await releasing;
+    }, { timeout: 60_000 });
+    await isHeld;
+    // Called directly: this is the database's own property, without the operator library's comparison with the plan.
+    const erase = codeOf(owner.$transaction((tx) => tx.$queryRaw`SELECT luxia_organization_erase(${m.organizationId})`, { timeout: 60_000 }));
+    expect(await stillWaiting(erase)).toBe(STILL_WAITING);
+    await owner.legacyUserBridge.create({ data: { legacyUserId: user.id, organizationId: m.organizationId, subjectId: m.subjectId } });
+    release();
+    await holder;
+    expect(await erase).toMatch(/foreign key|ERASURE_INCOMPLETE/i);
+    expect(await fingerprint(m.organizationId)).toEqual(before);
+    expect(await owner.legacyUserBridge.count({ where: { legacyUserId: user.id } })).toBe(1);
+    expect(await owner.organizationErasure.count({ where: { organizationId: m.organizationId } })).toBe(0);
+  }, 120_000);
+
   it("a legacy user with no bridge does not block an erasure, stays, and is reported by plan and apply", async () => {
     const j = await organization();
     await close(j);
