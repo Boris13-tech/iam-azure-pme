@@ -23,12 +23,21 @@ async function api(path: string, body?: unknown) {
   if (!response.ok) throw new Refused(ERRORS[value.error] ?? (response.status === 403 ? ERRORS.FORBIDDEN : "Opération impossible pour le moment. Réessayez."));
   return value;
 }
-async function names(url: string, pick: (row: Record<string, unknown>) => [string, string]) {
+async function names(url: string, pick: (row: Record<string, unknown>) => [string, string], paged = false) {
+  const labels = new Map<string, string>();
   try {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) return new Map<string, string>();
-    return new Map((await response.json() as Record<string, unknown>[]).map(pick));
-  } catch { return new Map<string, string>(); }
+    let after = "";
+    for (let page = 0; page < 100; page++) {
+      const response = await fetch(after ? `${url}?after=${encodeURIComponent(after)}` : url, { cache: "no-store" });
+      if (!response.ok) return labels;
+      const rows = await response.json() as Record<string, unknown>[];
+      for (const row of rows) { const [id, label] = pick(row); labels.set(id, label); }
+      // Catalogs that list 100 rows at a time, ordered by id; the others answer in one response.
+      if (!paged || rows.length < 100) return labels;
+      after = String(rows[rows.length - 1].id);
+    }
+  } catch { /* labels stay optional: the console keeps its fallback text */ }
+  return labels;
 }
 const SCOPE_KINDS: Record<string, string> = { RESOURCE: "ressource unique", RESOURCE_GROUP: "groupe de ressources", TENANT: "environnement entier" };
 const DECISIONS: Record<string, string> = { PENDING: "En attente", KEEP: "Accès conservé", REVOKE: "Accès retiré" };
@@ -40,7 +49,7 @@ const when = (value: string) => new Date(value).toLocaleString("fr-FR", { dateSt
 
 export default function ReviewConsole() {
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null), [selected, setSelected] = useState<Campaign | null>(null);
-  const [items, setItems] = useState<Item[] | null>(null), [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [items, setItems] = useState<Item[] | null>(null), [audit, setAudit] = useState<AuditEvent[] | "failed" | null>(null);
   const [configuration, setConfiguration] = useState<Configuration | null>(null), [permissions, setPermissions] = useState<string[]>([]), [actor, setActor] = useState("");
   const [name, setName] = useState(""), [scopeId, setScope] = useState(""), [reviewerSubjectId, setReviewer] = useState(""), [dueAt, setDue] = useState("");
   const [pending, setPending] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [loadFailed, setLoadFailed] = useState(false);
@@ -57,8 +66,8 @@ export default function ReviewConsole() {
       await load();
       // Labels one at a time, after the campaigns: each request holds a database connection on the server.
       const people = await names("/api/canonical/subjects", r => [String(r.id), String(r.name)]);
-      const rights = await names("/api/canonical/resource-governance/entitlements", r => [String(r.id), String(r.description || r.key)]);
-      const resources = await names("/api/canonical/resources", r => [String(r.id), String(r.name)]);
+      const rights = await names("/api/canonical/resource-governance/entitlements", r => [String(r.id), String(r.description || r.key)], true);
+      const resources = await names("/api/canonical/resources", r => [String(r.id), String(r.name)], true);
       setLabels({ people, rights, resources });
     } catch (failure) { setLoadFailed(true); setError(failure instanceof Error ? failure.message : ""); }
   };
@@ -67,7 +76,8 @@ export default function ReviewConsole() {
   const detail = async (campaign: Campaign, onlyPending = pending) => {
     setSelected(await api(`/${campaign.id}`)); setItems(null);
     setItems(await api(`/${campaign.id}/items${onlyPending ? "?pending=true" : ""}`));
-    setAudit(await api(`/${campaign.id}/audit`));
+    setAudit(null);
+    try { setAudit(await api(`/${campaign.id}/audit`)); } catch (failure) { setAudit("failed"); throw failure; }
   };
   const execute = async (work: () => Promise<void>) => {
     setBusy(true); setError("");
@@ -144,9 +154,10 @@ export default function ReviewConsole() {
         onClick={() => void execute(async () => { await api(`/${selected.id}/complete`, {}); await load(); await detail(selected); })}>Clôturer la campagne</button>
         <p className="lx-meta">Toutes les décisions doivent être prises avant la clôture.</p></div>}
       <h3 className="flex items-center gap-2 px-4 pt-2 text-sm font-semibold"><History size={16} aria-hidden /> Historique</h3>
-      {audit.length === 0 ? <EmptyState>Aucun événement.</EmptyState> : <ul className="lx-list">{audit.map(event => <li key={event.id}>
+      {audit === null ? <LoadingState label="Chargement de l’historique..." /> : audit === "failed" ? <ErrorState onRetry={() => void execute(() => detail(selected))}>L’historique est indisponible.</ErrorState>
+        : audit.length === 0 ? <EmptyState>Aucun événement.</EmptyState> : <ul className="lx-list">{audit.map(event => <li key={event.id}>
         <span>{REVIEW_EVENTS[event.operation] ?? event.operation} ({RESULTS[event.result] ?? event.result})</span><time className="lx-meta" dateTime={event.occurredAt}>{when(event.occurredAt)}</time></li>)}</ul>}
-      {audit.length > 0 && audit.length % 100 === 0 && <div className="p-4"><button type="button" disabled={busy} className="lx-btn lx-btn--secondary lx-btn--small" onClick={() => void execute(async () => setAudit([...audit, ...await api(`/${selected.id}/audit?after=${audit[audit.length - 1].id}`)]))}>Afficher plus</button></div>}
+      {Array.isArray(audit) && audit.length > 0 && audit.length % 100 === 0 && <div className="p-4"><button type="button" disabled={busy} className="lx-btn lx-btn--secondary lx-btn--small" onClick={() => void execute(async () => setAudit([...audit, ...await api(`/${selected.id}/audit?after=${audit[audit.length - 1].id}`)]))}>Afficher plus</button></div>}
     </section>}
   </div>;
 }
