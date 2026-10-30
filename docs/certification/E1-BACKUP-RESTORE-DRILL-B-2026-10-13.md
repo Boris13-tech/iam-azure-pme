@@ -216,6 +216,17 @@ The inventory was taken **inside the dump's snapshot** and travels encrypted wit
   - The timeline above is the third, complete run.
 - **On Windows, `psql` ends its lines with CRLF.** It was found by the behaviour checks on the test branch and fixed in `pg.mjs`. Earlier results were checked as unaffected: those comparisons were string against string, or the lines were trimmed.
 
+## Correction, 2026-10-18: the drill copy did not expire
+
+The timeline (section 4) says the target branch `br-raspy-frost-b9j52do9` would expire on 2026-10-16, so that the copy of Production would delete itself. **That did not happen.** A read-only check on 2026-10-18 found:
+- the branch still present and ready;
+- **no expiry set** (`expires_at` empty);
+- 40 MB of data: the restored copy of Production, in the drill project in Frankfurt (the operator's own Neon account, separate organization).
+
+The expiry was requested when the branch was created, but it was never read back. The claim in section 4 rested on the request, not on evidence.
+- **Fix in practice:** every rehearsal branch's expiry is now read back before any data is copied, and a run with no expiry stops (the EU-2 rehearsal of 2026-10-18 applies this).
+- **The copy itself:** its deletion waits for the operator's decision, since no Neon branch is deleted without the operator's agreement.
+
 ## Addendum, evening of 2026-10-13
 
 - **R1, key custody: closed.**

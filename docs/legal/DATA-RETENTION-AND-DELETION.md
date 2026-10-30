@@ -25,11 +25,12 @@
 |---|---|---|
 | Abuse counters | 2 days | As today |
 | Expired sign-in challenges and Microsoft transactions | Deleted 7 days after expiry | Scheduled purge (no audit value) |
-| Sessions | Hashes of the IP address and user agent removed 30 days after the session ends; the rest kept with the journal | Scheduled job, journaled |
-| Journal and sign-in records | **Per customer:** 1 year by default, configurable up to **[TO BE DECIDED]** years; LUXIA operator interventions kept at least as long as the customer contract plus **[TO BE DECIDED]** | Removal of whole time periods (for example monthly partitions) by a reviewed, journaled procedure, never row by row by the application. This keeps T0's rule: the application can never delete history |
-| Deleted or retired person | Name and identifiers replaced by a pseudonym after **[TO BE DECIDED]**; the journal keeps the pseudonymous identifier | Erasure request procedure (`DATA-SUBJECT-REQUESTS.md`) |
-| Closed organization | Everything deleted **[TO BE DECIDED, for example 90 days]** after closure, except what the law requires to keep; deletion recorded in the operator journal | Operator procedure, after a reversible quarantine period |
-| Independent backups | 30 days (in place), and possibly 12 monthly copies **[TO BE DECIDED]**; protected against deletion during that time | Immutability and a lifecycle rule (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`) |
+| Invitations | **PROPOSED: deleted 30 days after expiry or use.** They hold only token hashes; the journal keeps the event | Scheduled purge (R4) |
+| Sessions | **No network identifier stored** (R1, #107); existing hashes removed once (R2). The rest of the session row is kept with the journal period, as evidence of access | Code change (R1); one-way redaction migration (R2) |
+| Journal and sign-in records | **PROPOSED: 1 year by default**, in line with the CNIL's recommendation for access logs (6 months to 1 year, deliberation 2021-122). A customer may extend it **up to 3 years** with a documented justification (internal control, legal obligation). LUXIA operator interventions are kept as long as the customer's journal, and at least 1 year | Removal of whole time periods (for example monthly partitions) by a reviewed, journaled procedure, never row by row by the application. This keeps T0's rule: the application can never delete history (R5) |
+| Deleted or retired person | **PROPOSED: pseudonymized 30 days after the person is retired** (time to correct a mistaken retirement). A disabled person stays until the customer retires them. A customer's erasure request (the customer is the controller) is executed within 30 days. The journal keeps the pseudonymous identifier | Erasure request procedure (`DATA-SUBJECT-REQUESTS.md`), mechanism R6 |
+| Closed organization | **PROPOSED: everything deleted 90 days after closure** (a reversible quarantine for mistakes and disputes), except what the law requires to keep. **The end of a pilot follows the same rule, after the export window.** The deletion is recorded in the operator journal | Operator procedure after the quarantine, mechanism R7 |
+| Independent backups | **PROPOSED: 30 days (in place), and no monthly copies** (minimization). Deleted data therefore disappears from the backups within 30 days of its deletion. They are protected against deletion during that time | Immutability and a lifecycle rule (`docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md`), mechanism R8 |
 
 ## 3. Tension to resolve with counsel: append-only versus erasure
 
@@ -44,5 +45,5 @@ The proposed answer:
 
 ## Gaps to close before publication
 
-- A decision on every **[TO BE DECIDED]**.
+- Validation of every period marked **PROPOSED** (2026-10-18, prepared by the LUXIA legal workstream from the CNIL recommendation and the minimization principle; not legal advice).
 - The purge jobs, pseudonymization and closure deletion: designed here, not built.

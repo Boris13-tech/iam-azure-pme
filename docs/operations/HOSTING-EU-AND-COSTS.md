@@ -27,6 +27,8 @@ All figures exclude VAT. Prices come from the providers' pages on 2026-10-13. **
 
 **Neon Scale** costs $0.222 per CU-hour and adds 30-day history, 25 branches, an uptime SLA and SOC 2. It is **not** needed now. It becomes the requirement when a customer contract asks for an SLA or a SOC 2 report from our database provider, or for more than 7 days of history.
 
+**Operator decisions, 2026-10-18 (latest first):** a budget cap of **€40 per month for everything, and €0 until the operator's signal**. Hence: **Neon Free** in Frankfurt (€0), Vercel Hobby until the first pilot, then **Vercel Pro** at the operator's signal (Hobby forbids commercial use). This supersedes the same day's earlier choice of Neon Scale within €120 per month. The move follows [EU-MIGRATION-RUNBOOK.md](EU-MIGRATION-RUNBOOK.md).
+
 A region cannot be changed on an existing Neon project, so the move means a new project and a data migration (Neon documentation).
 
 ## 3. Monthly cost estimates (ASSUMPTIONS)
