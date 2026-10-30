@@ -53,10 +53,12 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Onboarding checklist:
       administrator = admin.id;
     }
     await owner.resource.create({ data: { ...rich, type: "API", name: "Checklist resource" } });
+    // Real references: the backup round trip restores this database, foreign keys included.
+    const reviewedScope = await owner.resourceScope.create({ data: { ...rich, key: "checklist", kind: "TENANT" } });
     await owner.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
       await tx.organizationDomain.create({ data: { ...rich, domain: `${randomUUID()}.example.test`, status: "VERIFIED", verifiedAt: new Date(), challengeHash: sha(randomUUID()), challengeExpiresAt: new Date(Date.now() + 1e8) } });
-      await tx.accessReviewCampaign.create({ data: { ...rich, name: "Fixture", scopeId: randomUUID(), scopeType: "TENANT", reviewerSubjectId: administrator, createdBySubjectId: administrator, startsAt: new Date(), dueAt: new Date(Date.now() + 1e8) } });
+      await tx.accessReviewCampaign.create({ data: { ...rich, name: "Fixture", scopeId: reviewedScope.id, scopeType: "TENANT", reviewerSubjectId: administrator, createdBySubjectId: administrator, startsAt: new Date(), dueAt: new Date(Date.now() + 1e8) } });
     }, { timeout: 30_000 });
   }, 120_000);
   afterAll(async () => { await owner?.$disconnect(); await rawPrisma.$disconnect(); });
@@ -107,9 +109,10 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Onboarding checklist:
     await grant(rich, expired.subjectId, "resources.read", { validUntil: new Date(Date.now() - 1000) });
     expect(await getOnboardingChecklist(expired, change())).toMatchObject({ firstResource: null });
     const scoped = await viewer(bare, ["subjects.read"]);
+    const narrow = await owner.resourceScope.create({ data: { ...bare, key: "narrow", kind: "TENANT" } });
     await owner.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
-      const entitlement = await tx.entitlement.create({ data: { ...bare, key: "providers.read", resource: "providers", action: "read", resourceScopeId: randomUUID() } });
+      const entitlement = await tx.entitlement.create({ data: { ...bare, key: "providers.read", resource: "providers", action: "read", resourceScopeId: narrow.id } });
       await tx.assignment.create({ data: { ...bare, subjectId: scoped.subjectId, entitlementId: entitlement.id, source: "DIRECT", sourceRef: randomUUID() } });
     }, { timeout: 30_000 });
     expect(await getOnboardingChecklist(scoped, change())).toMatchObject({ domainVerified: null });
