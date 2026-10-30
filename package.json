@@ -15,6 +15,7 @@
     "test:operations": "vitest run tests/operations && tsx scripts/certify-identity-v1.ts",
     "test:entra-parity": "vitest run tests/provider-adapters/microsoft-entra-adapter.contract.test.ts tests/provider-adapters/microsoft-entra-architecture.test.ts",
     "test:security:watch": "vitest tests/security",
+    "test:e2e": "playwright test",
     "postinstall": "prisma generate",
     "soak:staging": "tsx scripts/soak/run-soak.ts"
   },
@@ -36,6 +37,7 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "^20",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
