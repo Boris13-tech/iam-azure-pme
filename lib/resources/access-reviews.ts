@@ -94,13 +94,24 @@ export function createAccessReview(auth: AuthContext, input: CampaignInput, chan
 async function read<T>(auth: AuthContext, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   return withTenantDb(auth, async tx => { await requireNative(tx, auth, "access_reviews.read"); return work(tx); });
 }
+/**
+ * Campaign visibility. access_reviews.manage sees every campaign of the tenant; anyone else sees only the campaigns
+ * they review or created. A campaign outside that set is NOT_FOUND, for reads and writes alike (no existence oracle).
+ */
+async function visibleCampaigns(tx: Prisma.TransactionClient, auth: AuthContext): Promise<Prisma.AccessReviewCampaignWhereInput> {
+  try { await requireNative(tx, auth, "access_reviews.manage"); return scope(auth); }
+  catch (error) {
+    if (!(error instanceof CanonicalAdminError) || error.code !== "FORBIDDEN") throw error;
+    return { ...scope(auth), OR: [{ reviewerSubjectId: auth.subjectId }, { createdBySubjectId: auth.subjectId }] };
+  }
+}
 async function campaignInScope(tx: Prisma.TransactionClient, auth: AuthContext, id: string) {
-  const campaign = await tx.accessReviewCampaign.findFirst({ where: { ...scope(auth), id } });
+  const campaign = await tx.accessReviewCampaign.findFirst({ where: { ...await visibleCampaigns(tx, auth), id } });
   if (!campaign) fail("NOT_FOUND", 404);
   return campaign;
 }
 export function listAccessReviews(auth: AuthContext, after?: string) {
-  return read(auth, tx => tx.accessReviewCampaign.findMany({ where: { ...scope(auth), ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: "asc" }, take: 100, include: { _count: { select: { items: true } } } }));
+  return read(auth, async tx => tx.accessReviewCampaign.findMany({ where: { ...await visibleCampaigns(tx, auth), ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: "asc" }, take: 100, include: { _count: { select: { items: true } } } }));
 }
 export function getAccessReview(auth: AuthContext, id: string) { return read(auth, tx => campaignInScope(tx, auth, id)); }
 export function listReviewItems(auth: AuthContext, id: string, after?: string, pending = false) {
