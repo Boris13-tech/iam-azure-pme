@@ -21,7 +21,7 @@
 |---|---|
 | Availability | Nobody could sign in, sign up or reach the API for about 34 hours. Today only the operator and test organizations use Production; no pilot customer was affected |
 | Session cookies | Not readable by the foreign site: `luxia_session` is `HttpOnly`, `Secure`, `SameSite=Lax` (verified in the code). The foreign site was the operator's own static application with no server side |
-| Passkeys | No new credential or assertion could be produced for LUXIA: the LUXIA server was not reachable to issue challenges. The foreign site was the operator's own code, not an attacker's. **Residual lesson:** whatever is deployed on this domain runs on the passkey origin |
+| Passkeys | No credential or assertion could be accepted by LUXIA: its server was not reachable, and it checks the challenge, origin and relying party. Whether the foreign site invoked WebAuthn is not known. The foreign site was the operator's own code, not an attacker's. **Residual lesson:** whatever is deployed on this domain runs on the passkey origin |
 | Database, backups, secrets | Not touched. Hourly backups kept succeeding (last checked 2026-10-25 18:53 UTC) |
 | Personal data breach | **None found.** Temporary unavailability, no loss, no disclosure, no real customer data subjects. No notification required; recorded here |
 
@@ -46,6 +46,6 @@
 | 1 | Restore the Production deployment | Claude, with the operator's approval | **Done** |
 | 2 | Operator's passkey sign-in to prove the service end to end | Operator | Open |
 | 3 | **External monitoring now**: a free UptimeRobot keyword monitor on `https://iam-azure-pme.vercel.app/login` expecting the text `LUXIA`, every 5 minutes, alerting the operator by e-mail and push. It needs only an account, which the operator creates (no code). Monitoring design M-A | Operator | Open (recommended today) |
-| 4 | A free Production canary in GitHub Actions (`production-canary.yml`): every 30 minutes, checks that `/login` serves LUXIA, that `/` redirects to `/login` and that an API path answers 401; a failure fails the run and GitHub e-mails the operator. A stopgap: GitHub's scheduler is irregular (E4) | Claude (PR), operator merges (CI change) | In review |
+| 4 | A free Production canary in GitHub Actions (`production-canary.yml`): every 30 minutes, checks that `/login` serves LUXIA, that `/` redirects to `/login` and that an API path answers 401; a failure fails the run. It counts as an alert only after a deliberately failed run has been received by the operator: GitHub's e-mail depends on notification settings. A stopgap: GitHub's scheduler is irregular (E4) | Claude (PR), operator merges (CI change) | In review |
 | 5 | Rule for every working session on this machine: before any `vercel deploy --prod`, check the linked project (`.vercel/project.json`) and pass the project explicitly. LUXIA itself is deployed through the API with an exact commit, never from a folder | Operator and every session | Recorded |
 | 6 | Monitoring slices 1 and 2 (#102, #108), then G7 alert tests | Reviewer, operator | In the class A queue |

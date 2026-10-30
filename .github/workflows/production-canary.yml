@@ -1,8 +1,9 @@
 name: Production canary
 
 # Free stopgap until external monitoring is active (docs/incidents/2026-10-24-PRODUCTION-DOMAIN-OVERWRITTEN.md):
-# checks from outside that the Production domain serves LUXIA. A failed run e-mails the operator (GitHub's
-# notification for failed scheduled runs). No secret, no checkout, no token permission; it only reads public pages.
+# checks from outside that the Production domain serves LUXIA. A failure fails the run; an e-mail reaches someone only
+# if GitHub's notification settings send it, which the alert drill must prove (incident report, action 4).
+# No secret, no checkout, no token permission; it only reads public pages.
 on:
   schedule:
     - cron: '7,37 * * * *'
