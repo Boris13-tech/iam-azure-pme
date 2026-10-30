@@ -68,6 +68,8 @@ describe("B4 operator break-glass architecture", () => {
     expect(fn).toContain("metadata: eventMetadata(plan, digest, rest.effects), occurredAt,");
     expect(fn).toContain("const changeId = `break-glass:${digest}`");
     expect(fn).toContain(`refuse("ALREADY_APPLIED"`);
+    // The operator command binds every plan to the connection's host and port, at plan and at apply.
+    expect(read("scripts/operators/break-glass.ts").match(/endpoint: new URL\(url\)\.host/g)).toHaveLength(2);
     // D2: account disabling goes through the last-administrator guard variant, never around it.
     expect(body(read(SERVICE), "perform")).toContain("preserveLastAdministratorUnlessSuspended(tx, scope, async () => {");
     // Status changes use the B3 primitive only.

@@ -79,6 +79,8 @@ export type DnsCheck = (resolver: string, name: string) => Promise<"PRESENT" | "
 export type BreakGlassOptions = {
   issuedAt: Date;
   toolVersion: string;
+  /** Host and port of the connection. The operator command always sets it; part of the plan, so of the digest. */
+  endpoint?: string;
   dns?: DnsCheck;
   /** Tests only; the operator command always uses LUXIA_CERTIFICATION_ORGANIZATIONS. */
   certificationOrganizations?: readonly string[];
@@ -238,6 +240,8 @@ async function readCounts(tx: Tx, organizationId: string, tenantId: string, at: 
 export type BreakGlassPlan = {
   version: 1;
   toolVersion: string;
+  /** Where this plan may be applied: a digest made against another database does not match. */
+  binding: { endpoint: string | null; database: string; role: string };
   input: BreakGlassInput;
   organization: { id: string; slug: string; status: OrganizationStatus; statusChangedAt: string | null };
   tenantId: string;
@@ -253,6 +257,7 @@ export type BreakGlassPlan = {
 
 export async function computePlan(tx: Tx, input: BreakGlassInput, options: BreakGlassOptions): Promise<{ plan: BreakGlassPlan; digest: string }> {
   const at = options.issuedAt;
+  const [connection] = await tx.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
   const org = await tx.organization.findUnique({ where: { slug: input.organization }, select: { id: true, slug: true, status: true, statusChangedAt: true } });
   if (!org) refuse("ORGANIZATION_NOT_FOUND");
   const status = org.status as OrganizationStatus;
@@ -337,7 +342,7 @@ export async function computePlan(tx: Tx, input: BreakGlassInput, options: Break
   }
 
   const plan: BreakGlassPlan = {
-    version: 1, toolVersion: options.toolVersion, input,
+    version: 1, toolVersion: options.toolVersion, binding: { endpoint: options.endpoint ?? null, ...connection }, input,
     organization: { id: org.id, slug: org.slug, status, statusChangedAt: org.statusChangedAt?.toISOString() ?? null },
     tenantId, counts, target, operatorSubjectId: operator?.id ?? null, unjournaledStatusChange, expected,
     irreversible: IRREVERSIBLE_ACTIONS.includes(input.action),
