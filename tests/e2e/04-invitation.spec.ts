@@ -36,7 +36,7 @@ test("an invited member joins with a passkey and has no administration access", 
     expect(await invitee.authenticator.credentials()).toHaveLength(1);
 
     await signInWithPasskey(invitee.page, organization.slug, principalName);
-    await expect(topBar(invitee.page)).toContainText(memberName);
+    await expect(invitee.page.locator(".luxia-person")).toContainText(memberName);
     expect(await navigationEntries(invitee.page)).toEqual(["Vue d’ensemble"]);
 
     // Hidden is not the control: the server refuses the administration data to this member.
