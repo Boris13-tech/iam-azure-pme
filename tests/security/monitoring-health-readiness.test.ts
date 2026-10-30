@@ -81,6 +81,23 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     expect(await pending).toBe(false);
   });
 
+  it("a stalled database holds one query: after the timeout and the cache, no second one starts until it settles", async () => {
+    vi.useFakeTimers();
+    let answer!: (value: unknown) => void;
+    query.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    const start = 1_000_000;
+    const pending = databaseReady(undefined, start);
+    await vi.advanceTimersByTimeAsync(READINESS_TIMEOUT_MS + 1);
+    expect(await pending).toBe(false);
+    expect(await databaseReady(undefined, start + READINESS_CACHE_MS)).toBe(false);
+    expect(query).toHaveBeenCalledTimes(1);
+    answer([1]);
+    await vi.advanceTimersByTimeAsync(0);
+    query.mockResolvedValue([1]);
+    expect(await databaseReady(undefined, start + READINESS_CACHE_MS)).toBe(true);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
   it("the database sees one check per period, whatever the call rate (single flight, then cache)", async () => {
     let release!: () => void;
     query.mockReturnValue(new Promise((resolve) => { release = () => resolve([1]); }));
