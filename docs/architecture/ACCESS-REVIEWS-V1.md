@@ -8,6 +8,18 @@ Reviews consume only canonical `Subject → Assignment → Entitlement → Resou
 
 The campaign references an existing active ResourceScope (`RESOURCE`, `RESOURCE_GROUP`, `TENANT`). Its scope type/resource are server-derived. One explicit ACTIVE HUMAN reviewer must hold an effective native `access_reviews.decide` Assignment in the same Organization/Tenant. The actor creating a campaign needs `access_reviews.create`; completion needs `access_reviews.manage`. Only the assigned reviewer can decide, and their entitlement and lifecycle are checked again on every request, including replay.
 
+### Campaign visibility (#140)
+
+Reading needs `access_reviews.read` or `access_reviews.read_all`. One rule (`lib/resources/access-review-visibility.ts`) decides which campaigns a caller can open, for the API and the dashboard counters alike:
+
+| Right | Campaigns |
+|---|---|
+| `access_reviews.read` | those the caller reviews or created |
+| `access_reviews.read_all` | every campaign of the tenant, **read only**: it grants no decision, completion, creation, reviewer or scope change |
+| `access_reviews.manage` | every campaign of the tenant (it manages them; reading still needs read or read_all) |
+
+Outside that set a campaign is `NOT_FOUND`, exactly like an unknown id, for reads and decisions; a refused decision is journaled as `DENIED`. Action rights (`create`, `decide`, `manage`) are always checked on their own. The access review dashboard counters count only the visible campaigns, so a limited reader cannot infer the tenant's volume; without a read right they are `restricted`.
+
 Default self-review is denied both during generation and by a database CHECK. There is no v1 exception policy. Select a different reviewer if they hold any eligible access in the campaign scope. This avoids creating an unfinishable self-review item. No manager/role/name/email inference.
 
 ## Snapshot semantics

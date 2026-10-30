@@ -52,6 +52,8 @@ export const ENTITLEMENT_CATALOG_V1 = [
   "sod.read",
   "sod.manage",
   "access_reviews.read",
+  // Read-only, every campaign of the tenant (auditors). Grants no decision, completion or change.
+  "access_reviews.read_all",
   "access_reviews.create",
   "access_reviews.decide",
   "access_reviews.manage",
