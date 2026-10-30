@@ -45,8 +45,7 @@ describe("Brand and the pages before sign-in", () => {
     const sources = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? sources(`${dir}/${entry.name}`)
       : /\.(tsx?|css)$/.test(entry.name) ? [`${dir}/${entry.name}`] : []);
     for (const file of [...sources("app"), ...sources("components")]) expect(read(file), file).not.toMatch(/next\/font/);
-    const css = sources("app").filter((file) => file.endsWith(".css")).map(read).join("
-");
+    const css = sources("app").filter((file) => file.endsWith(".css")).map(read).join(String.fromCharCode(10));
     expect(css).not.toMatch(/@font-face|@import\s+url\(|fonts\.googleapis/i);
   });
 });
