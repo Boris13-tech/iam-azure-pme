@@ -17,11 +17,10 @@ The Customer evaluates LUXIA Identity, an identity and access management service
 1. **Users:** at most **[number, within the Beta limit of 50 users across all pilots]** people of the Customer.
 2. **Capabilities:**
    - sign-in with passkeys;
-   - sign-in with Microsoft Entra, through the Customer's own tenant with its administrator's consent;
    - recovery codes;
    - administration of people, accounts, entitlements and access reviews;
    - the security journal.
-   Generic OpenID Connect providers and other capabilities are outside the Pilot.
+   Sign-in through the Customer's own Microsoft Entra tenant, generic OpenID Connect providers and other capabilities are outside the Pilot.
 3. **No critical dependency.** The Customer keeps an independent way to reach its critical systems during the Pilot. LUXIA Identity must not be the only path to them.
 
 ## 3. Duration
@@ -30,7 +29,7 @@ From **[start date]** for **[3] months**, renewable by written agreement. Either
 
 ## 4. Fees
 
-**[TO BE DECIDED by the operator: free of charge, or a fee.]** If free of charge, no fee is due, and none becomes due without a new written agreement.
+The Pilot is **free of charge**. No fee is due, and none becomes due without a new written agreement.
 
 ## 5. The Customer's role and obligations
 
