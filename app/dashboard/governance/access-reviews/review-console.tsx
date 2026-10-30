@@ -1,13 +1,14 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ClipboardCheck, History, ListChecks } from "lucide-react";
 import { EmptyState, ErrorState, LoadingState, PageHeader } from "@/components/ui/states";
 
 // Access reviews. A reviewer decides on each access in words: who holds it, which entitlement, on which resources.
-// Names are read with the viewer's own rights (subjects, entitlements, resources); without them the line says so
-// instead of showing identifiers. Same API as before (/api/canonical/access-reviews).
+// The items endpoint returns those names under the item's own authorization (access_reviews.read); a name it
+// cannot give (a resource removed since the snapshot) is said in words instead of showing an identifier.
 type Campaign = { id: string; name: string; scopeType: string; status: string; dueAt: string; reviewerSubjectId: string };
-type Item = { id: string; subjectId: string; assignmentId: string; entitlementId: string; resourceIds: string[]; reviewerSubjectId: string; decision: string; reviewState: string; justification: string | null };
+type Item = { id: string; subjectId: string; subjectName: string | null; assignmentId: string; entitlementId: string; entitlementLabel: string | null;
+  resourceIds: string[]; resourceNames: (string | null)[]; reviewerSubjectId: string; decision: string; reviewState: string; justification: string | null };
 type Configuration = { scopes: { id: string; key: string; kind: string; resource?: { name: string } | null }[]; reviewers: { id: string; name: string }[] };
 type AuditEvent = { id: string; operation: string; result: string; occurredAt: string };
 
@@ -22,22 +23,6 @@ async function api(path: string, body?: unknown) {
   const value = await response.json().catch(() => ({}));
   if (!response.ok) throw new Refused(ERRORS[value.error] ?? (response.status === 403 ? ERRORS.FORBIDDEN : "Opération impossible pour le moment. Réessayez."));
   return value;
-}
-async function names(url: string, pick: (row: Record<string, unknown>) => [string, string], paged = false) {
-  const labels = new Map<string, string>();
-  try {
-    let after = "";
-    for (let page = 0; page < 100; page++) {
-      const response = await fetch(after ? `${url}?after=${encodeURIComponent(after)}` : url, { cache: "no-store" });
-      if (!response.ok) return labels;
-      const rows = await response.json() as Record<string, unknown>[];
-      for (const row of rows) { const [id, label] = pick(row); labels.set(id, label); }
-      // Catalogs that list 100 rows at a time, ordered by id; the others answer in one response.
-      if (!paged || rows.length < 100) return labels;
-      after = String(rows[rows.length - 1].id);
-    }
-  } catch { /* labels stay optional: the console keeps its fallback text */ }
-  return labels;
 }
 const SCOPE_KINDS: Record<string, string> = { RESOURCE: "ressource unique", RESOURCE_GROUP: "groupe de ressources", TENANT: "environnement entier" };
 const DECISIONS: Record<string, string> = { PENDING: "En attente", KEEP: "Accès conservé", REVOKE: "Accès retiré" };
@@ -54,7 +39,6 @@ export default function ReviewConsole() {
   const [name, setName] = useState(""), [scopeId, setScope] = useState(""), [reviewerSubjectId, setReviewer] = useState(""), [dueAt, setDue] = useState("");
   const [pending, setPending] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [loadFailed, setLoadFailed] = useState(false);
   const [justifications, setJustifications] = useState<Record<string, string>>({});
-  const [labels, setLabels] = useState({ people: new Map<string, string>(), rights: new Map<string, string>(), resources: new Map<string, string>() });
 
   const load = async () => setCampaigns(await api(""));
   const start = async () => {
@@ -64,11 +48,6 @@ export default function ReviewConsole() {
       setPermissions(platform.entitlements ?? []); setActor(platform.subject?.id ?? "");
       if ((platform.entitlements ?? []).includes("access_reviews.create")) setConfiguration(await api("/configuration"));
       await load();
-      // Labels one at a time, after the campaigns: each request holds a database connection on the server.
-      const people = await names("/api/canonical/subjects", r => [String(r.id), String(r.name)]);
-      const rights = await names("/api/canonical/resource-governance/entitlements", r => [String(r.id), String(r.description || r.key)], true);
-      const resources = await names("/api/canonical/resources", r => [String(r.id), String(r.name)]);
-      setLabels({ people, rights, resources });
     } catch (failure) { setLoadFailed(true); setError(failure instanceof Error ? failure.message : ""); }
   };
   useEffect(() => { void start(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -84,9 +63,9 @@ export default function ReviewConsole() {
     try { await work(); } catch (failure) { setError(failure instanceof Error ? failure.message : "Opération impossible pour le moment."); }
     finally { setBusy(false); }
   };
-  const person = (id: string) => labels.people.get(id) ?? "Personne (nom non visible avec vos droits)";
-  const right = (id: string) => labels.rights.get(id) ?? "Droit (libellé non visible avec vos droits)";
-  const resourceList = useMemo(() => (ids: string[]) => ids.length === 0 ? "aucune" : ids.map(id => labels.resources.get(id) ?? "ressource non visible").join(", "), [labels]);
+  const person = (item: Item) => item.subjectName ?? "Personne (nom non visible avec vos droits)";
+  const right = (item: Item) => item.entitlementLabel ?? "Droit (libellé non visible avec vos droits)";
+  const resourceList = (item: Item) => item.resourceIds.length === 0 ? "aucune" : item.resourceIds.map((_, index) => item.resourceNames?.[index] ?? "ressource non visible").join(", ");
 
   return <div className="luxia-dashboard">
     <PageHeader title="Revues d’accès" description="Vérifiez régulièrement que chaque accès est toujours justifié. Conserver maintient l’accès ; Retirer le supprime sur toutes ses ressources." />
@@ -134,8 +113,8 @@ export default function ReviewConsole() {
       {items === null ? <LoadingState label="Chargement des accès à examiner..." /> : items.length === 0 ? <EmptyState>Aucun accès à examiner.</EmptyState> : <ul className="lx-list">
         {items.map(item => <li key={item.id}>
           <div className="min-w-0 flex-1">
-            <p className="m-0 font-semibold">{person(item.subjectId)}</p>
-            <p className="lx-meta">Droit : {right(item.entitlementId)} · Ressources : {resourceList(item.resourceIds)}</p>
+            <p className="m-0 font-semibold">{person(item)}</p>
+            <p className="lx-meta">Droit : {right(item)} · Ressources : {resourceList(item)}</p>
             <p className="lx-meta">{DECISIONS[item.decision] ?? item.decision}, {REVIEW_STATES[item.reviewState] ?? item.reviewState}{item.justification ? ` · « ${item.justification} »` : ""}</p>
             {item.decision === "PENDING" && item.reviewerSubjectId === actor && permissions.includes("access_reviews.decide") && selected.status === "OPEN" && <div className="mt-3 lx-stack">
               <div className="lx-field"><label htmlFor={`justification-${item.id}`} className="lx-label">Justification (aucun mot de passe ni secret)</label>

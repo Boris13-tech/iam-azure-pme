@@ -6,6 +6,7 @@ import { withTenantDb } from "../db/scoped-client";
 import { requireNative } from "./service";
 import { evaluateSoD } from "./sod";
 import { isAssignmentEffective } from "../auth/entitlements-catalog";
+import { REVIEW_ALL_CAMPAIGNS_RIGHTS, REVIEW_READ_RIGHTS, campaignVisibility } from "./access-review-visibility";
 
 const scope = (auth: AuthContext) => ({ organizationId: auth.organizationId, tenantId: auth.tenantId });
 function fail(code: string, status = 409): never { throw new CanonicalAdminError(code, status); }
@@ -91,21 +92,55 @@ export function createAccessReview(auth: AuthContext, input: CampaignInput, chan
     return { value: campaign };
   });
 }
+/** The subset of `keys` the caller holds, with exactly requireNative's semantics. */
+async function heldRights(tx: Prisma.TransactionClient, auth: AuthContext, keys: readonly string[]) {
+  const held = new Set<string>();
+  for (const key of keys) {
+    try { await requireNative(tx, auth, key); held.add(key); }
+    catch (error) { if (!(error instanceof CanonicalAdminError) || error.code !== "FORBIDDEN") throw error; }
+  }
+  return held;
+}
+/** Reading needs access_reviews.read or access_reviews.read_all; read_all grants no action of any kind. */
 async function read<T>(auth: AuthContext, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-  return withTenantDb(auth, async tx => { await requireNative(tx, auth, "access_reviews.read"); return work(tx); });
+  return withTenantDb(auth, async tx => { if (!(await heldRights(tx, auth, REVIEW_READ_RIGHTS)).size) fail("FORBIDDEN", 403); return work(tx); });
+}
+/**
+ * Campaign visibility (access-review-visibility.ts): read_all and manage see every campaign of the tenant; anyone
+ * else only the campaigns they review or created. Outside that set a campaign is NOT_FOUND, for reads and writes
+ * alike, exactly like an id that does not exist (no existence oracle).
+ */
+async function visibleCampaigns(tx: Prisma.TransactionClient, auth: AuthContext): Promise<Prisma.AccessReviewCampaignWhereInput> {
+  return campaignVisibility(auth, await heldRights(tx, auth, REVIEW_ALL_CAMPAIGNS_RIGHTS));
 }
 async function campaignInScope(tx: Prisma.TransactionClient, auth: AuthContext, id: string) {
-  const campaign = await tx.accessReviewCampaign.findFirst({ where: { ...scope(auth), id } });
+  const campaign = await tx.accessReviewCampaign.findFirst({ where: { ...await visibleCampaigns(tx, auth), id } });
   if (!campaign) fail("NOT_FOUND", 404);
   return campaign;
 }
 export function listAccessReviews(auth: AuthContext, after?: string) {
-  return read(auth, tx => tx.accessReviewCampaign.findMany({ where: { ...scope(auth), ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: "asc" }, take: 100, include: { _count: { select: { items: true } } } }));
+  return read(auth, async tx => tx.accessReviewCampaign.findMany({ where: { ...await visibleCampaigns(tx, auth), ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: "asc" }, take: 100, include: { _count: { select: { items: true } } } }));
 }
 export function getAccessReview(auth: AuthContext, id: string) { return read(auth, tx => campaignInScope(tx, auth, id)); }
+/**
+ * Items carry the words a reviewer needs (who, which entitlement, which resources) under the item's own authorization:
+ * access_reviews.read, campaign in scope, same transaction and RLS context. Labels are resolved only for the rows
+ * returned, never through subjects.read / resources.read, and never for anything outside this page of items.
+ */
 export function listReviewItems(auth: AuthContext, id: string, after?: string, pending = false) {
-  return read(auth, async tx => { await campaignInScope(tx, auth, id); return tx.accessReviewItem.findMany({ where: { ...scope(auth), campaignId: id,
-    ...(after ? { id: { gt: after } } : {}), ...(pending ? { decision: "PENDING", reviewerSubjectId: auth.subjectId } : {}) }, orderBy: { id: "asc" }, take: 100 }); });
+  return read(auth, async tx => {
+    await campaignInScope(tx, auth, id);
+    const items = await tx.accessReviewItem.findMany({ where: { ...scope(auth), campaignId: id,
+      ...(after ? { id: { gt: after } } : {}), ...(pending ? { decision: "PENDING", reviewerSubjectId: auth.subjectId } : {}) }, orderBy: { id: "asc" }, take: 100,
+      include: { subject: { select: { name: true } }, entitlement: { select: { key: true, description: true } } } });
+    const resourceIds = [...new Set(items.flatMap(item => item.resourceIds))], names = new Map<string, string>();
+    // A TENANT scope snapshots up to 1 000 resources per item: bound the bind parameters of each query.
+    for (let start = 0; start < resourceIds.length; start += 5000) {
+      for (const row of await tx.resource.findMany({ where: { ...scope(auth), id: { in: resourceIds.slice(start, start + 5000) } }, select: { id: true, name: true } })) names.set(row.id, row.name);
+    }
+    return items.map(({ subject, entitlement, ...item }) => ({ ...item, subjectName: subject.name,
+      entitlementLabel: entitlement.description || entitlement.key, resourceNames: item.resourceIds.map(resourceId => names.get(resourceId) ?? null) }));
+  });
 }
 export function reviewConfiguration(auth: AuthContext) {
   return withTenantDb(auth, async tx => {
