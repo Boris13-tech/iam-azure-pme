@@ -61,6 +61,10 @@ BEGIN
      OR NEW."expiresAt" IS DISTINCT FROM OLD."expiresAt" OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt" THEN
     RAISE EXCEPTION 'INVITATION_IMMUTABLE' USING ERRCODE = '23514';
   END IF;
+  -- R4: the moment an invitation ends is the database's clock, never the caller's. Without this, a role that may
+  -- revoke could backdate revokedAt and make a row finished less than 30 days ago eligible for the purge.
+  IF NEW."acceptedAt" IS NOT NULL AND OLD."acceptedAt" IS NULL THEN NEW."acceptedAt" := v_now; END IF;
+  IF NEW."revokedAt" IS NOT NULL AND OLD."revokedAt" IS NULL THEN NEW."revokedAt" := v_now; END IF;
   IF NEW."acceptedAt" IS NOT NULL AND OLD."expiresAt" <= v_now THEN
     RAISE EXCEPTION 'INVITATION_EXPIRED' USING ERRCODE = '23514';
   END IF;

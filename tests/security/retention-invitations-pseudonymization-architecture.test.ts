@@ -41,10 +41,16 @@ function previous(name: string) {
   }
   return found;
 }
+// R4: the end of an invitation is stamped with the database's clock, so a caller cannot backdate it into the purge window.
+const STAMP = `  -- R4: the moment an invitation ends is the database's clock, never the caller's. Without this, a role that may
+  -- revoke could backdate revokedAt and make a row finished less than 30 days ago eligible for the purge.
+  IF NEW."acceptedAt" IS NOT NULL AND OLD."acceptedAt" IS NULL THEN NEW."acceptedAt" := v_now; END IF;
+  IF NEW."revokedAt" IS NOT NULL AND OLD."revokedAt" IS NULL THEN NEW."revokedAt" := v_now; END IF;
+`;
 const squash = (text: string) => text.replace(/\s+/g, " ").trim();
 
 describe("R4/R6 retention: migration architecture", () => {
-  it("comes after R7 and changes exactly one guard, the invitation guard, as R7's body plus the R4 gate only, placed first", () => {
+  it("comes after R7 and changes exactly one guard, the invitation guard: R7's body plus the R4 gate (first) and the end-time stamp", () => {
     const dirs = readdirSync("prisma/migrations").filter((dir) => /^\d{14}_/.test(dir)).sort();
     expect(dirs.indexOf(NEW)).toBeGreaterThan(dirs.indexOf("20261023140000_organization_erasure"));
     expect([...migration.matchAll(/CREATE OR REPLACE FUNCTION (\w+)\(/g)].map((m) => m[1])).toEqual(["luxia_invitation_guard"]);
@@ -52,7 +58,10 @@ describe("R4/R6 retention: migration architecture", () => {
     const before = previous("luxia_invitation_guard");
     expect(before, "R7's body is the previous one").toContain(R7_GATE);
     expect(now.split(GATE)).toHaveLength(2);
-    expect(now.replace(GATE, "")).toBe(before);
+    expect(now.split(STAMP)).toHaveLength(2);
+    expect(now.replace(GATE, "").replace(STAMP, "")).toBe(before);
+    // The stamp sits after the immutability checks (a finished row cannot change) and before the expiry check.
+    expect(now.indexOf(STAMP) + STAMP.length).toBe(now.indexOf(`  IF NEW."acceptedAt" IS NOT NULL AND OLD."expiresAt" <= v_now THEN`));
     expect(now.indexOf(GATE)).toBe(now.indexOf("\nBEGIN\n") + "\nBEGIN\n".length);
     // R7's erasure gate is kept, right after the R4 gate.
     expect(now.indexOf(R7_GATE)).toBe(now.indexOf(GATE) + GATE.length);

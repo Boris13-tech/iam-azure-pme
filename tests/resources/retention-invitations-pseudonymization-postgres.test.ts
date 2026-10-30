@@ -102,6 +102,24 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
   }, 120_000);
   afterAll(async () => { await rawPrisma.$disconnect(); await owner?.$disconnect(); });
 
+  it("a revocation cannot be backdated into the purge window: the database stamps its own time (audit of #138)", async () => {
+    // Created 31 days ago, expired 24 days ago: finished for 24 days, so NOT eligible.
+    const target = await invitation(a, { created: 31, expires: 24 });
+    const asRuntime = (sql: string) => rawPrisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${a.organizationId}, true), set_config('app.tenant_id', ${a.tenantId}, true)`;
+      return tx.$executeRawUnsafe(sql, target);
+    });
+    // The runtime role may revoke; it tries to date the revocation 100 days back.
+    expect(await asRuntime(`UPDATE "Invitation" SET "revokedAt" = (now() AT TIME ZONE 'UTC') - interval '100 days' WHERE "id" = $1`)).toBe(1);
+    const [stored] = await owner.$queryRawUnsafe<Array<{ age: number }>>(
+      `SELECT extract(epoch FROM ((now() AT TIME ZONE 'UTC') - "revokedAt"))::float8 AS age FROM "Invitation" WHERE "id" = $1`, target);
+    expect(stored.age).toBeLessThan(60); // stamped now, not 100 days ago
+    await drain("luxia_retention_purge_invitations", "invitations");
+    expect(await present([target])).toEqual([target]);
+    // A finished row cannot be re-dated afterwards either.
+    expect(await settle(asRuntime(`UPDATE "Invitation" SET "revokedAt" = (now() AT TIME ZONE 'UTC') - interval '100 days' WHERE "id" = $1`))).toMatch(/INVITATION_IMMUTABLE/);
+  });
+
   it("the runtime role runs it: the dry run changes nothing, then only rows past the period go, other organizations untouched", async () => {
     const gone = [
       await invitation(a, { created: 32, expires: 25, accepted: 31 }),
