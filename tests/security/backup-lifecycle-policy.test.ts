@@ -15,12 +15,16 @@ describe("R8 backup lifecycle policy", () => {
     expect(Object.keys(rule.definition.actions).sort()).toEqual(["baseBlob", "version"]);
     for (const action of Object.values(rule.definition.actions) as Array<Record<string, unknown>>) {
       expect(Object.keys(action)).toEqual(["delete"]);
-      expect((action.delete as { daysAfterCreationGreaterThan: number }).daysAfterCreationGreaterThan).toBeGreaterThan(30);
+      expect((action.delete as { daysAfterCreationGreaterThan: number }).daysAfterCreationGreaterThan).toBe(31);
     }
   });
 
   it("the runbook applies this very file, and verifies by reading back", () => {
     expect(runbook).toContain("--policy @docs/operations/BACKUP-LIFECYCLE-POLICY.json");
     expect(runbook).toContain("az storage account management-policy show");
+    // Proof of expiry counts soft-deleted versions too; the rollback disables the rule before deleting it.
+    expect(runbook).toContain("--include vd");
+    expect(runbook.indexOf("policy.rules[0].enabled=false")).toBeGreaterThan(-1);
+    expect(runbook.indexOf("policy.rules[0].enabled=false")).toBeLessThan(runbook.indexOf("az storage account management-policy delete"));
   });
 });

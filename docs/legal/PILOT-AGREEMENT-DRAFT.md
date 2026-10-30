@@ -65,7 +65,7 @@ The Pilot is provided **without any availability, performance or support-time co
 2. **At the end of the Pilot:**
    - on request made within **[15] days**, LUXIA provides an export of the Customer's data in a machine-readable format within **[15] days**;
    - LUXIA then deletes the Customer's organization and its data within **[90] days**, and confirms it in writing;
-   - encrypted backups that still contain the data are deleted within **[46]** days after that deletion (they cannot be deleted during their first 30 days, by design).
+   - encrypted backups that still contain the data are deleted about **[46]** days after that deletion, an estimate that depends on the storage platform's processing (they cannot be deleted during their first 30 days, by design).
 3. Data that a law requires LUXIA to keep is kept only for that purpose and that time.
 
 ## 10. Confidentiality

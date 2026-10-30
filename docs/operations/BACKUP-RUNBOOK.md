@@ -240,10 +240,10 @@ The authorized ceiling is €10 a month (operator decision, 2026-10-13).
 ### 8.1 How a backup ends
 
 1. Days 0 to 30: the version is immutable. Nobody can delete it, the lifecycle rule included (the lock wins).
-2. Day 31: the rule is due. Azure runs lifecycle rules about once a day, so the deletion happens within about a day after that.
+2. Day 31: the rule is due. Azure runs lifecycle rules about once a day, usually within a day after that; a run can take several days, and Azure gives no deadline.
 3. The deleted version then stays in the storage's recycle bin (blob soft delete) for its period, and is purged.
 
-**Worst case after a deletion in Production:** the last backup taken before the deletion is gone after about **31 + 1 + 14 = 46 days** with the soft delete at 14 days, or **33 days** with it at 1 day.
+**Estimate after a deletion in Production, not an enforced maximum:** the last backup taken before the deletion is gone after about **31 + 1 + 14 = 46 days** with the soft delete at 14 days, or **33 days** with it at 1 day. A slower lifecycle run adds to this. Only the check in 8.3 proves that a backup is gone.
 
 **Decision for the operator (recommended: 1 day).** After day 30, the soft delete only keeps backups that the policy says are expired; the 30-day locked immutability is the protection that matters. One day still covers a mistaken rule. The legal drafts say 30 days today: they must state the real figure (46 or 33 days), or the soft delete must be shortened. Changing the soft delete is a storage setting change, so it is an operator gate.
 
@@ -263,13 +263,21 @@ az storage account blob-service-properties update --resource-group luxia-backup-
 
 1. The policy read back equals the file:
    `az storage account management-policy show --resource-group luxia-backup-rg --account-name luxiabackupfrd325 --query policy`
-2. Two days after applying it, no version older than 33 days remains (counts only, no names printed):
-   `az storage blob list --account-name luxiabackupfrd325 --container-name prod-backups --include v --auth-mode login --num-results "*" --query "length([?properties.creationTime < '<now minus 33 days, ISO 8601>'])"`
-3. The freshness alert stays green (section 2): the rule never touches a backup younger than 31 days.
+2. The soft delete has the period the operator chose:
+   `az storage account blob-service-properties show --resource-group luxia-backup-rg --account-name luxiabackupfrd325 --query deleteRetentionPolicy`
+3. After 31 days plus that period and a margin, no version older than that total remains, **deleted versions included** (counts only, no names printed). A count without `d` misses versions still recoverable from the soft delete:
+   `az storage blob list --account-name luxiabackupfrd325 --container-name prod-backups --include vd --auth-mode login --num-results "*" --query "length([?properties.creationTime < '<now minus that total, ISO 8601>'])"`
+4. The freshness alert stays green (section 2): the rule never touches a backup younger than 31 days.
 
-Record the three results in the evidence store, then mark the pilot agreement's backup line (section 14) as met.
+Record the four results in the evidence store. Mark the pilot agreement's backup line (section 14) as met only once step 3 has returned 0.
 
 ### 8.4 Roll back
 
-`az storage account management-policy delete --resource-group luxia-backup-rg --account-name luxiabackupfrd325`. Nothing already deleted comes back (by design); the immutability keeps every backup younger than 30 days in any case.
+A run already in progress continues after its policy is deleted, so disable the rule first, wait 24 hours, check that deletions have stopped, then delete the policy:
+
+1. `az storage account management-policy update --resource-group luxia-backup-rg --account-name luxiabackupfrd325 --set policy.rules[0].enabled=false`
+2. After 24 hours, the count of step 3 of 8.3 no longer falls.
+3. `az storage account management-policy delete --resource-group luxia-backup-rg --account-name luxiabackupfrd325`
+
+A rollback cannot stop a run immediately, and nothing already purged comes back (by design); the immutability keeps every backup younger than 30 days in any case.
 
