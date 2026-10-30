@@ -61,13 +61,14 @@ These keep their state (standard, section 18). The missing intermediate states a
 | Backup schedule gate (#68) | Catch-up path never observed in Production |
 | F4 S1–S5 (#76–#80, not in Production) | THREAT-MODELED, traceability tables, INDEPENDENTLY REVIEWED (required before merging #76, decision F4-13), STAGING VERIFIED, gates |
 
-## 3b. Exceptions in force (standard, section 19)
+## 3b. Exception register (standard, section 19)
 
-Every exception is written, approved by the operator, limited in time, and listed here until it expires.
+Every exception is written, approved by the operator and limited in time. An exception that has ended (expired, closed or revoked) **stays listed**, with its state, the date and time (UTC) it ended, and the reason. None is ever deleted (standard section 19, amendment 2).
 
 | ID | Rule waived | Scope (exact) | Granted | Expires | Conditions | State |
 |---|---|---|---|---|---|---|
-| EX-001 | Independent review before merge, for a class A change (standard, section 8) | PR #84 (items P3 and P4 only: actions pinned to SHAs, explicit least-privilege workflow permissions), **head `7dfc59935e2f7398df63fb99214deb67d49484fd` only**. Any other commit or change is outside the exception | By the operator, 2026-10-18 | **At the merge of #84, or 24 hours after the grant**, whichever comes first | Full CI green on that exact head; merged only after #82 and the CI of `main` are closed; merged with an exact head-SHA match | ACTIVE |
+| EX-001 | Independent review before merge, for a class A change (standard, section 8) | PR #84 (items P3 and P4 only: actions pinned to SHAs, explicit least-privilege workflow permissions), **head `7dfc59935e2f7398df63fb99214deb67d49484fd` only**. Any other commit or change is outside the exception | By the operator, 2026-10-18 | **At the merge of #84, or 24 hours after the grant**, whichever comes first | Full CI green on that exact head; merged only after #82 and the CI of `main` are closed; merged with an exact head-SHA match | **EXPIRED** 2026-10-18T09:04:13Z: expired at merge of PR #84 (merged on head `7dfc599…` as `91386d6`, within the 24 h) |
+| EX-002 | Independent review before merge, for dependency updates (supply chain is class A, standard section 3) | Dependency updates that stay **within the same major version**: proposed by Dependabot, or combined from Dependabot proposals. CI green on the exact SHA; the branch current with `main`; the lockfile diff limited to the updated packages and their own dependencies, listed in the PR. **No** major version, **no** new direct dependency | By the operator, 2026-10-23 (acceleration mode: "mises à jour de dépendances non breaking") | **When an independent human reviewer is engaged, or on 2026-11-22**, whichever comes first | Every lockfile change listed in the PR; the full CI (build, PostgreSQL suites, backup round trip) passes | **ACTIVE** |
 
 ## 4. Recommended order (for the operator's decision)
 
