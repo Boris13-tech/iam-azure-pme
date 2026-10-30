@@ -109,11 +109,11 @@ describe.runIf(enabled)("B4 operator break-glass procedure (owner command, app_u
     const input = request(org, "SUSPEND_ORGANIZATION", customer(["SUSPEND_ORGANIZATION"]));
     const opts = options(org, { endpoint: "db.example.test:5432" });
     const { plan, digest } = await planBreakGlass(owner, input, opts);
-    const [connection] = await owner.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
+    const [connection] = await owner.$queryRaw<Array<{ database: string; schema: string; role: string }>>`SELECT current_database() AS database, current_schema() AS schema, current_user AS role`;
     expect(plan.binding).toEqual({ endpoint: "db.example.test:5432", ...connection });
     const other = await planBreakGlass(owner, input, { ...opts, endpoint: "db.example.test:5433" });
     expect(other.digest).not.toBe(digest);
-    await expect(applyBreakGlass(owner, input, { ...opts, endpoint: "db.example.test:5433", confirm: digest })).rejects.toThrow();
+    await expect(applyBreakGlass(owner, input, { ...opts, endpoint: "db.example.test:5433", confirm: digest })).rejects.toMatchObject({ code: "DIGEST_MISMATCH" });
     expect((await owner.organization.findUniqueOrThrow({ where: { id: org.organizationId } })).status).toBe("ACTIVE");
     expect(await owner.canonicalAdminAuditEvent.count({ where: { changeId: `break-glass:${digest}` } })).toBe(0);
   });

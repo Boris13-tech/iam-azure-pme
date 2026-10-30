@@ -240,8 +240,8 @@ async function readCounts(tx: Tx, organizationId: string, tenantId: string, at: 
 export type BreakGlassPlan = {
   version: 1;
   toolVersion: string;
-  /** Where this plan may be applied: a digest made against another database does not match. */
-  binding: { endpoint: string | null; database: string; role: string };
+  /** Where this plan may be applied. A restored copy reached at the same address, under the same names, still matches. */
+  binding: { endpoint: string | null; database: string; schema: string; role: string };
   input: BreakGlassInput;
   organization: { id: string; slug: string; status: OrganizationStatus; statusChangedAt: string | null };
   tenantId: string;
@@ -257,7 +257,7 @@ export type BreakGlassPlan = {
 
 export async function computePlan(tx: Tx, input: BreakGlassInput, options: BreakGlassOptions): Promise<{ plan: BreakGlassPlan; digest: string }> {
   const at = options.issuedAt;
-  const [connection] = await tx.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
+  const [connection] = await tx.$queryRaw<Array<{ database: string; schema: string; role: string }>>`SELECT current_database() AS database, current_schema() AS schema, current_user AS role`;
   const org = await tx.organization.findUnique({ where: { slug: input.organization }, select: { id: true, slug: true, status: true, statusChangedAt: true } });
   if (!org) refuse("ORGANIZATION_NOT_FOUND");
   const status = org.status as OrganizationStatus;
