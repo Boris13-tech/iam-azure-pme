@@ -21,6 +21,8 @@ describe("the PostgreSQL suites run only against a test database", () => {
       [local("luxia_db", 5432), local("luxia_db", 5433)],
       ["postgresql://u:p@localhost/luxia_db", local("luxia_db", 5433)],
       [undefined, local("luxia_db")],
+      [local("luxia_db"), `${local("luxia_db")}&host=remote.example.test`],
+      [`${local("luxia_db")}&hostaddr=192.0.2.1`, local("luxia_db")],
       [local("luxia_db"), undefined],
     ]) expect(() => assertTestDatabase(on(runtime, owner)), `${runtime} ${owner}`).toThrow("ISOLATED_DB_REQUIRED");
   });

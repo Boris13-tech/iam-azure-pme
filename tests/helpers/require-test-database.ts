@@ -19,6 +19,8 @@ export function assertTestDatabase(env: Readonly<Record<string, string | undefin
     if (!url) throw new Error("ISOLATED_DB_REQUIRED");
     return new URL(url);
   });
+  // Prisma lets these parameters override the URL's host: the name checked below would not be the server reached.
+  if ([runtime, owner].some((url) => url.searchParams.has("host") || url.searchParams.has("hostaddr"))) throw new Error("ISOLATED_DB_REQUIRED");
   // A pooled runtime endpoint and its direct owner endpoint are one server; anything else is two.
   if (runtime.hostname.replace("-pooler.", ".") !== owner.hostname || port(runtime) !== port(owner)) throw new Error("ISOLATED_DB_REQUIRED");
   if (owner.pathname !== runtime.pathname) throw new Error("ISOLATED_DB_REQUIRED");
