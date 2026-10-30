@@ -6,6 +6,7 @@ import { withTenantDb } from "../db/scoped-client";
 import { requireNative } from "./service";
 import { evaluateSoD } from "./sod";
 import { isAssignmentEffective } from "../auth/entitlements-catalog";
+import { REVIEW_ALL_CAMPAIGNS_RIGHTS, REVIEW_READ_RIGHTS, campaignVisibility } from "./access-review-visibility";
 
 const scope = (auth: AuthContext) => ({ organizationId: auth.organizationId, tenantId: auth.tenantId });
 function fail(code: string, status = 409): never { throw new CanonicalAdminError(code, status); }
@@ -91,19 +92,26 @@ export function createAccessReview(auth: AuthContext, input: CampaignInput, chan
     return { value: campaign };
   });
 }
+/** The subset of `keys` the caller holds, with exactly requireNative's semantics. */
+async function heldRights(tx: Prisma.TransactionClient, auth: AuthContext, keys: readonly string[]) {
+  const held = new Set<string>();
+  for (const key of keys) {
+    try { await requireNative(tx, auth, key); held.add(key); }
+    catch (error) { if (!(error instanceof CanonicalAdminError) || error.code !== "FORBIDDEN") throw error; }
+  }
+  return held;
+}
+/** Reading needs access_reviews.read or access_reviews.read_all; read_all grants no action of any kind. */
 async function read<T>(auth: AuthContext, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-  return withTenantDb(auth, async tx => { await requireNative(tx, auth, "access_reviews.read"); return work(tx); });
+  return withTenantDb(auth, async tx => { if (!(await heldRights(tx, auth, REVIEW_READ_RIGHTS)).size) fail("FORBIDDEN", 403); return work(tx); });
 }
 /**
- * Campaign visibility. access_reviews.manage sees every campaign of the tenant; anyone else sees only the campaigns
- * they review or created. A campaign outside that set is NOT_FOUND, for reads and writes alike (no existence oracle).
+ * Campaign visibility (access-review-visibility.ts): read_all and manage see every campaign of the tenant; anyone
+ * else only the campaigns they review or created. Outside that set a campaign is NOT_FOUND, for reads and writes
+ * alike, exactly like an id that does not exist (no existence oracle).
  */
 async function visibleCampaigns(tx: Prisma.TransactionClient, auth: AuthContext): Promise<Prisma.AccessReviewCampaignWhereInput> {
-  try { await requireNative(tx, auth, "access_reviews.manage"); return scope(auth); }
-  catch (error) {
-    if (!(error instanceof CanonicalAdminError) || error.code !== "FORBIDDEN") throw error;
-    return { ...scope(auth), OR: [{ reviewerSubjectId: auth.subjectId }, { createdBySubjectId: auth.subjectId }] };
-  }
+  return campaignVisibility(auth, await heldRights(tx, auth, REVIEW_ALL_CAMPAIGNS_RIGHTS));
 }
 async function campaignInScope(tx: Prisma.TransactionClient, auth: AuthContext, id: string) {
   const campaign = await tx.accessReviewCampaign.findFirst({ where: { ...await visibleCampaigns(tx, auth), id } });
