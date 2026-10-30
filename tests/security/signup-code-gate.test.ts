@@ -3,7 +3,7 @@ import { checkSignupPlan, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRef
 
 // Standard, section 10: issuing a signup code (a Production write) needs a plan, its digest as the
 // confirmation, the same database and tool commit, and a fresh plan.
-const target = { host: "ep-example.eu-central-1.aws.neon.tech", database: "neondb", role: "neondb_owner" };
+const target = { host: "ep-example.eu-central-1.aws.neon.tech", database: "neondb", schema: "public", role: "neondb_owner" };
 const commit = "a".repeat(40);
 const at = new Date("2026-10-23T10:00:00.000Z");
 const made = () => planSignupCode({ by: "operator", days: "14", note: "pilot one" }, target, commit, at);
@@ -36,6 +36,8 @@ describe("signup-code issuance gate", () => {
     expect(refusal(() => checkSignupPlan({ plan, digest }, digest, current, new Date(at.getTime() + SIGNUP_PLAN_VALIDITY_MS + 1)))).toBe("PLAN_EXPIRED");
     expect(refusal(() => checkSignupPlan({ plan, digest }, digest, { target: { ...target, host: "ep-other.neon.tech" }, toolVersion: commit }, at))).toBe("TARGET_MISMATCH");
     expect(refusal(() => checkSignupPlan({ plan, digest }, digest, { target: { ...target, database: "other" }, toolVersion: commit }, at))).toBe("TARGET_MISMATCH");
+    expect(refusal(() => checkSignupPlan({ plan, digest }, digest, { target: { ...target, schema: "other" }, toolVersion: commit }, at))).toBe("TARGET_MISMATCH");
+    expect(refusal(() => checkSignupPlan({ plan, digest }, digest, { target: { ...target, host: `${target.host}:5433` }, toolVersion: commit }, at))).toBe("TARGET_MISMATCH");
     expect(refusal(() => checkSignupPlan({ plan, digest }, digest, { target, toolVersion: "b".repeat(40) }, at))).toBe("TOOL_VERSION_MISMATCH");
     expect(refusal(() => checkSignupPlan({ digest }, digest, current, at))).toBe("NOT_A_SIGNUP_PLAN");
     expect(refusal(() => checkSignupPlan(null, digest, current, at))).toBe("NOT_A_SIGNUP_PLAN");

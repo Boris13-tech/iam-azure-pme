@@ -15,7 +15,7 @@
 import { execSync } from "node:child_process";
 import { randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { signupCodeHash } from "../../lib/onboarding/signup";
 import { canonicalJson, planDigest } from "../../lib/operators/break-glass";
@@ -32,8 +32,8 @@ export function generateSignupCode(): string {
 export class SignupPlanRefusal extends Error {}
 const refuse = (code: string): never => { throw new SignupPlanRefusal(code); };
 
-/** Where a plan may be applied: the database, the role and the endpoint (host and port) it was made against. */
-export type SignupTarget = { host: string; database: string; role: string };
+/** Where a plan may be applied: the endpoint (host and port), database, schema and role it was made against. */
+export type SignupTarget = { host: string; database: string; schema: string; role: string };
 export type SignupPlan = {
   kind: "LUXIA_SIGNUP_CODE_PLAN"; by: string; days: number; note: string | null;
   target: SignupTarget; toolVersion: string; issuedAt: string; notAfter: string;
@@ -71,6 +71,9 @@ export async function issueFromPlan(db: PrismaClient, plan: SignupPlan, digest: 
   const marker = planMarker(digest);
   const code = generateSignupCode();
   const row = await db.$transaction(async (tx) => {
+    // By the database's clock, at the write: a wait before this point cannot carry a plan past its deadline.
+    const [clock] = await tx.$queryRaw<Array<{ open: boolean }>>`SELECT now() <= ${plan.notAfter}::timestamptz AS open`;
+    if (!clock.open) refuse("PLAN_EXPIRED");
     if (await tx.signupCode.findFirst({ where: { note: { startsWith: marker } }, select: { id: true } })) refuse("PLAN_ALREADY_USED");
     return tx.signupCode.create({ data: {
       codeHash: signupCodeHash(code)!, issuedBy: plan.by, note: plan.note ? `${marker} ${plan.note}` : marker, createdAt: now,
@@ -84,12 +87,16 @@ function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(`--${name}`);
   return at >= 0 ? args[at + 1] : undefined;
 }
+/** The commit of this script's own repository; "unknown" if its files differ from that commit, which refuses a plan. */
 function toolVersion(): string {
-  try { return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return "unknown"; }
+  const cwd = dirname(resolve(process.argv[1]));
+  const git = (command: string) => execSync(command, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  try { return git("git status --porcelain --untracked-files=no") ? "unknown" : git("git rev-parse HEAD"); } catch { return "unknown"; }
 }
 async function currentTarget(db: PrismaClient, url: string): Promise<SignupTarget> {
   const [row] = await db.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
-  return { host: new URL(url).host, database: row.database, role: row.role };
+  const parsed = new URL(url);
+  return { host: parsed.host, database: row.database, schema: parsed.searchParams.get("schema") ?? "public", role: row.role };
 }
 function writeEvidence(dir: string, name: string, value: unknown) {
   mkdirSync(dir, { recursive: true });
@@ -119,12 +126,13 @@ async function main() {
       const saved = JSON.parse(readFileSync(file, "utf8")) as { plan: SignupPlan; digest: string };
       const plan = checkSignupPlan(saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() });
       const { code, row } = await issueFromPlan(db, plan, saved.digest);
-      const path = writeEvidence(evidence, file.replace(/^.*[\\/]/, "").replace(/\.plan\.json$/, ".issue.json"),
-        { digest: saved.digest, codeId: row.id, expiresAt: row.expiresAt.toISOString(), issuedAt: row.createdAt.toISOString() });
+      // The code is committed: it is shown before anything else can fail, since it cannot be recovered from its hash.
       console.log(`Code id   : ${row.id}`);
       console.log(`Expires   : ${row.expiresAt.toISOString()}`);
       console.log(`Code      : ${code}`);
       console.log("The code is shown once and is not stored. Send it to the customer through a private channel.");
+      const path = writeEvidence(evidence, file.replace(/^.*[\\/]/, "").replace(/\.plan\.json$/, ".issue.json"),
+        { digest: saved.digest, codeId: row.id, expiresAt: row.expiresAt.toISOString(), issuedAt: row.createdAt.toISOString() });
       console.log(`Evidence  : ${path} (the code is not in it)`);
     } else if (command === "revoke") {
       const id = args[0];

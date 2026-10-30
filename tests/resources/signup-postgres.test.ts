@@ -150,9 +150,16 @@ describe.runIf(enabled)("Beta-code signup: atomic organization and first adminis
     expect((await owner.signupCode.findUniqueOrThrow({ where: { id } })).status).toBe("RESERVED");
   });
 
+  it("the operator gate refuses a plan past its deadline at the write, by the database's clock", async () => {
+    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `late ${suffix}` },
+      { host: "localhost", database: "ci", schema: "public", role: "ci" }, "c".repeat(40), new Date(Date.now() - 3_600_000));
+    await expect(issueFromPlan(owner, plan, digest)).rejects.toThrow("PLAN_EXPIRED");
+    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(0);
+  });
+
   it("the operator gate issues one usable code per confirmed plan, and only its hash is stored", async () => {
     const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `gate ${suffix}` },
-      { host: "localhost", database: "ci", role: "ci" }, "c".repeat(40));
+      { host: "localhost", database: "ci", schema: "public", role: "ci" }, "c".repeat(40));
     const { code, row } = await issueFromPlan(owner, plan, digest);
     expect(row).toMatchObject({ status: "ISSUED", issuedBy: "ci", note: `${planMarker(digest)} gate ${suffix}`, codeHash: signupCodeHash(code) });
     expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(2 * 86_400_000);
