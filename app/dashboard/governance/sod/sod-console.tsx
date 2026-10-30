@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { REFUSAL_LABELS } from "@/lib/ui/activity-labels";
 type Rule = { id: string; entitlementAId: string; entitlementBId: string; enabled: boolean };
 type Policy = { id: string; key: string; scopeId: string; status: "ACTIVE" | "DISABLED"; rules: Rule[] };
 type Conflict = { id: string; occurredAt: string; metadata: unknown };
@@ -12,7 +13,10 @@ export default function SoDConsole() {
   const [policyId, setPolicy] = useState(""); const [a, setA] = useState(""); const [b, setB] = useState("");
   const api = useCallback(async (path: string, method = "GET", body?: unknown) => {
     const response = await fetch(`/api/canonical/sod/${path}`, { method, headers: { "Content-Type": "application/json", "x-luxia-change-id": `sod-ui:${crypto.randomUUID()}` }, ...(body ? { body: JSON.stringify(body) } : {}) });
-    if (!response.ok) throw new Error("Opération refusée ou indisponible. Vérifiez vos droits et le périmètre choisi.");
+    if (!response.ok) {
+      const code = (await response.json().catch(() => ({}))).error;
+      throw new Error(REFUSAL_LABELS[code] ? `${REFUSAL_LABELS[code]}.` : "Opération refusée ou indisponible. Vérifiez vos droits et le périmètre choisi.");
+    }
     return response.json();
   }, []);
   const refresh = useCallback(async () => { const [p, c] = await Promise.all([api("policies"), api("conflicts")]); setPolicies(p); setConflicts(c); }, [api]);
