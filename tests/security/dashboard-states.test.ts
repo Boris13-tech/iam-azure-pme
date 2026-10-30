@@ -45,4 +45,12 @@ describe("Dashboard list states and business flows", () => {
     expect(reviews).toContain("right(item.entitlementId)");
     expect(reviews).not.toMatch(/setError\(failure instanceof Error \? failure\.message : "REQUEST_DENIED"\)/);
   });
+
+  it("only a catalog that follows `after` is paged: another would repeat one request, and one journal event, per page", () => {
+    const call = (url: string) => reviews.slice(reviews.indexOf(`names("${url}"`)).split(String.fromCharCode(10))[0];
+    expect(call("/api/canonical/resource-governance/entitlements")).toMatch(/, true\);$/);
+    expect(call("/api/canonical/resources")).not.toMatch(/, true\);$/);
+    expect(call("/api/canonical/subjects")).not.toMatch(/, true\);$/);
+    expect(read("app/api/canonical/resources/route.ts")).not.toContain("after");
+  });
 });

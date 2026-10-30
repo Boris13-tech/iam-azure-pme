@@ -67,7 +67,7 @@ export default function ReviewConsole() {
       // Labels one at a time, after the campaigns: each request holds a database connection on the server.
       const people = await names("/api/canonical/subjects", r => [String(r.id), String(r.name)]);
       const rights = await names("/api/canonical/resource-governance/entitlements", r => [String(r.id), String(r.description || r.key)], true);
-      const resources = await names("/api/canonical/resources", r => [String(r.id), String(r.name)], true);
+      const resources = await names("/api/canonical/resources", r => [String(r.id), String(r.name)]);
       setLabels({ people, rights, resources });
     } catch (failure) { setLoadFailed(true); setError(failure instanceof Error ? failure.message : ""); }
   };
