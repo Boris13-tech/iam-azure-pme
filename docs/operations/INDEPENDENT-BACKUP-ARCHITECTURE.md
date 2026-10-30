@@ -117,7 +117,7 @@ Why not the others:
 | Every 2 hours | 30 days | **in place:** version-level immutability, 30 days, **locked** (compliance) since the evening of 2026-10-13, by the operator's decision |
 | Monthly (the first of each month) | 12 months | **not in place:** the 12-month period must first be agreed with counsel, because deleted personal data survives in backups until they expire |
 
-**Not in place yet:** a lifecycle rule that removes versions once their protection has expired. At today's size, keeping them costs less than a cent a month. It is added together with the retention periods agreed with counsel.
+**Not in place yet:** a lifecycle rule that removes versions once their protection has expired. It is prepared (mechanism R8, [runbook section 8](BACKUP-RUNBOOK.md#8-expiry-of-backups-r8)) and waits for the operator's gate, with the soft-delete decision that sets the real worst case (46 or 33 days).
 
 Personal data deleted in Production stays in backups until they expire. The retention policy and the privacy documents must say so (`docs/legal/`).
 

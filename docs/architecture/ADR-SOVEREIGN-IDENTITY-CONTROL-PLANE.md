@@ -10,7 +10,7 @@
 
 ## Context and decision
 
-Phase 5F is validated on staging in native authorization mode. Gate0 and the extended soak passed, including 1,015 of 1,015 scenarios, with no authorization divergence, provider-path error, ghost grant, or reconciliation drift. Production was not modified.
+Phase 5F is validated on staging in native authorization mode. Gate0 and the extended soak passed, including 1,015 of 1,015 scenarios, with no provider-path error, ghost grant, or reconciliation drift. Production was not modified. The earlier statement of "no authorization divergence" is withdrawn as evidence of parity with the legacy model until #157 is closed: this run proves native-mode behaviour on those scenarios only.
 
 LUXIA Identity will evolve into a **Sovereign Identity Control Plane**. The LUXIA core, rather than any external identity provider, owns the canonical identity, authorization state, policy state, and audit history. Microsoft Entra, Google Workspace, AWS, GitHub, LDAP, Active Directory, Samba AD, custom APIs, and the native local provider are integrations around that core.
 
