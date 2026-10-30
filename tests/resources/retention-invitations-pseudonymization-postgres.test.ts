@@ -32,10 +32,10 @@ async function drain(fn: "luxia_retention_purge_invitations" | "luxia_retention_
   throw new Error("DRAIN_DID_NOT_CONVERGE");
 }
 
-/** These tests call global purges: they run only against a local test database, never one reachable by a URL elsewhere. */
+/** These tests call global purges: they refuse anything but a local database with a test name (luxia_*; Production is neondb). */
 function requireTestDatabase() {
   for (const url of [process.env.DATABASE_MIGRATION_URL, process.env.DATABASE_URL]) {
-    if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw new Error("ISOLATED_DB_REQUIRED");
+    if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname) || !/^\/luxia_\w+$/.test(new URL(url).pathname)) throw new Error("ISOLATED_DB_REQUIRED");
   }
 }
 
@@ -437,7 +437,22 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
           EXECUTE format('ALTER FUNCTION %s OWNER TO ${role}', r.n); END LOOP;
       END $o$`]);
       psqlOk(superuser, ["-c", `GRANT USAGE ON SCHEMA public TO app_user`, "-c", `GRANT EXECUTE ON FUNCTION luxia_retention_purge_invitations(integer, boolean), luxia_retention_pseudonymize_retired(integer, boolean) TO app_user`]);
-      expect(psqlOk(runtime.toString(), calls).replace(/\r/g, "")).toContain('"enforced": false');
+      // Two organizations, each with one finished invitation and one person retired past the period: an owner with
+      // BYPASSRLS sees both through the entry points, whatever the caller's context.
+      const rows = [randomUUID(), randomUUID()].map((org) => {
+        const tenant = randomUUID(), admin = randomUUID(), invitee = randomUUID(), retired = randomUUID();
+        return `INSERT INTO "Organization" ("id", "name", "slug", "updatedAt") VALUES ('${org}', 'R4 R6 owner', 'r46-${org.slice(0, 8)}', now());
+          INSERT INTO "Tenant" ("id", "organizationId", "name", "updatedAt") VALUES ('${tenant}', '${org}', 'Production', now());
+          INSERT INTO "Subject" ("id", "organizationId", "tenantId", "type", "name", "lifecycleState", "lifecycleChangedAt", "updatedAt") VALUES
+            ('${admin}', '${org}', '${tenant}', 'HUMAN', 'Admin', 'ACTIVE', now(), now()),
+            ('${invitee}', '${org}', '${tenant}', 'HUMAN', 'Invitee', 'PROVISIONING', now(), now()),
+            ('${retired}', '${org}', '${tenant}', 'HUMAN', 'Left', 'RETIRED', (now() AT TIME ZONE 'UTC') - interval '40 days', now());
+          INSERT INTO "Invitation" ("id", "organizationId", "tenantId", "subjectId", "tokenHash", "role", "invitedBySubjectId", "createdAt", "updatedAt", "expiresAt") VALUES
+            ('${randomUUID()}', '${org}', '${tenant}', '${invitee}', '${sha(randomUUID())}', 'MEMBER', '${admin}', (now() AT TIME ZONE 'UTC') - interval '47 days', now(), (now() AT TIME ZONE 'UTC') - interval '40 days');`;
+      }).join("\n");
+      psqlOk(superuser, ["-1", "-c", `SET LOCAL session_replication_role = replica;\n${rows}`]);
+      expect(psqlOk(runtime.toString(), calls).replace(/\r/g, "").trim().split("\n"))
+        .toEqual(['{"enforced": false, "invitations": 2}', '{"enforced": false, "subjects": 2, "displayNames": 2, "principalNames": 0}']);
       psqlOk(superuser, ["-c", `ALTER ROLE ${role} NOBYPASSRLS`]);
       for (const statement of [calls[1], calls[3]]) {
         const refused = psql(runtime.toString(), ["-c", statement]);
