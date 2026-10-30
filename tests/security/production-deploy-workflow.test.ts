@@ -58,6 +58,7 @@ describe("Production deploy workflow (GOV-001)", () => {
 
   // The steps' own scripts, run against a stand-in for the Vercel API: a removed control turns these red.
   const hasShell = spawnSync("bash", ["-c", "command -v jq"]).status === 0;
+  it.runIf(process.env.CI)("in CI these script tests really run", () => expect(hasShell).toBe(true));
   const script = (id: string) => {
     const from = workflow.indexOf(`id: ${id}\n`);
     const start = workflow.indexOf("run: |\n", from) + "run: |\n".length;
@@ -66,7 +67,7 @@ describe("Production deploy workflow (GOV-001)", () => {
   function run(id: string, api: string, env: Record<string, string> = {}) {
     const dir = mkdtempSync(join(tmpdir(), "deploy-"));
     try {
-      writeFileSync(join(dir, "curl"), `#!/bin/bash\nurl="\${@: -1}"\nfor a in "$@"; do [[ "$a" == -d ]] && break; done\necho "$*" >> "${dir}/calls"\n${api}\n`);
+      writeFileSync(join(dir, "curl"), `#!/bin/bash\nfor a in "$@"; do [[ "$a" == https://* ]] && url="$a"; done\necho "$*" >> "${dir}/calls"\n${api}\n`);
       writeFileSync(join(dir, "sleep"), "#!/bin/bash\nexit 0\n");
       chmodSync(join(dir, "curl"), 0o755); chmodSync(join(dir, "sleep"), 0o755);
       writeFileSync(join(dir, "step.sh"), script(id));
