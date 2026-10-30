@@ -151,6 +151,28 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     expect(await call("luxia_retention_purge_invitations", 5000, true)).toEqual({ invitations: 0, enforced: true });
   });
 
+  it("the boundary is exact: finished 30 days ago to the millisecond stays, one millisecond earlier goes (audit of #138)", async () => {
+    // Dating the rows and purging in one transaction: now() is the same for both, so the boundary is deterministic.
+    const at = await invitation(a, null), before = await invitation(a, null), after = await invitation(a, null);
+    const remaining = await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+      const date = (id: string, finished: string) => tx.$executeRawUnsafe(`UPDATE "Invitation" SET
+          "createdAt" = (now() AT TIME ZONE 'UTC')::timestamp(3) - interval '37 days' + $2::interval,
+          "expiresAt" = (now() AT TIME ZONE 'UTC')::timestamp(3) - interval '30 days' + $2::interval
+        WHERE "id" = $1`, id, finished);
+      await date(at, "0 ms");
+      await date(before, "-1 ms");
+      await date(after, "1 ms");
+      await tx.$executeRaw`SET LOCAL session_replication_role = origin`;
+      for (let i = 0; i < 20; i++) {
+        const [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
+        if (counts.invitations === 0) break;
+      }
+      return (await tx.invitation.findMany({ where: { id: { in: [at, before, after] } }, select: { id: true } })).map((r) => r.id).sort();
+    }, { timeout: 60_000 });
+    expect(remaining).toEqual([at, after].sort());
+  });
+
   it("each call is bounded by its batch, and arguments out of range are refused", async () => {
     await drain("luxia_retention_purge_invitations", "invitations");
     const old = [await invitation(a, { created: 40, expires: 33 }), await invitation(a, { created: 41, expires: 34 }), await invitation(a, { created: 42, expires: 35 })];
