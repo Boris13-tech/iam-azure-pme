@@ -4,7 +4,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { SessionStore } from "../../lib/auth/session-store";
@@ -329,6 +329,44 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
     expect(await owner.organization.count({ where: { id: g.organizationId } })).toBe(1);
   }, 120_000);
 
+  // The tables with no link of their own to Organization until this migration. Each row is written by the runtime role.
+  const unlinkedWriters: Array<[string, (org: Org, tx: Prisma.TransactionClient) => Promise<unknown>]> = [
+    ["AuthTransaction", (org, tx) => tx.authTransaction.create({ data: { id: randomUUID(), stateHash: sha(randomUUID()), nonce: "n", codeVerifier: "v", expectedOrganizationId: org.organizationId,
+      expectedTenantId: org.tenantId, expectedProviderConnectionId: org.local, expiresAt: new Date(Date.now() + 60_000) } })],
+    ["AuthorizationShadowObservation", (org, tx) => tx.authorizationShadowObservation.create({ data: { organizationId: org.organizationId, tenantId: org.tenantId, subjectId: org.subjectId, action: "read", resource: "r7", status: "PARITY" } })],
+  ];
+  const asRuntime = <T>(org: Org, work: (tx: Prisma.TransactionClient) => Promise<T>) => rawPrisma.$transaction(async (tx) => {
+    // AuthorizationShadowObservation's policy reads its own two settings.
+    await tx.$queryRaw`SELECT set_config('app.organization_id', ${org.organizationId}, true), set_config('app.tenant_id', ${org.tenantId}, true),
+      set_config('app.current_organization_id', ${org.organizationId}, true), set_config('app.current_tenant_id', ${org.tenantId}, true)`;
+    return work(tx);
+  }, { timeout: 30_000 });
+
+  for (const [table, write] of unlinkedWriters) {
+    it(`${table}: a write in flight when apply starts is waited for and stops the erasure; a write after it fails`, async () => {
+      const n = await organization();
+      await close(n);
+      const { plan } = await planErasure(owner, n.slug, target, TOOL);
+      let inserted!: () => void, commit!: () => void;
+      const isInserted = new Promise<void>((resolve) => { inserted = resolve; });
+      const committing = new Promise<void>((resolve) => { commit = resolve; });
+      const flight = asRuntime(n, async (tx) => { await write(n, tx); inserted(); await committing; });
+      await Promise.race([isInserted, flight]); // a refused write surfaces here instead of hanging
+      const apply = codeOf(applyErasure(owner, plan));
+      expect(await stillWaiting(apply)).toBe(STILL_WAITING);
+      commit();
+      await flight;
+      expect(await apply).toBe("ERASURE_RESULT_MISMATCH");
+      expect(await owner.organization.count({ where: { id: n.organizationId } })).toBe(1);
+
+      const fresh = await planErasure(owner, n.slug, target, TOOL);
+      await applyErasure(owner, fresh.plan);
+      expect((await remaining(n.organizationId)).rows).toBe(0);
+      expect(await codeOf(asRuntime(n, (tx) => write(n, tx)))).not.toBe("OK");
+      expect((await remaining(n.organizationId)).rows).toBe(0);
+    }, 120_000);
+  }
+
   it("a table added later that holds a row of the organization: ERASURE_INCOMPLETE, everything rolls back, no record", async () => {
     const h = await organization();
     await close(h);
@@ -391,6 +429,12 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
       await client.$disconnect();
       expect((await applyErasure(client, plan)).counts).toEqual(plan.counts);
       expect(psqlOk(superuser, ["-c", `SELECT count(*) FROM "CanonicalAdminAuditEvent"`, "-c", `SELECT count(*) FROM "Organization"`]).replace(/\r/g, "").trim().split("\n")).toEqual(["0", "0"]);
+      // The rollback, run by that owner once it lost BYPASSRLS, must not read an empty table and drop the record.
+      psqlOk(superuser, ["-c", `ALTER ROLE ${role} NOBYPASSRLS`]);
+      const refused = psql(asOwner.toString(), ["-1", "-f", ROLLBACK]);
+      expect(refused.status).not.toBe(0);
+      expect(refused.stderr).toMatch(/row-level security|row_security/i);
+      expect(psqlOk(superuser, ["-c", `SELECT count(*) FROM "OrganizationErasure"`]).trim()).toBe("1");
     } finally {
       await client.$disconnect();
       psql(admin, ["-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`]);
@@ -398,7 +442,7 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
     }
   }, 240_000);
 
-  it("drill: the migration applies on a scratch database; the rollback restores the catalog, and refuses once an erasure is recorded", () => {
+  it("drill: the migration applies on a scratch database; the rollback restores the catalog, and refuses once an erasure is recorded", async () => {
     const admin = process.env.DATABASE_MIGRATION_URL!;
     const name = `luxia_r7_${suffix}`;
     psqlOk(admin, ["-c", `CREATE DATABASE ${name}`]);
@@ -415,6 +459,19 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
       psqlOk(url, ["-1", "-f", ROLLBACK]);
       expect(catalog()).toBe(before);
       psqlOk(url, ["-1", "-f", `prisma/migrations/${NEW}/migration.sql`]);
+      // An erasure in flight (its record not yet committed): the rollback waits, times out, and changes nothing.
+      const scratchClient = new PrismaClient({ datasources: { db: { url } } });
+      try {
+        await scratchClient.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(`INSERT INTO "OrganizationErasure" ("organizationId", "counts") VALUES ('in-flight', '{}')`);
+          const waited = psql(url, ["-1", "-f", ROLLBACK]);
+          expect(waited.status).not.toBe(0);
+          expect(waited.stderr).toMatch(/lock timeout/i);
+          throw new Error("ROLLBACK_THE_FIXTURE");
+        }, { timeout: 30_000 }).catch((error: Error) => { if (error.message !== "ROLLBACK_THE_FIXTURE") throw error; });
+      } finally {
+        await scratchClient.$disconnect();
+      }
       psqlOk(url, ["-c", `INSERT INTO "OrganizationErasure" ("organizationId", "counts") VALUES ('gone', '{}')`]);
       const refused = psql(url, ["-1", "-f", ROLLBACK]);
       expect(refused.status).not.toBe(0);

@@ -28,6 +28,8 @@ export class ErasureRefusal extends Error {}
 const refuse = (code: string): never => { throw new ErasureRefusal(code); };
 
 export type ErasureTarget = { host: string; database: string; role: string };
+/** The endpoint a plan is bound to: host and port, so another database on the same host does not match. */
+export const erasureEndpoint = (url: string) => new URL(url).host;
 export type ErasureCounts = Record<string, number>;
 export type ErasurePlan = {
   kind: "LUXIA_ORGANIZATION_ERASURE_PLAN";

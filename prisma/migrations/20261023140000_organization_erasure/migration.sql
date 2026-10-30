@@ -10,6 +10,13 @@
 -- does not bind. The runtime role can call neither function. TRUNCATE stays refused.
 -- Changed guard bodies are the previous ones plus that gate only (static test).
 
+-- Every table that carries an organization must make a writer wait for the erasure, and fail once it is done. These
+-- two had no such link. NOT VALID: new rows are checked, existing rows are not scanned or changed.
+ALTER TABLE "AuthTransaction" ADD CONSTRAINT "AuthTransaction_expectedOrganizationId_fkey"
+  FOREIGN KEY ("expectedOrganizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT NOT VALID;
+ALTER TABLE "AuthorizationShadowObservation" ADD CONSTRAINT "AuthorizationShadowObservation_organizationId_fkey"
+  FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT NOT VALID;
+
 CREATE TABLE "OrganizationErasure" (
   "id"             BIGSERIAL PRIMARY KEY,
   "organizationId" TEXT NOT NULL UNIQUE,

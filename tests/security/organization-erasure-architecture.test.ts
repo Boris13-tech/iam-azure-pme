@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { checkErasurePlan, ERASURE_PLAN_VALIDITY_MS, ERASURE_TABLES, ErasureRefusal, type ErasurePlan } from "../../lib/operators/organization-erasure";
+import { checkErasurePlan, erasureEndpoint, ERASURE_PLAN_VALIDITY_MS, ERASURE_TABLES, ErasureRefusal, type ErasurePlan } from "../../lib/operators/organization-erasure";
 import { planDigest } from "../../lib/operators/break-glass";
 
 // R7: static checks of the organization erasure migration, its rollback and the operator plan.
@@ -94,12 +94,27 @@ describe("R7 organization erasure: migration architecture", () => {
   it("the rollback restores every guard exactly, refuses once an erasure is recorded, and removes the rest", () => {
     for (const name of GUARDS) expect(fn(rollback, name), name).toBe(previous(name));
     expect(rollback).toContain("ROLLBACK_REFUSED_ERASURE_RECORDED");
+    // Before the check: an erasure in flight is waited for, and a role filtered by row-level security gets an error.
+    for (const text of ["SET LOCAL row_security = off;", 'LOCK TABLE "OrganizationErasure" IN ACCESS EXCLUSIVE MODE;'])
+      expect(rollback.indexOf(text), text).toBeLessThan(rollback.indexOf("ROLLBACK_REFUSED_ERASURE_RECORDED"));
+    for (const text of ["SET LOCAL row_security = off;", 'LOCK TABLE "OrganizationErasure" IN ACCESS EXCLUSIVE MODE;'])
+      expect(rollback.indexOf(text), text).toBeGreaterThan(-1);
+    for (const fk of ["AuthTransaction_expectedOrganizationId_fkey", "AuthorizationShadowObservation_organizationId_fkey"]) {
+      expect(migration).toContain(`ADD CONSTRAINT "${fk}"`);
+      expect(rollback).toContain(`DROP CONSTRAINT "${fk}"`);
+    }
     for (const text of ["DROP FUNCTION luxia_organization_erase(TEXT);", "DROP FUNCTION luxia_erasure_allowed(TEXT, OID);", 'DROP TABLE "OrganizationErasure";', `'${NEW}'`])
       expect(rollback).toContain(text);
   });
 });
 
 describe("R7 organization erasure: operator plan", () => {
+  it("a plan is bound to the port too: another database on the same host does not match", () => {
+    const a = "postgresql://owner:x@localhost:5432/neondb", b = "postgresql://owner:x@localhost:5433/neondb";
+    expect(erasureEndpoint(a)).not.toBe(erasureEndpoint(b));
+    expect(erasureEndpoint("postgresql://owner:x@ep-example.neon.tech/neondb")).toBe("ep-example.neon.tech");
+  });
+
   const target = { host: "ep-example.eu-central-1.aws.neon.tech", database: "neondb", role: "neondb_owner" };
   const commit = "a".repeat(40);
   const at = new Date("2026-10-23T10:00:00.000Z");

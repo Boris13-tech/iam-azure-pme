@@ -2,7 +2,11 @@
 --   psql -1 -v ON_ERROR_STOP=1 -f <this file>
 -- Restores the nine guards exactly as before (no erasure gate) and removes the erasure functions. It refuses once an
 -- organization has been erased: the OrganizationErasure records are then the only trace of it (forward fix only).
+-- The table lock waits for an erasure in flight, so its record is seen. row_security = off makes the check fail with an
+-- error, rather than see nothing, for a role that row-level security would filter.
 SET lock_timeout = '5s';
+SET LOCAL row_security = off;
+LOCK TABLE "OrganizationErasure" IN ACCESS EXCLUSIVE MODE;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM "OrganizationErasure") THEN
     RAISE EXCEPTION 'ROLLBACK_REFUSED_ERASURE_RECORDED';
@@ -274,6 +278,8 @@ END $$;
 DROP FUNCTION luxia_organization_erase(TEXT);
 DROP FUNCTION luxia_erasure_allowed(TEXT, OID);
 DROP TABLE "OrganizationErasure";
+ALTER TABLE "AuthorizationShadowObservation" DROP CONSTRAINT "AuthorizationShadowObservation_organizationId_fkey";
+ALTER TABLE "AuthTransaction" DROP CONSTRAINT "AuthTransaction_expectedOrganizationId_fkey";
 DO $$ BEGIN
   IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
     DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20261023140000_organization_erasure';

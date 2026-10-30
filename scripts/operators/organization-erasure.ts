@@ -17,7 +17,7 @@ import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { applyErasure, checkErasurePlan, ErasureRefusal, planErasure, type ErasurePlan, type ErasureTarget } from "../../lib/operators/organization-erasure";
+import { applyErasure, checkErasurePlan, erasureEndpoint, ErasureRefusal, planErasure, type ErasurePlan, type ErasureTarget } from "../../lib/operators/organization-erasure";
 
 function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(`--${name}`);
@@ -28,7 +28,7 @@ function toolVersion(): string {
 }
 async function currentTarget(db: PrismaClient, url: string): Promise<ErasureTarget> {
   const [row] = await db.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
-  return { host: new URL(url).hostname, database: row.database, role: row.role };
+  return { host: erasureEndpoint(url), database: row.database, role: row.role };
 }
 function writeEvidence(dir: string, name: string, value: unknown) {
   mkdirSync(dir, { recursive: true });
