@@ -4,9 +4,12 @@
 
 /* LUXIA visual system, aligned with luxia-it.com. Work surfaces stay light and neutral, one accent blue, colour
    reserved for actions and statuses. The brand (logo, night panel, network motif) frames the pages before sign-in.
-   Type: Roboto for text, Inter Tight for titles (self-hosted by next/font). Scale: 15px body, 14px labels, 13px
+   Type: Roboto for text, Inter Tight for titles when the device has them, else the system's sans-serif; nothing is
+   downloaded. Scale: 15px body, 14px labels, 13px
    secondary, 12px minimum. Motion: short state transitions only. */
 :root {
+  --font-text: Roboto, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Inter Tight", var(--font-text);
   --brand-night: #07090d;
   --brand-ink: #eef2f8;
   --brand-ink-2: #b9c3d4;

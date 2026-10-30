@@ -41,9 +41,9 @@ describe("Brand and the pages before sign-in", () => {
     expect(shell).toContain("bêta privée, sur invitation");
   });
 
-  it("fonts are self-hosted at build time (no request to a font provider from the browser)", () => {
+  it("no font is downloaded: neither the build nor the browser depends on a font provider", () => {
     const layout = read("app/layout.tsx");
-    expect(layout).toContain('from "next/font/google"');
+    expect(layout).not.toMatch(/next\/font/);
     expect(read("app/globals.css")).not.toMatch(/@import url\(|fonts\.googleapis/);
   });
 });
