@@ -21,6 +21,18 @@ async function read<T>(url: string): Promise<Load<T>> {
     return { state: "ok", data: await response.json() as T };
   } catch { return { state: "unavailable" }; }
 }
+/** Every page of a catalog that lists 100 rows at a time, ordered by id. */
+async function readAll<T extends { id: string }>(url: string): Promise<Load<T[]>> {
+  const rows: T[] = [];
+  for (let page = 0; page < 100; page++) {
+    const last = rows[rows.length - 1]?.id;
+    const result = await read<T[]>(last ? `${url}?after=${encodeURIComponent(last)}` : url);
+    if (result.state !== "ok") return result;
+    rows.push(...result.data);
+    if (result.data.length < 100) break;
+  }
+  return { state: "ok", data: rows };
+}
 const dateTime = (value: string) => new Date(value).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 
 export default function SoDConsole() {
@@ -28,6 +40,7 @@ export default function SoDConsole() {
   const [conflicts, setConflicts] = useState<Load<Conflict[]>>({ state: "loading" });
   const [scopes, setScopes] = useState<Scope[]>([]);
   const [entitlements, setEntitlements] = useState<Entitlement[]>([]);
+  const [catalog, setCatalog] = useState<"ok" | "restricted" | "unavailable">("ok");
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,11 +51,12 @@ export default function SoDConsole() {
     // At most two requests at a time: each holds a database connection on the server.
     const [p, c] = await Promise.all([read<Policy[]>("/api/canonical/sod/policies"), read<Conflict[]>("/api/canonical/sod/conflicts")]);
     setPolicies(p); setConflicts(c);
-    const s = await read<Scope[]>("/api/canonical/resource-governance/scopes");
-    const e = await read<Entitlement[]>("/api/canonical/resource-governance/entitlements");
+    const s = await readAll<Scope>("/api/canonical/resource-governance/scopes");
+    const e = await readAll<Entitlement>("/api/canonical/resource-governance/entitlements");
     const people = await read<Subject[]>("/api/canonical/subjects");
     setScopes(s.state === "ok" ? s.data.filter(x => x.active) : []);
     setEntitlements(e.state === "ok" ? e.data.filter(x => x.active) : []);
+    setCatalog(s.state === "restricted" || e.state === "restricted" ? "restricted" : s.state === "ok" && e.state === "ok" ? "ok" : "unavailable");
     setSubjects(people.state === "ok" ? people.data : []);
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -51,8 +65,8 @@ export default function SoDConsole() {
   const entitlementLabel = useMemo(() => new Map(entitlements.map(e => [e.id, e.description || e.key])), [entitlements]);
   const personLabel = useMemo(() => new Map(subjects.map(s => [s.id, s.name])), [subjects]);
   const selectedPolicy = policies.state === "ok" ? policies.data.find(p => p.id === policyId) : undefined;
-  // A rule pairs two entitlements of the policy's own scope.
-  const ruleChoices = selectedPolicy ? entitlements.filter(e => e.resourceScopeId === selectedPolicy.scopeId) : [];
+  // Any two active entitlements: the server applies a rule where their resources overlap the policy's scope.
+  const ruleChoices = selectedPolicy ? entitlements : [];
 
   async function mutate(path: string, method: string, body: unknown, success: string) {
     setBusy(true); setMessage(null);
@@ -86,6 +100,9 @@ export default function SoDConsole() {
             <option value="">{scopes.length ? "Choisir un périmètre" : "Aucun périmètre disponible"}</option>
             {scopes.map(s => <option key={s.id} value={s.id}>{s.key}</option>)}
           </select></div>
+        {catalog !== "ok" && <p className="lx-meta" role="status">{catalog === "restricted"
+          ? "Le catalogue des périmètres et des droits n’est pas lisible avec vos droits : il faut aussi le droit de lire les ressources."
+          : "Le catalogue des périmètres et des droits est indisponible pour le moment."}</p>}
         <button disabled={busy || !scopes.length} className="lx-btn lx-btn--primary">Créer (désactivée)</button>
       </form>
     </section>
@@ -118,7 +135,7 @@ export default function SoDConsole() {
             <option value="">Choisir une politique</option>{policies.data.map(p => <option key={p.id} value={p.id}>{p.key}</option>)}</select></div>
         <div className="lx-field"><label htmlFor="sod-a" className="lx-label">Premier droit</label>
           <select id="sod-a" className="lx-select" required value={a} onChange={e => setA(e.target.value)} disabled={!selectedPolicy}>
-            <option value="">{selectedPolicy && !ruleChoices.length ? "Aucun droit sur ce périmètre" : "Choisir un droit"}</option>
+            <option value="">{selectedPolicy && !ruleChoices.length ? "Aucun droit disponible" : "Choisir un droit"}</option>
             {ruleChoices.map(e => <option key={e.id} value={e.id}>{e.description || e.key}</option>)}</select></div>
         <div className="lx-field"><label htmlFor="sod-b" className="lx-label">Droit incompatible</label>
           <select id="sod-b" className="lx-select" required value={b} onChange={e => setB(e.target.value)} disabled={!selectedPolicy}>
