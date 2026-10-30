@@ -32,7 +32,7 @@ export function generateSignupCode(): string {
 export class SignupPlanRefusal extends Error {}
 const refuse = (code: string): never => { throw new SignupPlanRefusal(code); };
 
-/** Where a plan may be applied: the database, the role and the endpoint host it was made against. */
+/** Where a plan may be applied: the database, the role and the endpoint (host and port) it was made against. */
 export type SignupTarget = { host: string; database: string; role: string };
 export type SignupPlan = {
   kind: "LUXIA_SIGNUP_CODE_PLAN"; by: string; days: number; note: string | null;
@@ -89,7 +89,7 @@ function toolVersion(): string {
 }
 async function currentTarget(db: PrismaClient, url: string): Promise<SignupTarget> {
   const [row] = await db.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
-  return { host: new URL(url).hostname, database: row.database, role: row.role };
+  return { host: new URL(url).host, database: row.database, role: row.role };
 }
 function writeEvidence(dir: string, name: string, value: unknown) {
   mkdirSync(dir, { recursive: true });
