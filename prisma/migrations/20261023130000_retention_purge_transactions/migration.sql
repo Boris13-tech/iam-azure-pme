@@ -44,12 +44,13 @@ BEGIN
     DELETE FROM "AuthTransaction" WHERE "id" IN (
       SELECT "id" FROM "AuthTransaction" WHERE "expiresAt" < v_cutoff ORDER BY "expiresAt" LIMIT p_batch FOR UPDATE SKIP LOCKED);
     GET DIAGNOSTICS v_transactions = ROW_COUNT;
-    DELETE FROM "RetentionRun" WHERE "ranAt" < now() - interval '400 days';
+    DELETE FROM "RetentionRun" WHERE "id" IN (
+      SELECT "id" FROM "RetentionRun" WHERE "ranAt" < now() - interval '400 days' ORDER BY "ranAt" LIMIT p_batch FOR UPDATE SKIP LOCKED);
     GET DIAGNOSTICS v_runs = ROW_COUNT;
   ELSE
     SELECT count(*) INTO v_challenges FROM (SELECT 1 FROM "LocalAuthChallenge" WHERE "expiresAt" < v_cutoff LIMIT p_batch) c;
     SELECT count(*) INTO v_transactions FROM (SELECT 1 FROM "AuthTransaction" WHERE "expiresAt" < v_cutoff LIMIT p_batch) t;
-    SELECT count(*) INTO v_runs FROM "RetentionRun" WHERE "ranAt" < now() - interval '400 days';
+    SELECT count(*) INTO v_runs FROM (SELECT 1 FROM "RetentionRun" WHERE "ranAt" < now() - interval '400 days' LIMIT p_batch) r;
   END IF;
   v_counts := jsonb_build_object('localAuthChallenges', v_challenges, 'authTransactions', v_transactions, 'retentionRuns', v_runs);
   INSERT INTO "RetentionRun" ("enforced", "counts") VALUES (p_enforce, v_counts);

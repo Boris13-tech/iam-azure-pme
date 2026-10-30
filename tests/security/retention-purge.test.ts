@@ -100,6 +100,8 @@ describe("R3 retention job: migration architecture", () => {
   });
 
   it("the runtime gets EXECUTE only; the run records stay owner-only; the rollback removes both", () => {
+    // The activation gate recreates the runtime role's grants after the migrations: it must include this one.
+    expect(readFileSync(".github/workflows/production-activation-gate.yml", "utf8")).toContain("GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO app_user;");
     expect(migration.match(/GRANT [^;]+;/g)).toEqual(["GRANT EXECUTE ON FUNCTION luxia_retention_purge_transactions(integer, boolean) TO app_user;"]);
     expect(migration).toContain('REVOKE ALL ON "RetentionRun" FROM app_user;');
     expect(migration).toContain('ALTER TABLE "RetentionRun" FORCE ROW LEVEL SECURITY;');

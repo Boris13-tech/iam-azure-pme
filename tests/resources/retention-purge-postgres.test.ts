@@ -72,6 +72,17 @@ describe.runIf(enabled)("R3: purge of expired challenges and transactions (Postg
     expect((await purgeExpiredTransactions(true, rawPrisma)).localAuthChallenges).toBe(0);
   });
 
+  it("the history of past runs is bounded by the batch too, in the dry run and when enforcing", async () => {
+    const call = (batch: number, enforce: boolean) =>
+      rawPrisma.$queryRawUnsafe<Array<{ counts: Record<string, number> }>>(`SELECT luxia_retention_purge_transactions(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
+    for (let i = 0; i < 3; i++) await owner.$executeRawUnsafe(`INSERT INTO "RetentionRun" ("ranAt", "enforced", "counts") VALUES (now() - interval '401 days', true, '{}')`);
+    expect(await call(1, false)).toMatchObject({ retentionRuns: 1 });
+    expect(await call(1, true)).toMatchObject({ retentionRuns: 1 });
+    expect(await call(1, true)).toMatchObject({ retentionRuns: 1 });
+    expect(await call(5000, true)).toMatchObject({ retentionRuns: 1 });
+    expect(await call(5000, true)).toMatchObject({ retentionRuns: 0 });
+  });
+
   it("each call is bounded by its batch, and arguments out of range are refused", async () => {
     const old = { challenges: [await challenge(9), await challenge(9)], transactions: [await transaction(9), await transaction(9)] };
     const call = (batch: number, enforce: boolean | null) =>
