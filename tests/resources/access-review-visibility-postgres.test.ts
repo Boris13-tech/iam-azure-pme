@@ -176,12 +176,18 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Access review campaig
       for (const subjectId of subjectIds) await owner.assignment.create({ data: { ...scope, subjectId, entitlementId: entitlement.id, source: "DIRECT" } });
     }
     const past = new Date(Date.now() - 86_400_000);
+    // Real references: the backup round trip restores this database, foreign keys included.
+    const reviewedScope = await owner.resourceScope.create({ data: { ...scope, key: "counters", kind: "TENANT" } });
+    const reviewed = await owner.entitlement.create({ data: { ...scope, key: "counters.review", action: "review", resource: "counters" } });
     await owner.$transaction(async tx => {
       await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
-      const campaign = (reviewerSubjectId: string, status: "OPEN" | "COMPLETED") => tx.accessReviewCampaign.create({ data: { ...scope, name: "Counters", scopeId: randomUUID(), scopeType: "TENANT",
+      const campaign = (reviewerSubjectId: string, status: "OPEN" | "COMPLETED") => tx.accessReviewCampaign.create({ data: { ...scope, name: "Counters", scopeId: reviewedScope.id, scopeType: "TENANT",
         reviewerSubjectId, createdBySubjectId: other.subjectId, startsAt: new Date(past.getTime() - 86_400_000), dueAt: past, status, completedAt: status === "COMPLETED" ? past : null } });
-      const item = (campaignId: string, reviewerSubjectId: string, reviewState: "PENDING" | "REQUIRES_REMEDIATION") => tx.accessReviewItem.create({ data: { ...scope, campaignId, reviewerSubjectId, reviewState,
-        subjectId: randomUUID(), assignmentId: randomUUID(), entitlementId: randomUUID(), scopeId: randomUUID(), resourceIds: [randomUUID()], assignmentVersion: past, entitlementVersion: past } });
+      const item = async (campaignId: string, reviewerSubjectId: string, reviewState: "PENDING" | "REQUIRES_REMEDIATION") => {
+        const assignment = await tx.assignment.create({ data: { ...scope, subjectId: managing.subjectId, entitlementId: reviewed.id, source: "DIRECT", sourceRef: randomUUID() } });
+        await tx.accessReviewItem.create({ data: { ...scope, campaignId, reviewerSubjectId, reviewState,
+          subjectId: managing.subjectId, assignmentId: assignment.id, entitlementId: reviewed.id, scopeId: reviewedScope.id, resourceIds: [randomUUID()], assignmentVersion: past, entitlementVersion: past } });
+      };
       // Visible to the limited reader: one overdue campaign, one pending item, one to remediate.
       const own = await campaign(limited.subjectId, "OPEN");
       await item(own.id, limited.subjectId, "PENDING");
