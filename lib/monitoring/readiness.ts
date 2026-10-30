@@ -42,8 +42,8 @@ export async function databaseReady(check: Check = databaseCheck, now = Date.now
   inflight = (async () => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      outstanding = true;
       const query = check();
+      outstanding = true;
       const settled = () => { outstanding = false; };
       query.then(settled, settled);
       await Promise.race([

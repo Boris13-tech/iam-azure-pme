@@ -98,6 +98,12 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     expect(query).toHaveBeenCalledTimes(2);
   });
 
+  it("a check that throws at once does not count as an unanswered query", async () => {
+    const start = 1_000_000;
+    expect(await databaseReady(() => { throw new Error("no connection"); }, start)).toBe(false);
+    expect(await databaseReady(async () => [1], start + READINESS_CACHE_MS)).toBe(true);
+  });
+
   it("the database sees one check per period, whatever the call rate (single flight, then cache)", async () => {
     let release!: () => void;
     query.mockReturnValue(new Promise((resolve) => { release = () => resolve([1]); }));
