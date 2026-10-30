@@ -7,7 +7,10 @@
 import type { PrismaClient } from "@prisma/client";
 import { canonicalJson, planDigest } from "./break-glass";
 
-/** Children first. Kept identical to the array in the migration (architecture test). */
+/**
+ * Children first. Kept identical to the array in the migration (architecture test). LegacyUserBridge is deliberately
+ * absent: an organization that has one is refused, and the erasure must never remove that link.
+ */
 export const ERASURE_TABLES = [
   "AccessReviewItem", "AccessReviewCampaign", "SoDRule", "SoDPolicy", "Assignment", "Entitlement",
   "ResourceScopeMember", "ResourceScope", "ProviderSecretReference", "ProviderConnectionTenantScope", "Resource",
@@ -15,7 +18,7 @@ export const ERASURE_TABLES = [
   "Invitation", "IdentityRecoveryApproval", "IdentityRecoveryCeremony", "IdentityPortabilityConflict",
   "IdentityPortabilityReceipt", "CredentialReenrollmentRequirement", "IdentityContinuityConflict",
   "IdentityContinuityEvent", "IdentityAssuranceSnapshot", "OfflineIdentityChallenge", "IdentityContinuityState",
-  "TrustAnchorVersion", "CryptoKeyVersion", "ProviderIdentityCollision", "LegacyUserBridge", "IdentityAccount",
+  "TrustAnchorVersion", "CryptoKeyVersion", "ProviderIdentityCollision", "IdentityAccount",
   "AuthorizationShadowObservation", "CanonicalAdminAuditEvent", "OrganizationDomain", "Subject", "ProviderConnection",
   "Tenant", "SignupCode",
 ] as const;
@@ -29,8 +32,17 @@ export type ErasureCounts = Record<string, number>;
 export type ErasurePlan = {
   kind: "LUXIA_ORGANIZATION_ERASURE_PLAN";
   organization: { id: string; slug: string; status: "CLOSED"; statusChangedAt: string | null };
-  counts: ErasureCounts; target: ErasureTarget; toolVersion: string; issuedAt: string; notAfter: string;
+  counts: ErasureCounts;
+  /** Precondition (no bridge for this organization) and what the erasure cannot see: legacy users with no bridge, in the whole database. */
+  legacy: { bridgesForOrganization: 0; usersWithoutBridge: number };
+  target: ErasureTarget; toolVersion: string; issuedAt: string; notAfter: string;
 };
+
+/** Legacy users linked to no organization. They carry no organization, so no erasure can attribute or remove them. */
+export async function countLegacyUsersWithoutBridge(db: Pick<PrismaClient, "$queryRawUnsafe">): Promise<number> {
+  const [row] = await db.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM "User" u WHERE NOT EXISTS (SELECT 1 FROM "LegacyUserBridge" b WHERE b."legacyUserId" = u."id")`);
+  return row.n;
+}
 
 /** Rows of the organization per table, as the database function will delete them. Table names are constants. */
 export async function countOrganizationRows(db: Pick<PrismaClient, "$queryRawUnsafe">, organizationId: string): Promise<ErasureCounts> {
@@ -51,10 +63,13 @@ export async function planErasure(db: PrismaClient, slug: string | undefined, ta
   const organization = await db.organization.findUnique({ where: { slug: slug! }, select: { id: true, slug: true, status: true, statusChangedAt: true } });
   if (!organization) refuse("ORGANIZATION_UNKNOWN");
   if (organization!.status !== "CLOSED") refuse("ORGANIZATION_NOT_CLOSED");
+  // Legacy tables have no organization column; the bridge is their only link. The database refuses too.
+  if (await db.legacyUserBridge.count({ where: { organizationId: organization!.id } }) > 0) refuse("LEGACY_DATA_PRESENT");
   const plan: ErasurePlan = {
     kind: "LUXIA_ORGANIZATION_ERASURE_PLAN",
     organization: { id: organization!.id, slug: organization!.slug, status: "CLOSED", statusChangedAt: organization!.statusChangedAt?.toISOString() ?? null },
-    counts: await countOrganizationRows(db, organization!.id), target, toolVersion,
+    counts: await countOrganizationRows(db, organization!.id),
+    legacy: { bridgesForOrganization: 0, usersWithoutBridge: await countLegacyUsersWithoutBridge(db) }, target, toolVersion,
     issuedAt: now.toISOString(), notAfter: new Date(now.getTime() + ERASURE_PLAN_VALIDITY_MS).toISOString(),
   };
   return { plan, digest: planDigest(plan) };
@@ -84,6 +99,6 @@ export async function applyErasure(db: PrismaClient, plan: ErasurePlan) {
     if (canonicalJson(row.counts) !== canonicalJson(plan.counts)) refuse("ERASURE_RESULT_MISMATCH");
     const remaining = await tx.organization.count({ where: { id: plan.organization.id } });
     if (remaining !== 0) refuse("ERASURE_RESULT_MISMATCH");
-    return { organizationId: plan.organization.id, slug: plan.organization.slug, counts: row.counts };
+    return { organizationId: plan.organization.id, slug: plan.organization.slug, counts: row.counts, legacyUsersWithoutBridge: await countLegacyUsersWithoutBridge(tx) };
   }, { timeout: 120_000, maxWait: 10_000 });
 }

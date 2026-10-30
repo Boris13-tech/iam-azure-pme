@@ -1,9 +1,13 @@
 -- R7 (docs/architecture/RETENTION-AND-MINIMIZATION-DESIGN.md): the operator erases a CLOSED organization at the
--- end of a pilot or after its closure. Every row of the organization goes, in a fixed order, children first; then
--- the organization row. The append-only journal and the other guards keep refusing every DELETE, except inside
--- this erasure: the operator's function sets a transaction-local marker naming the organization, and each guard
--- lets a DELETE through only when the marker names the row's organization, the statement runs as the table's
--- owner, and the organization is CLOSED. The runtime role can call neither function. TRUNCATE stays refused.
+-- end of a pilot or after its closure. Every row of every table that carries the organization goes, in a fixed order,
+-- children first; then the organization row. An organization with a LegacyUserBridge row is refused, and the bridge is
+-- never deleted here: the legacy tables (User, UserRole, AuditLog) carry no organization and the bridge is their only
+-- link, so they need their own procedure first. The append-only journal and the other guards keep refusing every
+-- DELETE, except when a transaction-local marker names the row's organization, the statement runs as the table's
+-- owner in its own session, and the organization is CLOSED. luxia_organization_erase, through the operator command,
+-- is the supported and recorded path. It is not the only technically possible one: the database owner keeps its
+-- intrinsic capabilities (setting that marker by hand, disabling triggers), which this gate limits by mistake only and
+-- does not bind. The runtime role can call neither function. TRUNCATE stays refused.
 -- Changed guard bodies are the previous ones plus that gate only (static test).
 
 CREATE TABLE "OrganizationErasure" (
@@ -367,7 +371,6 @@ DECLARE
     'TrustAnchorVersion',
     'CryptoKeyVersion',
     'ProviderIdentityCollision',
-    'LegacyUserBridge',
     'IdentityAccount',
     'AuthorizationShadowObservation',
     'CanonicalAdminAuditEvent',
@@ -390,6 +393,12 @@ BEGIN
   END IF;
   IF v_status <> 'CLOSED' THEN
     RAISE EXCEPTION 'ERASURE_ORGANIZATION_NOT_CLOSED' USING ERRCODE = '23514';
+  END IF;
+  -- The bridge is the only link to the legacy tables, which have no organization column: fail closed, keep the link.
+  -- It is in no delete list: one committed after this check stops the erasure (foreign key on Subject, or the
+  -- completeness check below), and the whole transaction rolls back.
+  IF EXISTS (SELECT 1 FROM "LegacyUserBridge" b WHERE b."organizationId" = p_organization_id) THEN
+    RAISE EXCEPTION 'ERASURE_LEGACY_DATA_PRESENT' USING ERRCODE = '23514';
   END IF;
   PERFORM set_config('luxia.erasure_organization', p_organization_id, true);
   FOREACH v_table IN ARRAY v_tables LOOP

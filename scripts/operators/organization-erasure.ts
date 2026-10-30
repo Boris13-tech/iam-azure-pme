@@ -7,6 +7,11 @@
 //
 // Runs with the owner connection in LUXIA_OWNER_DATABASE_URL (direct endpoint, BYPASSRLS role), never printed.
 // `plan` writes nothing. `apply` is irreversible; the backups still hold the data until they expire (R8).
+// Precondition: no LegacyUserBridge row for the organization, otherwise REFUSED LEGACY_DATA_PRESENT; a historical
+// organization needs the separate legacy procedure first. An organization created without a bridge continues normally.
+// Guarantee: no row attributable to the organization through the supported canonical or legacy linkage remains.
+// Legacy users with no bridge cannot be attributed and are not part of it; plan and apply report their
+// count for the whole database, and that count needs the operator's attention.
 // Evidence files hold the organization identifiers and the counts per table, never row content.
 import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -46,6 +51,7 @@ async function main() {
       console.log(JSON.stringify(plan, null, 1));
       console.log(`\nNothing was written. Plan digest : ${digest}`);
       console.log(`Valid until : ${plan.notAfter}`);
+      if (plan.legacy.usersWithoutBridge > 0) console.log(`WARNING: ${plan.legacy.usersWithoutBridge} legacy user(s) in this database have no bridge: no erasure can attribute them to an organization. Review them before telling a customer the erasure is complete.`);
       console.log(`IRREVERSIBLE. Apply with : apply --plan ${path} --confirm ${digest} --irreversible ${plan.organization.slug}`);
     } else if (command === "apply") {
       const file = option(args, "plan");
@@ -57,8 +63,9 @@ async function main() {
       const path = writeEvidence(evidence, file.replace(/^.*[\/]/, "").replace(/\.plan\.json$/, ".apply.json"),
         { kind: "LUXIA_ORGANIZATION_ERASURE_APPLY", digest: saved.digest, erasedAt: new Date().toISOString(), ...result });
       console.log(JSON.stringify(result, null, 1));
-      console.log(`\nERASED: ${result.slug}. Every row of the organization is gone; the counts match the plan.`);
+      console.log(`\nERASED: ${result.slug}. No row attributable to the organization through the supported canonical or legacy linkage remains; the counts match the plan.`);
       console.log(`Evidence    : ${path}`);
+      if (result.legacyUsersWithoutBridge > 0) console.log(`WARNING: ${result.legacyUsersWithoutBridge} legacy user(s) in this database have no bridge and were not examined: operator attention needed.`);
       console.log("Backups keep the data until they expire (R8). Confirm the erasure to the customer in writing.");
     } else {
       throw new Error("Commands: plan | apply");

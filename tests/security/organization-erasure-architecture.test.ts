@@ -59,10 +59,12 @@ describe("R7 organization erasure: migration architecture", () => {
     expect([...array.matchAll(/'(\w+)'/g)].map((m) => m[1])).toEqual([...ERASURE_TABLES]);
     const schema = read("prisma/schema.prisma");
     const scoped = [...schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)]
-      .filter(([, , body]) => /^\s+organizationId\s/m.test(body)).map(([, name]) => name).filter((name) => name !== "OrganizationErasure");
+      .filter(([, , body]) => /^\s+organizationId\s/m.test(body)).map(([, name]) => name)
+      // OrganizationErasure outlives the organization. LegacyUserBridge is never erased: its presence refuses the erasure.
+      .filter((name) => name !== "OrganizationErasure" && name !== "LegacyUserBridge");
     expect([...scoped].sort()).toEqual([...ERASURE_TABLES].sort());
     const erase = fn(migration, "luxia_organization_erase");
-    for (const text of ["ERASURE_REQUIRES_BYPASSRLS", "ERASURE_ORGANIZATION_NOT_CLOSED", "ERASURE_INCOMPLETE", `"expectedOrganizationId" = p_organization_id`,
+    for (const text of ["ERASURE_REQUIRES_BYPASSRLS", "ERASURE_ORGANIZATION_NOT_CLOSED", "ERASURE_LEGACY_DATA_PRESENT", "ERASURE_INCOMPLETE", `"expectedOrganizationId" = p_organization_id`,
       "format('DELETE FROM %I WHERE \"organizationId\" = $1', v_table) USING p_organization_id", "FOR UPDATE"])
       expect(erase).toContain(text);
     expect(erase).not.toMatch(/SECURITY DEFINER/);
@@ -102,7 +104,7 @@ describe("R7 organization erasure: operator plan", () => {
   const commit = "a".repeat(40);
   const at = new Date("2026-10-23T10:00:00.000Z");
   const plan: ErasurePlan = { kind: "LUXIA_ORGANIZATION_ERASURE_PLAN", organization: { id: "o1", slug: "acme", status: "CLOSED", statusChangedAt: null },
-    counts: { Session: 2, Organization: 1 }, target, toolVersion: commit, issuedAt: at.toISOString(), notAfter: new Date(at.getTime() + ERASURE_PLAN_VALIDITY_MS).toISOString() };
+    counts: { Session: 2, Organization: 1 }, legacy: { bridgesForOrganization: 0, usersWithoutBridge: 0 }, target, toolVersion: commit, issuedAt: at.toISOString(), notAfter: new Date(at.getTime() + ERASURE_PLAN_VALIDITY_MS).toISOString() };
   const digest = planDigest(plan);
   const current = { target, toolVersion: commit };
   const refusal = (fn: () => unknown) => { try { fn(); } catch (error) { return error instanceof ErasureRefusal ? error.message : `OTHER ${String(error)}`; } return "ACCEPTED"; };

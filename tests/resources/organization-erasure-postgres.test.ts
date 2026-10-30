@@ -1,5 +1,5 @@
 // R7 (docs/architecture/RETENTION-AND-MINIMIZATION-DESIGN.md): erasure of a CLOSED organization by the operator
-// procedure, on PostgreSQL with the real guards. Every row of the erased organization goes; every other
+// procedure, on PostgreSQL with the real guards. Every row of every table that carries it goes; every other
 // organization is byte-identical; the journal and the other guards still refuse every DELETE outside it.
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -25,6 +25,8 @@ let owner: PrismaClient;
 let orgs = 0;
 
 type Org = { slug: string; organizationId: string; tenantId: string; local: string; subjectId: string; accountId: string };
+/** Tables whose DELETE guard carries the erasure gate; the fixture holds a row in each, so each gate really runs. */
+const GATED_ROWS = { Invitation: 1, OrganizationDomain: 1, LocalRecoveryCode: 1, ProviderSecretReference: 1, AccessReviewCampaign: 1, AccessReviewItem: 1 };
 async function organization(): Promise<Org> {
   const organizationId = randomUUID(), tenantId = randomUUID(), slug = `r7-${suffix}-${++orgs}`;
   const scope = { organizationId, tenantId };
@@ -39,7 +41,20 @@ async function organization(): Promise<Org> {
   await owner.localAuthenticator.create({ data: { ...scope, identityAccountId: account.id, type: "PASSKEY", credentialId: key.credentialId, publicKey: key.publicKeyPem,
     relyingPartyId: "localhost", allowedOrigin: "http://localhost:3000", credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", algorithmId: "WEBAUTHN_ES256" } });
   const entitlement = await owner.entitlement.create({ data: { ...scope, key: "assignments.manage", resource: "assignments", action: "manage" } });
-  await owner.assignment.create({ data: { ...scope, subjectId: subject.id, entitlementId: entitlement.id, source: "DIRECT", sourceRef: "r7-test" } });
+  const assignment = await owner.assignment.create({ data: { ...scope, subjectId: subject.id, entitlementId: entitlement.id, source: "DIRECT", sourceRef: "r7-test" } });
+  const reviewer = await owner.subject.create({ data: { ...scope, type: "HUMAN", name: "Reviewer", lifecycleState: "ACTIVE" } });
+  const invitee = await owner.subject.create({ data: { ...scope, type: "HUMAN", name: "Invitee", lifecycleState: "PROVISIONING" } });
+  await owner.invitation.create({ data: { ...scope, subjectId: invitee.id, tokenHash: sha(randomUUID()), role: "MEMBER", invitedBySubjectId: subject.id } });
+  await owner.organizationDomain.create({ data: { ...scope, domain: `r7-${randomUUID().slice(0, 8)}.example`, challengeHash: sha(randomUUID()), challengeExpiresAt: new Date(Date.now() + 60_000) } });
+  await owner.localRecoveryCode.create({ data: { ...scope, identityAccountId: account.id, codeHash: sha(randomUUID()), batchId: randomUUID() } });
+  await owner.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`resource-governance:${organizationId}:${tenantId}`}, 0))::text`;
+    await tx.providerSecretReference.create({ data: { organizationId, providerConnectionId: local.id, purpose: "OIDC_CLIENT", store: "azure-key-vault", locator: "akv://luxia-app-kv/oidc-conn", activeVersion: "a".repeat(32) } });
+  });
+  const reviewScope = await owner.resourceScope.create({ data: { ...scope, key: "r7-tenant", kind: "TENANT" } });
+  const campaign = await owner.accessReviewCampaign.create({ data: { ...scope, name: "R7", scopeId: reviewScope.id, scopeType: "TENANT", reviewerSubjectId: reviewer.id, createdBySubjectId: subject.id, startsAt: new Date(), dueAt: new Date(Date.now() + 86_400_000) } });
+  await owner.accessReviewItem.create({ data: { ...scope, campaignId: campaign.id, subjectId: subject.id, assignmentId: assignment.id, entitlementId: entitlement.id, scopeId: reviewScope.id,
+    resourceIds: [randomUUID()], assignmentVersion: new Date(), entitlementVersion: new Date(), reviewerSubjectId: reviewer.id } });
   const org = { slug, organizationId, tenantId, local: local.id, subjectId: subject.id, accountId: account.id };
   // Product rows: two sessions with their sign-in evidence, a challenge, a Microsoft transaction, the signup code.
   for (let i = 0; i < 2; i++) await SessionStore.createSession({ ...scope, subjectId: subject.id, identityAccountId: account.id }, undefined, undefined,
@@ -127,7 +142,7 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
 
     const { plan } = await planErasure(owner, a.slug, target, TOOL);
     expect(plan.counts).toMatchObject({ Session: 2, AuthenticationEvidence: 2, LocalAuthChallenge: 1, AuthTransaction: 1, SignupCode: 1, Organization: 1,
-      CanonicalAdminAuditEvent: journal, ProviderConnection: 1, Tenant: 1 });
+      CanonicalAdminAuditEvent: journal, ProviderConnection: 1, Tenant: 1, ...GATED_ROWS });
     const result = await applyErasure(owner, plan);
     expect(result.counts).toEqual(plan.counts);
     const left = await remaining(a.organizationId);
@@ -169,6 +184,179 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
     expect((await applyErasure(owner, fresh.plan)).counts.AuthTransaction).toBe(2);
     expect((await remaining(c.organizationId)).rows).toBe(0);
   }, 120_000);
+
+  it("an organization with a bridge is refused by the plan and by the database: nothing goes, the link stays", async () => {
+    const e = await organization();
+    const user = await owner.user.create({ data: { email: `r7-${randomUUID()}@example.test`, name: "Legacy person" } });
+    await owner.legacyUserBridge.create({ data: { legacyUserId: user.id, organizationId: e.organizationId, subjectId: e.subjectId } });
+    await owner.auditLog.create({ data: { actorId: user.id, action: "LEGACY", ip: "198.51.100.1" } });
+    await close(e);
+    const before = await fingerprint(e.organizationId);
+    expect(await codeOf(planErasure(owner, e.slug, target, TOOL))).toBe("LEGACY_DATA_PRESENT");
+    expect(await codeOf(owner.$queryRaw`SELECT luxia_organization_erase(${e.organizationId})`)).toBe("ERASURE_LEGACY_DATA_PRESENT");
+    expect(await fingerprint(e.organizationId)).toEqual(before);
+    expect(await owner.legacyUserBridge.count({ where: { legacyUserId: user.id } })).toBe(1);
+    expect(await owner.auditLog.count({ where: { actorId: user.id } })).toBe(1);
+    expect(await owner.organizationErasure.count({ where: { organizationId: e.organizationId } })).toBe(0);
+  }, 120_000);
+
+  it("a bridge committed while apply runs stops the erasure: it is never deleted, everything rolls back", async () => {
+    const i = await organization();
+    await close(i);
+    const { plan } = await planErasure(owner, i.slug, target, TOOL);
+    const user = await owner.user.create({ data: { email: `r7-${randomUUID()}@example.test`, name: "Legacy person" } });
+    let inserted!: () => void, commit!: () => void;
+    const isInserted = new Promise<void>((resolve) => { inserted = resolve; });
+    const committing = new Promise<void>((resolve) => { commit = resolve; });
+    const late = owner.$transaction(async (tx) => {
+      await tx.legacyUserBridge.create({ data: { legacyUserId: user.id, organizationId: i.organizationId, subjectId: i.subjectId } });
+      inserted();
+      await committing;
+    }, { timeout: 30_000 });
+    await isInserted;
+    const before = await fingerprint(i.organizationId);
+    const apply = codeOf(applyErasure(owner, plan));
+    expect(await stillWaiting(apply)).toBe(STILL_WAITING); // the erasure reaches the Subject the bridge holds
+    commit();
+    await late;
+    expect(await apply).not.toBe("OK");
+    expect(await fingerprint(i.organizationId)).toEqual(before);
+    expect(await owner.legacyUserBridge.count({ where: { legacyUserId: user.id } })).toBe(1);
+    expect(await owner.organizationErasure.count({ where: { organizationId: i.organizationId } })).toBe(0);
+  }, 120_000);
+
+  it("a legacy user with no bridge does not block an erasure, stays, and is reported by plan and apply", async () => {
+    const j = await organization();
+    await close(j);
+    const orphan = await owner.user.create({ data: { email: `r7-${randomUUID()}@example.test`, name: "Unlinked person" } });
+    const total = await owner.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM "User" u WHERE NOT EXISTS (SELECT 1 FROM "LegacyUserBridge" b WHERE b."legacyUserId" = u."id")`);
+    const { plan } = await planErasure(owner, j.slug, target, TOOL);
+    expect(plan.legacy).toEqual({ bridgesForOrganization: 0, usersWithoutBridge: total[0].n });
+    const result = await applyErasure(owner, plan);
+    expect(result.legacyUsersWithoutBridge).toBe(total[0].n);
+    expect((await remaining(j.organizationId)).rows).toBe(0);
+    expect(await owner.user.count({ where: { id: orphan.id } })).toBe(1);
+  }, 120_000);
+
+  const journalEvent = (org: Org) => ({ organizationId: org.organizationId, tenantId: org.tenantId, actorSubjectId: org.subjectId, operation: "SESSION.SIGN_OUT", result: "SUCCESS" as const, changeId: `r7:${randomUUID()}`, metadata: {} });
+  const STILL_WAITING = "STILL_WAITING";
+  const stillWaiting = (promise: Promise<unknown>) => Promise.race([promise.then(() => "SETTLED", () => "SETTLED"), new Promise((resolve) => setTimeout(() => resolve(STILL_WAITING), 700))]);
+
+  it("a runtime INSERT during the erasure waits, then fails; the erasure stands", async () => {
+    const f = await organization();
+    await close(f);
+    let erased!: () => void, finish!: () => void;
+    const isErased = new Promise<void>((resolve) => { erased = resolve; });
+    const finishing = new Promise<void>((resolve) => { finish = resolve; });
+    const erasure = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT luxia_organization_erase(${f.organizationId})`;
+      erased();
+      await finishing;
+    }, { timeout: 30_000 });
+    await isErased;
+    const late = codeOf(rawPrisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${f.organizationId}, true), set_config('app.tenant_id', ${f.tenantId}, true)`;
+      await tx.canonicalAdminAuditEvent.create({ data: journalEvent(f) });
+    }, { timeout: 30_000 }));
+    expect(await stillWaiting(late)).toBe(STILL_WAITING);
+    finish();
+    await erasure;
+    expect(await late).not.toBe("OK");
+    expect((await remaining(f.organizationId)).rows).toBe(0);
+  }, 120_000);
+
+  it("a runtime INSERT in flight when apply starts: the result differs from the plan, nothing is deleted", async () => {
+    const g = await organization();
+    await close(g);
+    const { plan } = await planErasure(owner, g.slug, target, TOOL);
+    let inserted!: () => void, commit!: () => void;
+    const isInserted = new Promise<void>((resolve) => { inserted = resolve; });
+    const committing = new Promise<void>((resolve) => { commit = resolve; });
+    const flight = rawPrisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${g.organizationId}, true), set_config('app.tenant_id', ${g.tenantId}, true)`;
+      await tx.canonicalAdminAuditEvent.create({ data: journalEvent(g) });
+      inserted();
+      await committing;
+    }, { timeout: 30_000 });
+    await isInserted;
+    const apply = codeOf(applyErasure(owner, plan));
+    expect(await stillWaiting(apply)).toBe(STILL_WAITING); // waits on the lock the insert holds on the organization row
+    commit();
+    await flight;
+    expect(await apply).toBe("ERASURE_RESULT_MISMATCH");
+    expect(await owner.organizationErasure.count({ where: { organizationId: g.organizationId } })).toBe(0);
+    expect(await owner.canonicalAdminAuditEvent.count({ where: { organizationId: g.organizationId } })).toBe(plan.counts.CanonicalAdminAuditEvent + 1);
+    expect(await owner.organization.count({ where: { id: g.organizationId } })).toBe(1);
+  }, 120_000);
+
+  it("a table added later that holds a row of the organization: ERASURE_INCOMPLETE, everything rolls back, no record", async () => {
+    const h = await organization();
+    await close(h);
+    const { plan } = await planErasure(owner, h.slug, target, TOOL);
+    const extra = `r7_extra_${suffix}`;
+    await owner.$executeRawUnsafe(`CREATE TABLE "${extra}" ("organizationId" TEXT NOT NULL)`);
+    try {
+      await owner.$executeRawUnsafe(`INSERT INTO "${extra}" VALUES ($1)`, h.organizationId);
+      const before = await fingerprint(h.organizationId);
+      expect(await codeOf(applyErasure(owner, plan))).toBe("ERASURE_INCOMPLETE");
+      expect(await fingerprint(h.organizationId)).toEqual(before);
+      expect(await owner.organizationErasure.count({ where: { organizationId: h.organizationId } })).toBe(0);
+    } finally {
+      await owner.$executeRawUnsafe(`DROP TABLE IF EXISTS "${extra}"`);
+    }
+  }, 120_000);
+
+  it("an owner that is not a superuser erases with BYPASSRLS, and is refused without it (Production-like role, scratch database)", async () => {
+    const admin = process.env.DATABASE_MIGRATION_URL!;
+    const name = `luxia_r7_owner_${suffix}`, role = `luxia_r7_owner_${suffix}`, password = randomUUID();
+    psqlOk(admin, ["-c", `CREATE DATABASE ${name}`]);
+    psqlOk(admin, ["-c", `CREATE ROLE ${role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS PASSWORD '${password}'`]);
+    const scratch = new URL(admin); scratch.pathname = `/${name}`;
+    const superuser = scratch.toString();
+    const asOwner = new URL(superuser); asOwner.username = role; asOwner.password = password;
+    const client = new PrismaClient({ datasources: { db: { url: asOwner.toString() } } });
+    try {
+      for (const dir of readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort()) psqlOk(superuser, ["-1", "-f", `prisma/migrations/${dir}/migration.sql`]);
+      const org = randomUUID(), tenant = randomUUID(), subject = randomUUID(), connection = randomUUID();
+      psqlOk(superuser, ["-1", "-c", `SET LOCAL session_replication_role = replica;
+        INSERT INTO "Organization" ("id", "name", "slug", "status", "updatedAt") VALUES ('${org}', 'R7 owner', 'r7-owner-${suffix}', 'CLOSED', now());
+        INSERT INTO "Tenant" ("id", "organizationId", "name", "updatedAt") VALUES ('${tenant}', '${org}', 'Production', now());
+        INSERT INTO "ProviderConnection" ("id", "organizationId", "providerType", "externalScopeId", "name", "updatedAt") VALUES ('${connection}', '${org}', 'LUXIA_LOCAL', 'r7-owner', 'Local', now());
+        INSERT INTO "Subject" ("id", "organizationId", "tenantId", "type", "name", "updatedAt") VALUES ('${subject}', '${org}', '${tenant}', 'HUMAN', 'Person', now());
+        INSERT INTO "CanonicalAdminAuditEvent" ("id", "organizationId", "tenantId", "actorSubjectId", "operation", "changeId", "result") VALUES ('${randomUUID()}', '${org}', '${tenant}', '${subject}', 'SESSION.SIGN_OUT', 'r7-owner', 'SUCCESS');`]);
+      // Everything LUXIA owns moves to the role: tables and sequences, functions, types, the schema.
+      psqlOk(superuser, ["-1", "-c", `DO $o$ DECLARE r RECORD; BEGIN
+        FOR r IN SELECT c.oid::regclass::text AS n, c.relkind FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace WHERE s.nspname = 'public' AND c.relkind IN ('r', 'p') LOOP
+          EXECUTE format('ALTER TABLE %s OWNER TO ${role}', r.n); END LOOP;
+        FOR r IN SELECT c.oid::regclass::text AS n FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace WHERE s.nspname = 'public' AND c.relkind = 'S'
+            AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype IN ('a', 'i')) LOOP
+          EXECUTE format('ALTER SEQUENCE %s OWNER TO ${role}', r.n); END LOOP;
+        FOR r IN SELECT p.oid::regprocedure::text AS n FROM pg_proc p JOIN pg_namespace s ON s.oid = p.pronamespace WHERE s.nspname = 'public' LOOP
+          EXECUTE format('ALTER FUNCTION %s OWNER TO ${role}', r.n); END LOOP;
+        FOR r IN SELECT t.oid::regtype::text AS n FROM pg_type t JOIN pg_namespace s ON s.oid = t.typnamespace WHERE s.nspname = 'public' AND t.typtype = 'e' LOOP
+          EXECUTE format('ALTER TYPE %s OWNER TO ${role}', r.n); END LOOP;
+        ALTER SCHEMA public OWNER TO ${role};
+      END $o$`]);
+      const [me] = await client.$queryRaw<Array<{ super: boolean; bypass: boolean; session: string }>>`SELECT r.rolsuper AS super, r.rolbypassrls AS bypass, session_user::text AS session FROM pg_roles r WHERE r.rolname = current_user`;
+      expect(me).toEqual({ super: false, bypass: true, session: role });
+      const ownerTarget = { host: "localhost", database: name, role };
+      const { plan } = await planErasure(client, `r7-owner-${suffix}`, ownerTarget, TOOL);
+      expect(plan.counts).toMatchObject({ CanonicalAdminAuditEvent: 1, Subject: 1, ProviderConnection: 1, Tenant: 1, Organization: 1 });
+      // Control: the same role without BYPASSRLS is refused and nothing goes.
+      psqlOk(superuser, ["-c", `ALTER ROLE ${role} NOBYPASSRLS`]);
+      await client.$disconnect();
+      expect(await codeOf(client.$queryRaw`SELECT luxia_organization_erase(${org})`)).toBe("ERASURE_REQUIRES_BYPASSRLS");
+      expect(psqlOk(superuser, ["-c", `SELECT count(*) FROM "CanonicalAdminAuditEvent" WHERE "organizationId" = '${org}'`]).trim()).toBe("1");
+      psqlOk(superuser, ["-c", `ALTER ROLE ${role} BYPASSRLS`]);
+      await client.$disconnect();
+      expect((await applyErasure(client, plan)).counts).toEqual(plan.counts);
+      expect(psqlOk(superuser, ["-c", `SELECT count(*) FROM "CanonicalAdminAuditEvent"`, "-c", `SELECT count(*) FROM "Organization"`]).replace(/\r/g, "").trim().split("\n")).toEqual(["0", "0"]);
+    } finally {
+      await client.$disconnect();
+      psql(admin, ["-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`]);
+      psql(admin, ["-c", `DROP ROLE IF EXISTS ${role}`]);
+    }
+  }, 240_000);
 
   it("drill: the migration applies on a scratch database; the rollback restores the catalog, and refuses once an erasure is recorded", () => {
     const admin = process.env.DATABASE_MIGRATION_URL!;
