@@ -1,16 +1,27 @@
 // Operator command for private-beta signup codes (Customer Self-Onboarding v1, requirement 1).
 //
-//   npx tsx scripts/operators/signup-codes.ts issue --by "<operator>" [--days 14] [--note "<customer>"]
+//   npx tsx scripts/operators/signup-codes.ts plan --by "<operator>" [--days 14] [--note "<customer>"] [--evidence <dir>]
+//   npx tsx scripts/operators/signup-codes.ts issue --plan <plan.json> --confirm <digest> [--evidence <dir>]
 //   npx tsx scripts/operators/signup-codes.ts revoke <code id> --by "<operator>"
 //   npx tsx scripts/operators/signup-codes.ts list
 //
 // Runs with the table owner connection in LUXIA_OWNER_DATABASE_URL (SignupCode has no app_user
 // access). The code is printed once and only its SHA-256 is stored: it cannot be shown again.
+//
+// Issuing a code is a Production write (standard, section 10). `plan` writes nothing and prints a
+// digest. `issue` writes only with that digest, within 15 minutes, against the same database, role
+// and tool commit as the plan, and at most once per plan. Revocation stays immediate: it only
+// removes access, and must stay fast during an incident.
+import { execSync } from "node:child_process";
 import { randomInt } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { signupCodeHash } from "../../lib/onboarding/signup";
+import { canonicalJson, planDigest } from "../../lib/operators/break-glass";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"; // no 0/O, 1/I/L, U
+export const SIGNUP_PLAN_VALIDITY_MS = 15 * 60_000;
 
 export function generateSignupCode(): string {
   // 20 symbols drawn uniformly (crypto.randomInt) from a 30-letter alphabet: about 98 bits.
@@ -18,33 +29,111 @@ export function generateSignupCode(): string {
   return `LUXIA-${groups.join("-")}`;
 }
 
+export class SignupPlanRefusal extends Error {}
+const refuse = (code: string): never => { throw new SignupPlanRefusal(code); };
+
+/** Where a plan may be applied: the endpoint (host and port), database, schema and role it was made against. */
+export type SignupTarget = { host: string; database: string; schema: string; role: string };
+export type SignupPlan = {
+  kind: "LUXIA_SIGNUP_CODE_PLAN"; by: string; days: number; note: string | null;
+  target: SignupTarget; toolVersion: string; issuedAt: string; notAfter: string;
+};
+
+export function planSignupCode(input: { by?: string; days?: string; note?: string }, target: SignupTarget, toolVersion: string, now = new Date()) {
+  const days = Number(input.days ?? 14);
+  if (!input.by || input.by.length > 200) refuse("BY_REQUIRED");
+  if (!Number.isInteger(days) || days < 1 || days > 30) refuse("DAYS_OUT_OF_RANGE");
+  if (!/^[0-9a-f]{40}$/.test(toolVersion)) refuse("TOOL_VERSION_UNKNOWN");
+  const plan: SignupPlan = {
+    kind: "LUXIA_SIGNUP_CODE_PLAN", by: input.by!, days, note: input.note?.slice(0, 150) ?? null, target, toolVersion,
+    issuedAt: now.toISOString(), notAfter: new Date(now.getTime() + SIGNUP_PLAN_VALIDITY_MS).toISOString(),
+  };
+  return { plan, digest: planDigest(plan) };
+}
+
+/** Refuses unless the saved plan is intact, confirmed by its digest, fresh, and for this database and commit. */
+export function checkSignupPlan(saved: unknown, confirm: string | undefined, current: { target: SignupTarget; toolVersion: string }, now = new Date()): SignupPlan {
+  const file = saved as { plan?: SignupPlan; digest?: string } | null;
+  if (!file?.plan || file.plan.kind !== "LUXIA_SIGNUP_CODE_PLAN") refuse("NOT_A_SIGNUP_PLAN");
+  const plan = file!.plan!;
+  if (planDigest(plan) !== file!.digest) refuse("PLAN_TAMPERED");
+  if (!confirm || confirm !== file!.digest) refuse("CONFIRMATION_MISMATCH");
+  if (!(now.getTime() <= Date.parse(plan.notAfter))) refuse("PLAN_EXPIRED");
+  if (canonicalJson(plan.target) !== canonicalJson(current.target)) refuse("TARGET_MISMATCH");
+  if (plan.toolVersion !== current.toolVersion) refuse("TOOL_VERSION_MISMATCH");
+  return plan;
+}
+
+/** The plan marker stored in the code's note: it makes each plan usable once. */
+export const planMarker = (digest: string) => `plan:${digest.slice(0, 16)}`;
+
+export async function issueFromPlan(db: PrismaClient, plan: SignupPlan, digest: string, now = new Date()) {
+  const marker = planMarker(digest);
+  const code = generateSignupCode();
+  const row = await db.$transaction(async (tx) => {
+    // By the database's clock, at the write: a wait before this point cannot carry a plan past its deadline.
+    const [clock] = await tx.$queryRaw<Array<{ open: boolean }>>`SELECT now() <= ${plan.notAfter}::timestamptz AS open`;
+    if (!clock.open) refuse("PLAN_EXPIRED");
+    if (await tx.signupCode.findFirst({ where: { note: { startsWith: marker } }, select: { id: true } })) refuse("PLAN_ALREADY_USED");
+    return tx.signupCode.create({ data: {
+      codeHash: signupCodeHash(code)!, issuedBy: plan.by, note: plan.note ? `${marker} ${plan.note}` : marker, createdAt: now,
+      expiresAt: new Date(now.getTime() + plan.days * 86_400_000),
+    } });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  return { code, row };
+}
+
 function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(`--${name}`);
   return at >= 0 ? args[at + 1] : undefined;
+}
+/** The commit of this script's own repository; "unknown" if its files differ from that commit, which refuses a plan. */
+function toolVersion(): string {
+  const cwd = dirname(resolve(process.argv[1]));
+  const git = (command: string) => execSync(command, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  try { return git("git status --porcelain --untracked-files=no") ? "unknown" : git("git rev-parse HEAD"); } catch { return "unknown"; }
+}
+async function currentTarget(db: PrismaClient, url: string): Promise<SignupTarget> {
+  const [row] = await db.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
+  const parsed = new URL(url);
+  return { host: parsed.host, database: row.database, schema: parsed.searchParams.get("schema") ?? "public", role: row.role };
+}
+function writeEvidence(dir: string, name: string, value: unknown) {
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, name);
+  writeFileSync(path, JSON.stringify(value, null, 1));
+  return path;
 }
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   const url = process.env.LUXIA_OWNER_DATABASE_URL;
   if (!url) throw new Error("LUXIA_OWNER_DATABASE_URL is required (table owner connection).");
+  const evidence = option(args, "evidence") ?? ".signup-code-evidence";
   const db = new PrismaClient({ datasources: { db: { url } } });
   try {
-    if (command === "issue") {
-      const by = option(args, "by");
-      const days = Number(option(args, "days") ?? 14);
-      const note = option(args, "note");
-      if (!by || by.length > 200) throw new Error("--by <operator> is required.");
-      if (!Number.isInteger(days) || days < 1 || days > 30) throw new Error("--days must be between 1 and 30.");
-      const code = generateSignupCode();
-      const createdAt = new Date();
-      const row = await db.signupCode.create({ data: {
-        codeHash: signupCodeHash(code)!, issuedBy: by, note: note?.slice(0, 200), createdAt,
-        expiresAt: new Date(createdAt.getTime() + days * 86_400_000),
-      } });
+    if (command === "plan") {
+      const { plan, digest } = planSignupCode({ by: option(args, "by"), days: option(args, "days"), note: option(args, "note") },
+        await currentTarget(db, url), toolVersion());
+      const path = writeEvidence(evidence, `${plan.issuedAt.replace(/[:.]/g, "-")}-signup-code-${digest.slice(0, 12)}.plan.json`, { plan, digest });
+      console.log(JSON.stringify(plan, null, 1));
+      console.log(`\nNothing was written. Plan digest : ${digest}`);
+      console.log(`Valid until : ${plan.notAfter}`);
+      console.log(`Issue with  : issue --plan ${path} --confirm ${digest}`);
+    } else if (command === "issue") {
+      const file = option(args, "plan");
+      if (!file) throw new Error("issue needs --plan <plan.json> --confirm <digest>. Run plan first: it writes nothing.");
+      const saved = JSON.parse(readFileSync(file, "utf8")) as { plan: SignupPlan; digest: string };
+      const plan = checkSignupPlan(saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() });
+      const { code, row } = await issueFromPlan(db, plan, saved.digest);
+      // The code is committed: it is shown before anything else can fail, since it cannot be recovered from its hash.
       console.log(`Code id   : ${row.id}`);
       console.log(`Expires   : ${row.expiresAt.toISOString()}`);
       console.log(`Code      : ${code}`);
       console.log("The code is shown once and is not stored. Send it to the customer through a private channel.");
+      const path = writeEvidence(evidence, file.replace(/^.*[\\/]/, "").replace(/\.plan\.json$/, ".issue.json"),
+        { digest: saved.digest, codeId: row.id, expiresAt: row.expiresAt.toISOString(), issuedAt: row.createdAt.toISOString() });
+      console.log(`Evidence  : ${path} (the code is not in it)`);
     } else if (command === "revoke") {
       const id = args[0];
       const by = option(args, "by");
@@ -60,11 +149,14 @@ async function main() {
       for (const row of rows)
         console.log([row.id, row.status, row.createdAt.toISOString(), row.expiresAt.toISOString(), row.consumedAt?.toISOString() ?? "-", row.organization?.slug ?? "-", row.issuedBy, row.note ?? ""].join(" | "));
     } else {
-      throw new Error("Commands: issue | revoke | list");
+      throw new Error("Commands: plan | issue | revoke | list");
     }
   } finally {
     await db.$disconnect();
   }
 }
 
-if (/signup-codes.ts$/.test(process.argv[1] ?? "")) main().catch((error) => { console.error(error instanceof Error ? error.message : "FAILED"); process.exit(1); });
+if (/signup-codes.ts$/.test(process.argv[1] ?? "")) main().catch((error) => {
+  console.error(error instanceof SignupPlanRefusal ? `REFUSED ${error.message}` : error instanceof Error ? error.message : "FAILED");
+  process.exit(1);
+});
