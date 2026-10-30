@@ -40,3 +40,6 @@ REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEv
 REVOKE DELETE, TRUNCATE ON "ProviderConnection" FROM app_user;
 -- F3: secret references are revoked, never deleted (same as the migration gives app_user in Production).
 REVOKE DELETE, TRUNCATE ON "ProviderSecretReference" FROM app_user;
+-- R4/R6: the daily retention job (same grants as the migration gives app_user in Production).
+GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO app_user;
+GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;
