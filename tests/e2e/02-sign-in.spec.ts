@@ -1,5 +1,5 @@
 import { addVirtualAuthenticator } from "./support/virtual-authenticator";
-import { expect, freshOrganization, signInWithPasskey, signOut, signUpThroughUi, test } from "./support/journeys";
+import { expect, freshOrganization, signInWithPasskey, signOut, signUpThroughUi, test, topBar } from "./support/journeys";
 
 // Journey 2: passkey sign-in on /login (organization identifier + personal identifier) -> /dashboard;
 // sign-out (POST /auth/logout) -> /login, the session is gone and /dashboard sends back to /login.
@@ -9,7 +9,7 @@ test("the founder signs in with the passkey, signs out, and the dashboard is clo
   await signUpThroughUi(page, organization);
 
   await signInWithPasskey(page, organization.slug, organization.principalName);
-  await expect(page.locator("header")).toContainText(organization.organizationName);
+  await expect(topBar(page)).toContainText(organization.organizationName);
   const session = (await context.cookies()).find((cookie) => cookie.name === "luxia_session");
   expect(session).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
   expect(session?.value).toBeTruthy();

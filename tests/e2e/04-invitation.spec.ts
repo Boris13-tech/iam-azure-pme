@@ -1,8 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { addVirtualAuthenticator } from "./support/virtual-authenticator";
-import {
-  MESSAGE, expect, freshOrganization, navigationEntries, newDevice, signInWithPasskey, signUpThroughUi, test,
-} from "./support/journeys";
+import { MESSAGE, expect, freshOrganization, navigationEntries, newDevice, signInWithPasskey, signUpThroughUi, test, pageAlert, topBar } from "./support/journeys";
 
 // Journey 4: an administrator creates a MEMBER invitation on the Organization page; the link is shown
 // once. The invitee opens it in another browser (own context and passkey device), creates a passkey,
@@ -38,7 +36,7 @@ test("an invited member joins with a passkey and has no administration access", 
     expect(await invitee.authenticator.credentials()).toHaveLength(1);
 
     await signInWithPasskey(invitee.page, organization.slug, principalName);
-    await expect(invitee.page.locator("header")).toContainText(memberName);
+    await expect(topBar(invitee.page)).toContainText(memberName);
     expect(await navigationEntries(invitee.page)).toEqual(["Vue d’ensemble"]);
 
     // Hidden is not the control: the server refuses the administration data to this member.
@@ -55,7 +53,7 @@ test("an invited member joins with a passkey and has no administration access", 
     await late.page.goto(link);
     await late.page.getByLabel("Choisissez votre identifiant", { exact: true }).fill(`late-${randomBytes(4).toString("hex")}@example.test`);
     await late.page.getByRole("button", { name: "Créer ma clé d’accès et rejoindre l’organisation" }).click();
-    await expect(late.page.getByRole("alert")).toHaveText(MESSAGE.invitationInvalid);
+    await expect(pageAlert(late.page)).toHaveText(MESSAGE.invitationInvalid);
     expect(await late.authenticator.credentials()).toHaveLength(0);
   } finally {
     await late.context.close();

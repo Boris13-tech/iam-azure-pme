@@ -1,5 +1,5 @@
 import { addVirtualAuthenticator } from "./support/virtual-authenticator";
-import { expect, fillSignupForm, freshOrganization, signUpThroughUi, test } from "./support/journeys";
+import { expect, fillSignupForm, freshOrganization, signUpThroughUi, test, pageAlert } from "./support/journeys";
 
 // Journey 1: an operator-issued private-beta code -> /signup -> the founder's passkey is created on the
 // device -> success screen -> /login with the organization identifier prefilled. The code is single-use.
@@ -21,6 +21,6 @@ test("a private-beta code creates the organization and the founder's passkey, th
 
   // The code is spent: a second organization cannot be created with it, and no passkey is made for it.
   await fillSignupForm(page, code, freshOrganization("signup-replay"));
-  await expect(page.getByRole("alert")).toHaveText("Ce code n’est pas valide, a expiré ou a déjà été utilisé.");
+  await expect(pageAlert(page)).toHaveText("Ce code n’est pas valide, a expiré ou a déjà été utilisé.");
   expect(await authenticator.credentials()).toHaveLength(1);
 });

@@ -1,9 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { addVirtualAuthenticator } from "./support/virtual-authenticator";
-import {
-  MESSAGE, expect, expectSignInRefused, freshOrganization, signInWithPasskey, signUpThroughUi, startPasskeySignIn, test,
-} from "./support/journeys";
+import { MESSAGE, expect, expectSignInRefused, freshOrganization, signInWithPasskey, signUpThroughUi, startPasskeySignIn, test, pageAlert } from "./support/journeys";
 
 // Journey 5: refusals. A wrong organization identifier and an unknown person get the same fixed message
 // as each other, after the same form of server answer, so the page never reveals whether an organization
@@ -69,7 +67,7 @@ test("wrong organization, unknown person and cancelled ceremonies are refused wi
     await page.getByLabel("Votre identifiant", { exact: true }).fill(person);
     await page.getByLabel("Code de récupération", { exact: true }).fill("AAAAA-BBBBB-CCCCC-DDDDD");
     await page.getByRole("button", { name: "Utiliser ce code" }).click();
-    await expect(page.getByRole("alert")).toHaveText(MESSAGE.recoveryRefused);
+    await expect(pageAlert(page)).toHaveText(MESSAGE.recoveryRefused);
     expect(new URL(page.url()).pathname).toBe("/login/recovery");
   }
 });

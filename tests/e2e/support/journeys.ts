@@ -19,6 +19,15 @@ export const MESSAGE = {
   invitationInvalid: "Ce lien d’invitation n’est pas valide, a expiré, a été révoqué ou a déjà été utilisé. Demandez un nouveau lien à votre administrateur.",
 } as const;
 
+/**
+ * The page's own alert. Next.js also renders a route announcer with role="alert" (#__next-route-announcer__,
+ * empty, for screen readers on navigation); it is excluded by its fixed id, not by position.
+ */
+export const pageAlert = (page: Page) => page.getByRole("alert").and(page.locator(":not(#__next-route-announcer__)"));
+
+/** The signed-in frame's top bar (organization, environment, person): the one <header> with this role in the layout. */
+export const topBar = (page: Page) => page.locator("header.luxia-topbar");
+
 export const newClientAddress = () => `2001:db8:${randomBytes(2).toString("hex")}::${randomBytes(2).toString("hex")}`;
 
 export const test = base.extend<{ clientAddress: string }>({

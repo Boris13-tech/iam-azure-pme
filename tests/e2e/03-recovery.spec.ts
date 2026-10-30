@@ -1,7 +1,5 @@
 import { addVirtualAuthenticator } from "./support/virtual-authenticator";
-import {
-  MESSAGE, expect, expectSignInRefused, freshOrganization, signInWithPasskey, signOut, signUpThroughUi, startPasskeySignIn, test,
-} from "./support/journeys";
+import { MESSAGE, expect, expectSignInRefused, freshOrganization, signInWithPasskey, signOut, signUpThroughUi, startPasskeySignIn, test, pageAlert } from "./support/journeys";
 
 // Journey 3: recovery codes generated in Settings -> the device is lost -> /login/recovery with one code
 // -> recovery-only session on /recovery (nothing else is open) -> a new passkey on a NEW device ->
@@ -56,7 +54,7 @@ test("a recovery code replaces a lost passkey and the old passkey is refused aft
   await page.getByLabel("Votre identifiant", { exact: true }).fill(organization.principalName);
   await page.getByLabel("Code de récupération", { exact: true }).fill(code);
   await page.getByRole("button", { name: "Utiliser ce code" }).click();
-  await expect(page.getByRole("alert")).toHaveText(MESSAGE.recoveryRefused);
+  await expect(pageAlert(page)).toHaveText(MESSAGE.recoveryRefused);
 
   // The new passkey signs in (FULL session), and the R5 notice asks for a new batch.
   await signInWithPasskey(page, organization.slug, organization.principalName);
