@@ -6,15 +6,26 @@ import { POSTURE_QUERIES } from "../../lib/dashboard/posture-queries";
 
 describe("Identity Security Posture v1 contract", () => {
   it("uses only existing catalog entitlements (no catalog change in this slice)", () => {
-    for (const id of WIDGET_IDS) for (const key of WIDGETS[id].permissions)
+    for (const id of WIDGET_IDS) for (const key of [...WIDGETS[id].permissions, ...(WIDGETS[id] as { anyOf?: readonly string[] }).anyOf ?? []])
       expect(ENTITLEMENT_CATALOG_V1 as readonly string[]).toContain(key);
   });
 
   it("governance widgets require sod.read / access_reviews.read(.decide) and nothing else grants them", () => {
     for (const id of WIDGET_IDS.filter(id => WIDGETS[id].section === "governance")) {
-      const perms = WIDGETS[id].permissions as readonly string[];
+      const perms = [...WIDGETS[id].permissions, ...(WIDGETS[id] as { anyOf?: readonly string[] }).anyOf ?? []];
       expect(perms.some(p => p.startsWith("sod.") || p.startsWith("access_reviews."))).toBe(true);
       expect(isPermitted(id, new Set(ENTITLEMENT_CATALOG_V1.filter(k => !k.startsWith("sod.") && !k.startsWith("access_reviews."))))).toBe(false);
+    }
+  });
+
+  it("access review counters need access_reviews.read OR access_reviews.read_all; decide or manage alone shows none", () => {
+    const reviews: WidgetId[] = ["governance.reviewCampaignsByStatus", "governance.overdueReviewCampaigns", "governance.pendingReviewItems",
+      "governance.reviewItemsRequiringRemediation", "governance.myPendingReviewDecisions"];
+    for (const id of reviews) {
+      for (const held of [["access_reviews.decide"], ["access_reviews.manage"], ["access_reviews.create"], ["access_reviews.decide", "access_reviews.manage", "access_reviews.create"]])
+        expect(isPermitted(id, new Set(held)), `${id} with ${held}`).toBe(false);
+      const extra = id === "governance.myPendingReviewDecisions" ? ["access_reviews.decide"] : [];
+      for (const read of ["access_reviews.read", "access_reviews.read_all"]) expect(isPermitted(id, new Set([read, ...extra])), `${id} with ${read}`).toBe(true);
     }
   });
 
