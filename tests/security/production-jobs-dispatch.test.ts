@@ -38,7 +38,8 @@ describe("Production jobs by workflow_dispatch only", () => {
     const verified = job(gate, "ci-verified");
     expect(verified).not.toMatch(/environment:|secrets\./);
     expect(verified).toMatch(/permissions:\n\s+contents: read\n\s+actions: read/);
-    expect(verified).toContain("Dispatched from main, on a commit whose CI passed");
+    for (const refusal of ['if [ "$GITHUB_REF" != "refs/heads/main" ]; then echo "REFUSED:', 'if [ "$conclusion" != "success" ]; then echo "REFUSED:', 'if [ "$run_sha" != "$GITHUB_SHA" ]; then echo "REFUSED:'])
+      expect(verified, refusal).toMatch(new RegExp(`${refusal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\n]*; exit 1; fi\\n`));
     for (const name of ["database-activation", "canonical-identity-bootstrap"]) expect(job(gate, name), name).toMatch(/\n {4}needs: ci-verified\n/);
     expect(job(gate, "database-activation")).toMatch(/\n {4}environment: Production\n/);
   });
