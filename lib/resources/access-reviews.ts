@@ -103,9 +103,25 @@ export function listAccessReviews(auth: AuthContext, after?: string) {
   return read(auth, tx => tx.accessReviewCampaign.findMany({ where: { ...scope(auth), ...(after ? { id: { gt: after } } : {}) }, orderBy: { id: "asc" }, take: 100, include: { _count: { select: { items: true } } } }));
 }
 export function getAccessReview(auth: AuthContext, id: string) { return read(auth, tx => campaignInScope(tx, auth, id)); }
+/**
+ * Items carry the words a reviewer needs (who, which entitlement, which resources) under the item's own authorization:
+ * access_reviews.read, campaign in scope, same transaction and RLS context. Labels are resolved only for the rows
+ * returned, never through subjects.read / resources.read, and never for anything outside this page of items.
+ */
 export function listReviewItems(auth: AuthContext, id: string, after?: string, pending = false) {
-  return read(auth, async tx => { await campaignInScope(tx, auth, id); return tx.accessReviewItem.findMany({ where: { ...scope(auth), campaignId: id,
-    ...(after ? { id: { gt: after } } : {}), ...(pending ? { decision: "PENDING", reviewerSubjectId: auth.subjectId } : {}) }, orderBy: { id: "asc" }, take: 100 }); });
+  return read(auth, async tx => {
+    await campaignInScope(tx, auth, id);
+    const items = await tx.accessReviewItem.findMany({ where: { ...scope(auth), campaignId: id,
+      ...(after ? { id: { gt: after } } : {}), ...(pending ? { decision: "PENDING", reviewerSubjectId: auth.subjectId } : {}) }, orderBy: { id: "asc" }, take: 100,
+      include: { subject: { select: { name: true } }, entitlement: { select: { key: true, description: true } } } });
+    const resourceIds = [...new Set(items.flatMap(item => item.resourceIds))], names = new Map<string, string>();
+    // A TENANT scope snapshots up to 1 000 resources per item: bound the bind parameters of each query.
+    for (let start = 0; start < resourceIds.length; start += 5000) {
+      for (const row of await tx.resource.findMany({ where: { ...scope(auth), id: { in: resourceIds.slice(start, start + 5000) } }, select: { id: true, name: true } })) names.set(row.id, row.name);
+    }
+    return items.map(({ subject, entitlement, ...item }) => ({ ...item, subjectName: subject.name,
+      entitlementLabel: entitlement.description || entitlement.key, resourceNames: item.resourceIds.map(resourceId => names.get(resourceId) ?? null) }));
+  });
 }
 export function reviewConfiguration(auth: AuthContext) {
   return withTenantDb(auth, async tx => {
