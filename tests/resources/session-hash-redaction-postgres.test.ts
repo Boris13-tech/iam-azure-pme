@@ -81,6 +81,18 @@ describe.runIf(enabled)("R2: one-way redaction of session network hashes (Postgr
       expect(direct.status).not.toBe(0);
       expect(direct.stderr).toMatch(/SESSION_REDACTION_OWNER_ONLY/);
       expect((await db.session.findUniqueOrThrow({ where: { id: other } })).ipHash).toBe(`ip-${other}`);
+      // Nor through a definer function of the owner: current_user is the owner there, session_user is not.
+      const probe = `r2_probe_${suffix}`;
+      psqlOk(url, ["-1", "-c", `CREATE FUNCTION ${probe}(p TEXT) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$ UPDATE "Session" SET "ipHash" = NULL WHERE "id" = p $$; GRANT EXECUTE ON FUNCTION ${probe}(TEXT) TO app_user`]);
+      const definer = psql(runtime.toString(), ["-c", `SELECT ${probe}('${other}')`]);
+      psqlOk(url, ["-c", `DROP FUNCTION ${probe}(TEXT)`]);
+      expect(definer.status).not.toBe(0);
+      expect(definer.stderr).toMatch(/SESSION_REDACTION_OWNER_ONLY/);
+      expect((await db.session.findUniqueOrThrow({ where: { id: other } })).ipHash).toBe(`ip-${other}`);
+      // A role without BYPASSRLS that could call the redaction is refused rather than seeing no row and reporting 0.
+      const filtered = psql(url, ["-1", "-c", `CREATE ROLE r2_filtered_${suffix.replace(/-/g, "_")} NOLOGIN NOSUPERUSER NOBYPASSRLS; GRANT EXECUTE ON FUNCTION luxia_session_redact_network_hashes(integer) TO r2_filtered_${suffix.replace(/-/g, "_")}; SET LOCAL ROLE r2_filtered_${suffix.replace(/-/g, "_")}; SELECT luxia_session_redact_network_hashes(1)`]);
+      expect(filtered.status).not.toBe(0);
+      expect(filtered.stderr).toMatch(/REDACTION_REQUIRES_BYPASSRLS/);
 
       // Bounded redaction by the owner; the runtime role cannot call it.
       const redact = (batch: number) => db!.$queryRawUnsafe<Array<{ n: number }>>(`SELECT luxia_session_redact_network_hashes(${batch}) AS n`).then((rows) => rows[0].n);
