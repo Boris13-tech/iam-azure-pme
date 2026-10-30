@@ -30,6 +30,7 @@ export function readSoDPolicy(auth: AuthContext, id: string, changeId: string) {
 export function createSoDPolicy(auth: AuthContext, input: { key: string; scopeId: string }, changeId: string) {
   return operation(auth, changeId, "SOD.POLICY.CREATE", "sod.manage", async tx => {
     if (!await tx.resourceScope.findFirst({ where: { ...context(auth), id: input.scopeId, active: true } })) throw new CanonicalAdminError("NOT_FOUND", 404);
+    if (await tx.soDPolicy.findFirst({ where: { ...context(auth), key: input.key }, select: { id: true } })) throw new CanonicalAdminError("SOD_POLICY_KEY_TAKEN", 409);
     const value = await tx.soDPolicy.create({ data: { ...context(auth), ...input, status: "DISABLED" } });
     return { value, metadata: { policyId: value.id, scopeId: value.scopeId } };
   });
