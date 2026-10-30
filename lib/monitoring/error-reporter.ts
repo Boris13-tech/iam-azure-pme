@@ -33,13 +33,22 @@ export function scrub(text: string): string {
     .slice(0, MAX_MESSAGE);
 }
 
+/** The project-relative part of a stack path; any other path says nothing about the machine or a person. */
+function projectPath(raw: string) {
+  const path = raw.replace(/\\/g, "/").replace(/^file:\/\//, "");
+  return /(?:^|\/)((?:app|lib|node_modules|\.next)\/[\w./()[\]@-]+)$/.exec(path)?.[1] ?? "<external>";
+}
+
+/** Free text can hold anything, so only a plain error code leaves; the type and the stack frames locate the rest. */
+const safeMessage = (message: string) => (/^[A-Z][A-Z0-9_]{2,80}$/.test(message) ? message : "<withheld>");
+
 function frames(stack: string | undefined) {
   if (!stack) return [];
   return stack.split("\n").slice(1).map((line) => /at (?:(.+?) \()?(.+?):(\d+):\d+\)?$/.exec(line.trim())).filter(Boolean)
     .slice(0, MAX_FRAMES).reverse().map((m) => ({
       function: scrub(m![1] ?? "?").slice(0, 80),
       // Paths are reduced to the project-relative part; machine prefixes never leave.
-      filename: m![2].replace(/\\/g, "/").replace(/^.*?\/(app|lib|node_modules|\.next)\//, "$1/").replace(/^file:\/\//, "").slice(0, 160),
+      filename: projectPath(m![2]).slice(0, 160),
       lineno: Number(m![3]),
     }));
 }
@@ -59,7 +68,7 @@ export function buildEvent(error: unknown, component: ErrorComponent, routePath?
     tags: { component, ...(route ? { route } : {}) },
     exception: { values: [{
       type: (err.name || "Error").replace(/[^\w]/g, "").slice(0, 60) || "Error",
-      value: scrub(err.message || ""),
+      value: safeMessage(err.message || ""),
       stacktrace: { frames: frames(err.stack) },
     }] },
   };

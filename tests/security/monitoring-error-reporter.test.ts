@@ -55,13 +55,31 @@ describe("Monitoring slice 2: scrubbed error events, Sentry envelope protocol, n
     for (const key of ["request", "user", "contexts", "breadcrumbs", "server_name", "extra"]) expect(event).not.toHaveProperty(key);
   });
 
+  it("sends no free text: only a plain error code leaves in the message", async () => {
+    await reportError(new Error('password=hunter2 body={"name":"Jane Doe","phone":"+40123456789"} fe80::1'), "session");
+    for (const secret of ["hunter2", "Jane Doe", "+40123456789", "fe80::1"]) expect(sentBody()).not.toContain(secret);
+    expect(sentEvent().exception.values[0].value).toBe("<withheld>");
+    fetchMock.mockClear();
+    await reportError(new Error("SESSION_RESOLUTION_FAILED"), "session");
+    expect(sentEvent().exception.values[0].value).toBe("SESSION_RESOLUTION_FAILED");
+  });
+
+  it("a stack path outside the project says nothing about the machine", async () => {
+    const error = new Error("X_CODE");
+    error.stack = "Error: X_CODE\n    at run (/home/jane.doe/secret-client/worker.js:1:1)\n    at go (/srv/deploy/lib/auth/session.ts:2:2)";
+    await reportError(error, "session");
+    const files = sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename);
+    expect(files.sort()).toEqual(["<external>", "lib/auth/session.ts"]);
+    expect(sentBody()).not.toContain("jane.doe");
+  });
+
   it("scrubs connection strings, e-mails, IP addresses and tokens from the message", async () => {
     const secrets = ["postgresql://app_user:s3cr3t@ep-x.eu-central-1.aws.neon.tech/neondb", "jane.doe@example.com", "203.0.113.42",
       "2001:db8::8a2e:370:7334", "luxia_session=9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a3928"];
     await reportError(new Error(`failed for ${secrets.join(" and ")}`), "session");
     const body = sentBody();
     for (const secret of ["s3cr3t", "app_user:", "jane.doe", "203.0.113.42", "8a2e:370", "9f8e7d6c5b4a39281706f5e4d3c2b1a0"]) expect(body).not.toContain(secret);
-    expect(sentEvent().exception.values[0].value).toMatch(/<url>.*<email>.*<ip>.*<token>/);
+    expect(sentEvent().exception.values[0].value).toBe("<withheld>");
   });
 
   it("drops a route value that is not a plain route pattern", () => {
