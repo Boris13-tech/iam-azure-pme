@@ -66,7 +66,6 @@ resource writerRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
         notActions: []
         dataActions: [
           'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read'
-          'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write'
           'Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action'
         ]
         notDataActions: []

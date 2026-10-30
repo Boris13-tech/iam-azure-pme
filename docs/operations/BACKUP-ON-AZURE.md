@@ -37,7 +37,9 @@ The image build runs on GitHub but never sees Production data or a Production se
 
 ## 3. Rollback
 
-Until step 9, rolling back is stopping the Azure job (`az containerapp job stop`, or delete it) while the GitHub path keeps running. After step 9, re-enable the dispatcher and restore the workflow from git history. In every case, the locked 30-day immutability keeps all existing backups.
+Until step 9, rolling back is removing the Azure job (`az containerapp job delete`: stopping an execution leaves its schedule) and checking that no further execution starts, while the GitHub path keeps running. After step 9, also recreate the GitHub environment secrets, issue a fresh create-and-read SAS, re-enable the dispatcher, restore the workflow from git history, and require one verified backup before calling it done. In every case, the locked 30-day immutability keeps all existing backups.
+
+**Permissions to prove at the cutover drill (not verified until then):** the identity creates new blobs with `blobs/add/action` and without `blobs/write`, a first backup must succeed, and a PUT on an existing path must be refused. It can still list the container through `blobs/read`.
 
 ## 4. Threat model (short, STRIDE)
 

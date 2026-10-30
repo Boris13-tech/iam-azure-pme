@@ -63,7 +63,7 @@ describe("Backup on Azure: image and its build", () => {
     const check = workflow.slice(workflow.indexOf("\n  build-check:\n"), workflow.indexOf("\n  image:\n"));
     expect(check).toMatch(/if: github.event_name == 'pull_request'\n    runs-on: ubuntu-24.04\n    permissions:\n      contents: read\n    steps:/);
     expect(check).not.toMatch(/docker (login|push)|GH_TOKEN|packages:/);
-    expect(workflow.slice(workflow.indexOf("\n  image:\n"))).toMatch(/^\n  image:\n    if: github.event_name != 'pull_request'\n/);
+    expect(workflow.slice(workflow.indexOf("\n  image:\n"))).toMatch(/^\n  image:\n    if: github.event_name != 'pull_request' && github.ref == 'refs\/heads\/main'\n/);
     expect(workflow).toMatch(/^permissions:\n  contents: read\n/m);
     expect(workflow).toMatch(/permissions:\n      contents: read\n      packages: write\n      id-token: write\n      attestations: write\n/);
     for (const uses of workflow.match(/uses: \S+/g)!) expect(uses).toMatch(/@[0-9a-f]{40}$/);
@@ -87,7 +87,6 @@ describe("Backup on Azure: job, identity and permissions", () => {
     const dataActions = /dataActions: \[\n([\s\S]*?)\n\s+\]/.exec(bicep)![1].split("\n").map((line) => line.trim().replace(/'/g, ""));
     expect(dataActions).toEqual([
       "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
-      "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
       "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
     ]);
     expect(bicep).not.toMatch(/blobs\/delete|\/\*'|Storage Blob Data (Contributor|Owner)|ba92f5b4-2d11-453d-a403-e96b0029c9fe/);
