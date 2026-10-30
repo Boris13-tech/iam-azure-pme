@@ -1,91 +1,163 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ClipboardCheck, History, ListChecks } from "lucide-react";
+import { EmptyState, ErrorState, LoadingState, PageHeader } from "@/components/ui/states";
 
+// Access reviews. A reviewer decides on each access in words: who holds it, which entitlement, on which resources.
+// Names are read with the viewer's own rights (subjects, entitlements, resources); without them the line says so
+// instead of showing identifiers. Same API as before (/api/canonical/access-reviews).
 type Campaign = { id: string; name: string; scopeType: string; status: string; dueAt: string; reviewerSubjectId: string };
 type Item = { id: string; subjectId: string; assignmentId: string; entitlementId: string; resourceIds: string[]; reviewerSubjectId: string; decision: string; reviewState: string; justification: string | null };
 type Configuration = { scopes: { id: string; key: string; kind: string; resource?: { name: string } | null }[]; reviewers: { id: string; name: string }[] };
+type AuditEvent = { id: string; operation: string; result: string; occurredAt: string };
+
+const ERRORS: Record<string, string> = {
+  FORBIDDEN: "Vous n’avez pas le droit d’effectuer cette action.", NOT_FOUND: "Élément introuvable ou non visible pour vous.",
+  REVIEW_IMMUTABLE: "Cette décision ne peut plus être modifiée.", SELF_REVIEW_FORBIDDEN: "Un réviseur ne peut pas examiner ses propres accès.",
+  CAMPAIGN_INCOMPLETE: "Toutes les décisions doivent être prises avant la clôture.", VALIDATION_FAILED: "Vérifiez les champs saisis.",
+};
+class Refused extends Error {}
 async function api(path: string, body?: unknown) {
   const response = await fetch(`/api/canonical/access-reviews${path}`, { cache: "no-store", ...(body ? { method: "POST", headers: { "content-type": "application/json", "x-luxia-change-id": `review-ui:${crypto.randomUUID()}` }, body: JSON.stringify(body) } : {}) });
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error ?? "REQUEST_DENIED");
+  const value = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Refused(ERRORS[value.error] ?? (response.status === 403 ? ERRORS.FORBIDDEN : "Opération impossible pour le moment. Réessayez."));
   return value;
 }
+async function names(url: string, pick: (row: Record<string, unknown>) => [string, string], paged = false) {
+  const labels = new Map<string, string>();
+  try {
+    let after = "";
+    for (let page = 0; page < 100; page++) {
+      const response = await fetch(after ? `${url}?after=${encodeURIComponent(after)}` : url, { cache: "no-store" });
+      if (!response.ok) return labels;
+      const rows = await response.json() as Record<string, unknown>[];
+      for (const row of rows) { const [id, label] = pick(row); labels.set(id, label); }
+      // Catalogs that list 100 rows at a time, ordered by id; the others answer in one response.
+      if (!paged || rows.length < 100) return labels;
+      after = String(rows[rows.length - 1].id);
+    }
+  } catch { /* labels stay optional: the console keeps its fallback text */ }
+  return labels;
+}
 const SCOPE_KINDS: Record<string, string> = { RESOURCE: "ressource unique", RESOURCE_GROUP: "groupe de ressources", TENANT: "environnement entier" };
-const DECISIONS: Record<string, string> = { PENDING: "en attente", KEEP: "accès conservé", REVOKE: "accès retiré" };
+const DECISIONS: Record<string, string> = { PENDING: "En attente", KEEP: "Accès conservé", REVOKE: "Accès retiré" };
 const REVIEW_STATES: Record<string, string> = { PENDING: "à examiner", REQUIRES_REMEDIATION: "à corriger", DECIDED: "décidé" };
 const REVIEW_EVENTS: Record<string, string> = { "ACCESS_REVIEW.CAMPAIGN.CREATE": "Campagne créée", "ACCESS_REVIEW.CAMPAIGN.COMPLETE": "Campagne clôturée",
   "ACCESS_REVIEW.ITEM.KEEP": "Accès conservé", "ACCESS_REVIEW.ITEM.REVOKE": "Accès retiré" };
 const RESULTS: Record<string, string> = { SUCCESS: "réussi", DENIED: "refusé", FAILURE: "échec" };
+const when = (value: string) => new Date(value).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 
 export default function ReviewConsole() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]), [selected, setSelected] = useState<Campaign | null>(null);
-  const [items, setItems] = useState<Item[]>([]), [audit, setAudit] = useState<{ id: string; operation: string; result: string; occurredAt: string }[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[] | null>(null), [selected, setSelected] = useState<Campaign | null>(null);
+  const [items, setItems] = useState<Item[] | null>(null), [audit, setAudit] = useState<AuditEvent[] | "failed" | null>(null);
   const [configuration, setConfiguration] = useState<Configuration | null>(null), [permissions, setPermissions] = useState<string[]>([]), [actor, setActor] = useState("");
   const [name, setName] = useState(""), [scopeId, setScope] = useState(""), [reviewerSubjectId, setReviewer] = useState(""), [dueAt, setDue] = useState("");
-  const [pending, setPending] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [pending, setPending] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(""), [loadFailed, setLoadFailed] = useState(false);
   const [justifications, setJustifications] = useState<Record<string, string>>({});
+  const [labels, setLabels] = useState({ people: new Map<string, string>(), rights: new Map<string, string>(), resources: new Map<string, string>() });
+
   const load = async () => setCampaigns(await api(""));
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const platform = await (await fetch("/api/platform/context", { cache: "no-store" })).json();
-        if (!active) return;
-        setPermissions(platform.entitlements ?? []); setActor(platform.subject?.id ?? "");
-        if ((platform.entitlements ?? []).includes("access_reviews.create")) setConfiguration(await api("/configuration"));
-        await load();
-      } catch (failure) { if (active) setError(failure instanceof Error ? failure.message : "REQUEST_DENIED"); }
-    })();
-    return () => { active = false; };
-  }, []);
+  const start = async () => {
+    setLoadFailed(false); setError("");
+    try {
+      const platform = await (await fetch("/api/platform/context", { cache: "no-store" })).json();
+      setPermissions(platform.entitlements ?? []); setActor(platform.subject?.id ?? "");
+      if ((platform.entitlements ?? []).includes("access_reviews.create")) setConfiguration(await api("/configuration"));
+      await load();
+      // Labels one at a time, after the campaigns: each request holds a database connection on the server.
+      const people = await names("/api/canonical/subjects", r => [String(r.id), String(r.name)]);
+      const rights = await names("/api/canonical/resource-governance/entitlements", r => [String(r.id), String(r.description || r.key)], true);
+      const resources = await names("/api/canonical/resources", r => [String(r.id), String(r.name)]);
+      setLabels({ people, rights, resources });
+    } catch (failure) { setLoadFailed(true); setError(failure instanceof Error ? failure.message : ""); }
+  };
+  useEffect(() => { void start(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const detail = async (campaign: Campaign, onlyPending = pending) => {
-    setSelected(await api(`/${campaign.id}`));
+    setSelected(await api(`/${campaign.id}`)); setItems(null);
     setItems(await api(`/${campaign.id}/items${onlyPending ? "?pending=true" : ""}`));
-    setAudit(await api(`/${campaign.id}/audit`));
+    setAudit(null);
+    try { setAudit(await api(`/${campaign.id}/audit`)); } catch (failure) { setAudit("failed"); throw failure; }
   };
   const execute = async (work: () => Promise<void>) => {
     setBusy(true); setError("");
-    try { await work(); } catch (failure) { setError(failure instanceof Error ? failure.message : "REQUEST_DENIED"); }
+    try { await work(); } catch (failure) { setError(failure instanceof Error ? failure.message : "Opération impossible pour le moment."); }
     finally { setBusy(false); }
   };
-  return <section className="p-6 space-y-5">
-    <h1 className="text-2xl font-semibold text-slate-900">Revues d’accès</h1>
-    <p className="text-base text-slate-600">Vérifiez régulièrement que chaque accès est toujours justifié. Conserver maintient l’accès, Retirer le supprime sur toutes ses ressources.</p>
-    {error && <p role="alert" className="text-red-700">{error}</p>}
-    {configuration && <form className="p-4 border rounded bg-white space-y-3" onSubmit={event => { event.preventDefault(); void execute(async () => {
-      const result = await api("", { name, scopeId, reviewerSubjectId, startsAt: new Date().toISOString(), dueAt: new Date(dueAt).toISOString() });
-      await load(); await detail(result); setName("");
-    }); }}>
-      <h2 className="font-bold">Créer une campagne</h2>
-      <input aria-label="Nom de la campagne" required maxLength={120} value={name} onChange={event => setName(event.target.value)} placeholder="Nom de la campagne" className="border p-2" />
-      <select aria-label="Périmètre" required value={scopeId} onChange={event => setScope(event.target.value)} className="border p-2"><option value="">Choisir un périmètre</option>{configuration.scopes.map(scope => <option key={scope.id} value={scope.id}>{scope.resource?.name ?? scope.key} ({SCOPE_KINDS[scope.kind] ?? scope.kind})</option>)}</select>
-      <select aria-label="Réviseur" required value={reviewerSubjectId} onChange={event => setReviewer(event.target.value)} className="border p-2"><option value="">Choisir un réviseur</option>{configuration.reviewers.map(reviewer => <option key={reviewer.id} value={reviewer.id}>{reviewer.name}</option>)}</select>
-      <label>Échéance <input type="datetime-local" required value={dueAt} onChange={event => setDue(event.target.value)} className="border p-2" /></label>
-      <button disabled={busy} className="rounded-md bg-accent px-4 py-2 font-medium text-white hover:bg-accent-strong">Créer la campagne</button>
-      <p className="text-sm text-slate-600">Un réviseur ne peut pas examiner ses propres accès. Une campagne couvre au maximum 1 000 accès.</p>
-    </form>}
-    <div className="space-y-2"><h2 className="font-bold">Campagnes</h2>{campaigns.length === 0 && <p>Aucune campagne.</p>}
-      {campaigns.map(campaign => <button key={campaign.id} disabled={busy} onClick={() => void execute(() => detail(campaign))} className="block p-3 border bg-white rounded"><span className="font-medium">{campaign.name}</span> <span className="text-slate-600">{campaign.status === "OPEN" ? "En cours" : "Terminée"}, échéance le {new Date(campaign.dueAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</span></button>)}
-      {campaigns.length > 0 && campaigns.length % 100 === 0 && <button disabled={busy} onClick={() => void execute(async () => setCampaigns([...campaigns, ...await api(`?after=${campaigns[campaigns.length - 1].id}`)]))}>Afficher plus</button>}
-    </div>
-    {selected && <div className="space-y-3"><h2 className="text-xl font-bold">{selected.name}</h2>
-      <label><input type="checkbox" checked={pending} onChange={event => { const value = event.target.checked; setPending(value); void execute(() => detail(selected, value)); }} /> Mes décisions en attente</label>
-      {items.length === 0 && <p>Aucun accès à examiner.</p>}
-      {items.map(item => <article key={item.id} className="border rounded p-4 bg-white space-y-2">
-        <p>Identité : {item.subjectId}</p><p>Accès : {item.assignmentId}</p><p>Droit : {item.entitlementId}</p>
-        <p>Ressources couvertes : {item.resourceIds.join(", ")}</p><p>Décision : {DECISIONS[item.decision] ?? item.decision}. État : {REVIEW_STATES[item.reviewState] ?? item.reviewState}.</p>
-        {item.justification && <p>Justification : {item.justification}</p>}
-        {item.decision === "PENDING" && item.reviewerSubjectId === actor && permissions.includes("access_reviews.decide") && selected.status === "OPEN" && <>
-          <label>Justification (ne saisissez aucun mot de passe ni secret)<textarea minLength={3} maxLength={2000} value={justifications[item.id] ?? ""} onChange={event => setJustifications({ ...justifications, [item.id]: event.target.value })} className="block border w-full p-2" /></label>
-          {(["KEEP", "REVOKE"] as const).map(decision => <button key={decision} disabled={busy || (justifications[item.id] ?? "").trim().length < 3} className="border rounded p-2 mr-2" onClick={() => void execute(async () => {
-            await api(`/${selected.id}/items/${item.id}/decision`, { decision, justification: justifications[item.id] }); await detail(selected);
-          })}>{decision === "KEEP" ? "Conserver l’accès" : "Retirer l’accès"}</button>)}
-        </>}
-      </article>)}
-      {items.length > 0 && items.length % 100 === 0 && <button disabled={busy} onClick={() => void execute(async () => setItems([...items, ...await api(`/${selected.id}/items?after=${items[items.length - 1].id}${pending ? "&pending=true" : ""}`)]))}>Afficher plus</button>}
-      {selected.status === "OPEN" && permissions.includes("access_reviews.manage") && <button disabled={busy} className="p-2 border rounded" onClick={() => void execute(async () => { await api(`/${selected.id}/complete`, {}); await load(); await detail(selected); })}>Clôturer la campagne (toutes les décisions doivent être prises)</button>}
-      <h3 className="font-bold">Historique</h3>{audit.map(event => <p key={event.id}>{REVIEW_EVENTS[event.operation] ?? event.operation} ({RESULTS[event.result] ?? event.result}), le {new Date(event.occurredAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</p>)}
-      {audit.length > 0 && audit.length % 100 === 0 && <button disabled={busy} onClick={() => void execute(async () => setAudit([...audit, ...await api(`/${selected.id}/audit?after=${audit[audit.length - 1].id}`)]))}>Afficher plus</button>}
-    </div>}
-  </section>;
+  const person = (id: string) => labels.people.get(id) ?? "Personne (nom non visible avec vos droits)";
+  const right = (id: string) => labels.rights.get(id) ?? "Droit (libellé non visible avec vos droits)";
+  const resourceList = useMemo(() => (ids: string[]) => ids.length === 0 ? "aucune" : ids.map(id => labels.resources.get(id) ?? "ressource non visible").join(", "), [labels]);
+
+  return <div className="luxia-dashboard">
+    <PageHeader title="Revues d’accès" description="Vérifiez régulièrement que chaque accès est toujours justifié. Conserver maintient l’accès ; Retirer le supprime sur toutes ses ressources." />
+    {error && !loadFailed && <p role="alert" className="lx-alert lx-alert--danger mb-4">{error}</p>}
+
+    {configuration && <section className="luxia-panel posture-section" aria-label="Créer une campagne">
+      <header><h2><ClipboardCheck size={18} aria-hidden /> Créer une campagne</h2></header>
+      <form className="lx-form-row" onSubmit={event => { event.preventDefault(); void execute(async () => {
+        const result = await api("", { name, scopeId, reviewerSubjectId, startsAt: new Date().toISOString(), dueAt: new Date(dueAt).toISOString() });
+        await load(); await detail(result); setName("");
+      }); }}>
+        <div className="lx-field"><label htmlFor="review-name" className="lx-label">Nom</label>
+          <input id="review-name" className="lx-input" required maxLength={120} value={name} onChange={event => setName(event.target.value)} placeholder="par exemple Revue trimestrielle" /></div>
+        <div className="lx-field"><label htmlFor="review-scope" className="lx-label">Périmètre</label>
+          <select id="review-scope" className="lx-select" required value={scopeId} onChange={event => setScope(event.target.value)}><option value="">Choisir un périmètre</option>
+            {configuration.scopes.map(scope => <option key={scope.id} value={scope.id}>{scope.resource?.name ?? scope.key} ({SCOPE_KINDS[scope.kind] ?? scope.kind})</option>)}</select></div>
+        <div className="lx-field"><label htmlFor="review-reviewer" className="lx-label">Réviseur</label>
+          <select id="review-reviewer" className="lx-select" required value={reviewerSubjectId} onChange={event => setReviewer(event.target.value)}><option value="">Choisir un réviseur</option>
+            {configuration.reviewers.map(reviewer => <option key={reviewer.id} value={reviewer.id}>{reviewer.name}</option>)}</select></div>
+        <div className="lx-field"><label htmlFor="review-due" className="lx-label">Échéance</label>
+          <input id="review-due" className="lx-input" type="datetime-local" required value={dueAt} onChange={event => setDue(event.target.value)} /></div>
+        <button disabled={busy} className="lx-btn lx-btn--primary">Créer la campagne</button>
+      </form>
+      <p className="lx-meta px-4 pb-4">Un réviseur ne peut pas examiner ses propres accès. Une campagne couvre au maximum 1 000 accès.</p>
+    </section>}
+
+    <section className="luxia-panel posture-section" aria-label="Campagnes">
+      <header><h2><ListChecks size={18} aria-hidden /> Campagnes</h2></header>
+      {loadFailed ? <ErrorState onRetry={() => void start()}>{error || "Les campagnes sont indisponibles."}</ErrorState>
+        : campaigns === null ? <LoadingState label="Chargement des campagnes..." />
+        : campaigns.length === 0 ? <EmptyState>Aucune campagne.</EmptyState>
+        : <ul className="lx-list">{campaigns.map(campaign => <li key={campaign.id}>
+            <div className="min-w-0"><p className="m-0 font-semibold">{campaign.name}</p>
+              <p className="lx-meta">Échéance le {when(campaign.dueAt)}</p></div>
+            <span className={`lx-pill${campaign.status === "OPEN" ? " lx-pill--warn" : " lx-pill--on"}`}>{campaign.status === "OPEN" ? "En cours" : "Terminée"}</span>
+            <button type="button" disabled={busy} aria-pressed={selected?.id === campaign.id} className="lx-btn lx-btn--secondary lx-btn--small" onClick={() => void execute(() => detail(campaign))}>Ouvrir</button>
+          </li>)}</ul>}
+      {campaigns && campaigns.length > 0 && campaigns.length % 100 === 0 && <div className="p-4"><button type="button" disabled={busy} className="lx-btn lx-btn--secondary lx-btn--small" onClick={() => void execute(async () => setCampaigns([...campaigns, ...await api(`?after=${campaigns[campaigns.length - 1].id}`)]))}>Afficher plus</button></div>}
+    </section>
+
+    {selected && <section className="luxia-panel posture-section" aria-label={`Campagne ${selected.name}`}>
+      <header><h2><ClipboardCheck size={18} aria-hidden /> {selected.name}</h2>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={pending} onChange={event => { const value = event.target.checked; setPending(value); void execute(() => detail(selected, value)); }} /> Mes décisions en attente</label>
+      </header>
+      {items === null ? <LoadingState label="Chargement des accès à examiner..." /> : items.length === 0 ? <EmptyState>Aucun accès à examiner.</EmptyState> : <ul className="lx-list">
+        {items.map(item => <li key={item.id}>
+          <div className="min-w-0 flex-1">
+            <p className="m-0 font-semibold">{person(item.subjectId)}</p>
+            <p className="lx-meta">Droit : {right(item.entitlementId)} · Ressources : {resourceList(item.resourceIds)}</p>
+            <p className="lx-meta">{DECISIONS[item.decision] ?? item.decision}, {REVIEW_STATES[item.reviewState] ?? item.reviewState}{item.justification ? ` · « ${item.justification} »` : ""}</p>
+            {item.decision === "PENDING" && item.reviewerSubjectId === actor && permissions.includes("access_reviews.decide") && selected.status === "OPEN" && <div className="mt-3 lx-stack">
+              <div className="lx-field"><label htmlFor={`justification-${item.id}`} className="lx-label">Justification (aucun mot de passe ni secret)</label>
+                <textarea id={`justification-${item.id}`} minLength={3} maxLength={2000} rows={2} className="lx-input" style={{ height: "auto", padding: "10px 14px" }}
+                  value={justifications[item.id] ?? ""} onChange={event => setJustifications({ ...justifications, [item.id]: event.target.value })} /></div>
+              <div className="flex flex-wrap gap-2">{(["KEEP", "REVOKE"] as const).map(decision => <button key={decision} type="button"
+                disabled={busy || (justifications[item.id] ?? "").trim().length < 3} className={`lx-btn lx-btn--small ${decision === "KEEP" ? "lx-btn--primary" : "lx-btn--secondary"}`}
+                onClick={() => void execute(async () => { await api(`/${selected.id}/items/${item.id}/decision`, { decision, justification: justifications[item.id] }); await detail(selected); })}>
+                {decision === "KEEP" ? "Conserver l’accès" : "Retirer l’accès"}</button>)}</div>
+            </div>}
+          </div>
+        </li>)}
+      </ul>}
+      {items && items.length > 0 && items.length % 100 === 0 && <div className="p-4"><button type="button" disabled={busy} className="lx-btn lx-btn--secondary lx-btn--small" onClick={() => void execute(async () => setItems([...items, ...await api(`/${selected.id}/items?after=${items[items.length - 1].id}${pending ? "&pending=true" : ""}`)]))}>Afficher plus</button></div>}
+      {selected.status === "OPEN" && permissions.includes("access_reviews.manage") && <div className="p-4"><button type="button" disabled={busy} className="lx-btn lx-btn--secondary lx-btn--small"
+        onClick={() => void execute(async () => { await api(`/${selected.id}/complete`, {}); await load(); await detail(selected); })}>Clôturer la campagne</button>
+        <p className="lx-meta">Toutes les décisions doivent être prises avant la clôture.</p></div>}
+      <h3 className="flex items-center gap-2 px-4 pt-2 text-sm font-semibold"><History size={16} aria-hidden /> Historique</h3>
+      {audit === null ? <LoadingState label="Chargement de l’historique..." /> : audit === "failed" ? <ErrorState onRetry={() => void execute(() => detail(selected))}>L’historique est indisponible.</ErrorState>
+        : audit.length === 0 ? <EmptyState>Aucun événement.</EmptyState> : <ul className="lx-list">{audit.map(event => <li key={event.id}>
+        <span>{REVIEW_EVENTS[event.operation] ?? event.operation} ({RESULTS[event.result] ?? event.result})</span><time className="lx-meta" dateTime={event.occurredAt}>{when(event.occurredAt)}</time></li>)}</ul>}
+      {Array.isArray(audit) && audit.length > 0 && audit.length % 100 === 0 && <div className="p-4"><button type="button" disabled={busy} className="lx-btn lx-btn--secondary lx-btn--small" onClick={() => void execute(async () => setAudit([...audit, ...await api(`/${selected.id}/audit?after=${audit[audit.length - 1].id}`)]))}>Afficher plus</button></div>}
+    </section>}
+  </div>;
 }
