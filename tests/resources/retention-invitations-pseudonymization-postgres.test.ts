@@ -194,8 +194,15 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     expect(await settle(rawPrisma.$executeRawUnsafe(`DELETE FROM "Invitation" WHERE "id" = $1`, past))).toMatch(/permission denied/);
     for (const id of [young, forged, pending])
       expect(await settle(owner.$executeRawUnsafe(`DELETE FROM "Invitation" WHERE "id" = $1`, id)), id).toMatch(/INVITATION_IMMUTABLE/);
-    // UPDATE and TRUNCATE are not let through by the gate.
+    // UPDATE is not let through by the gate.
     expect(await settle(owner.$executeRawUnsafe(`UPDATE "Invitation" SET "role" = 'ADMIN' WHERE "id" = $1`, past))).toMatch(/INVITATION_IMMUTABLE/);
+    // TRUNCATE, executed by the runtime role, with and without a tenant context: refused (audit of #138, F4).
+    expect(await settle(rawPrisma.$executeRawUnsafe(`TRUNCATE "Invitation"`))).toMatch(/permission denied/);
+    expect(await settle(rawPrisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${a.organizationId}, true), set_config('app.tenant_id', ${a.tenantId}, true)`;
+      return tx.$executeRawUnsafe(`TRUNCATE "Invitation"`);
+    }))).toMatch(/permission denied/);
+    expect(await present([past])).toEqual([past]);
     expect(await owner.$executeRawUnsafe(`DELETE FROM "Invitation" WHERE "id" = $1`, past)).toBe(1);
     expect(await present([past, young, forged, pending])).toEqual([young, forged, pending].sort());
   });
@@ -206,6 +213,97 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
       return settle(call("luxia_retention_purge_invitations", 10, false));
     });
     expect(result).toMatch(/RETENTION_ALREADY_RUNNING/);
+  });
+
+  it("an acceptance cannot be backdated either: the database stamps acceptedAt (audit of #138, F1)", async () => {
+    // Defence in depth: a row created more than 30 days ago has always expired (7-day or 24-hour validity), so
+    // acceptedAt alone never makes a row eligible; the stamp keeps the recorded time honest all the same.
+    const target = await invitation(a, null);
+    const asRuntime = (sql: string) => rawPrisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${a.organizationId}, true), set_config('app.tenant_id', ${a.tenantId}, true)`;
+      return tx.$executeRawUnsafe(sql, target);
+    });
+    expect(await asRuntime(`UPDATE "Invitation" SET "acceptedAt" = (now() AT TIME ZONE 'UTC') - interval '100 days' WHERE "id" = $1`)).toBe(1);
+    const [stored] = await owner.$queryRawUnsafe<Array<{ age: number }>>(
+      `SELECT extract(epoch FROM ((now() AT TIME ZONE 'UTC') - "acceptedAt"))::float8 AS age FROM "Invitation" WHERE "id" = $1`, target);
+    expect(stored.age).toBeLessThan(60);
+    await drain("luxia_retention_purge_invitations", "invitations");
+    expect(await present([target])).toEqual([target]);
+    expect(await settle(asRuntime(`UPDATE "Invitation" SET "acceptedAt" = (now() AT TIME ZONE 'UTC') - interval '100 days' WHERE "id" = $1`))).toMatch(/INVITATION_IMMUTABLE/);
+  });
+
+  it("two purges at the same time, on two connections: the second is refused while the first runs; rows go once (F2)", async () => {
+    await drain("luxia_retention_purge_invitations", "invitations");
+    const old = await invitation(a, { created: 40, expires: 33 });
+    let purged!: () => void;
+    const running = new Promise<void>((resolve) => { purged = resolve; });
+    const first = rawPrisma.$transaction(async (tx) => {
+      const [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
+      purged();
+      await tx.$queryRawUnsafe(`SELECT pg_sleep(2)::text`);
+      return counts;
+    }, { timeout: 30_000 });
+    await running;
+    expect(await settle(call("luxia_retention_purge_invitations", 5000, true))).toMatch(/RETENTION_ALREADY_RUNNING/);
+    expect(await first).toEqual({ invitations: 1, enforced: true });
+    expect(await present([old])).toEqual([]);
+  });
+
+  it("a row locked by another transaction is skipped, the others go; the next run deletes it (F3)", async () => {
+    await drain("luxia_retention_purge_invitations", "invitations");
+    const locked = await invitation(a, { created: 40, expires: 33 }), free = await invitation(a, { created: 41, expires: 34 });
+    let held!: () => void, release!: () => void;
+    const isHeld = new Promise<void>((resolve) => { held = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const holder = owner.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT "id" FROM "Invitation" WHERE "id" = $1 FOR UPDATE`, locked);
+      held();
+      await released;
+    }, { timeout: 30_000 });
+    await isHeld;
+    expect(await call("luxia_retention_purge_invitations", 5000, true)).toEqual({ invitations: 1, enforced: true });
+    expect(await present([locked, free])).toEqual([locked]);
+    release();
+    await holder;
+    expect(await call("luxia_retention_purge_invitations", 5000, true)).toEqual({ invitations: 1, enforced: true });
+    expect(await present([locked, free])).toEqual([]);
+  });
+
+  it("the caller's ROLLBACK undoes the purge (F5)", async () => {
+    await drain("luxia_retention_purge_invitations", "invitations");
+    const rows = [await invitation(a, { created: 40, expires: 33 }), await invitation(a, { created: 41, expires: 34 })];
+    const ROLLBACK = new Error("caller rollback");
+    let counts: Counts | undefined;
+    await expect(rawPrisma.$transaction(async (tx) => {
+      [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
+      throw ROLLBACK;
+    })).rejects.toBe(ROLLBACK);
+    expect(counts).toEqual({ invitations: 2, enforced: true });
+    expect(await present(rows)).toEqual([...rows].sort());
+  });
+
+  it("the purge is global by design: no organization parameter, the caller's tenant context neither restricts nor steers it (F6)", async () => {
+    await drain("luxia_retention_purge_invitations", "invitations");
+    const [{ args }] = await owner.$queryRaw<Array<{ args: string }>>`
+      SELECT pg_get_function_identity_arguments('luxia_retention_purge_invitations'::regproc) AS args`;
+    expect(args).toBe("p_batch integer, p_enforce boolean");
+    const inA = await invitation(a, { created: 40, expires: 33 }), inB = await invitation(b, { created: 40, expires: 33 });
+    const youngB = await invitation(b, { created: 36, expires: 29 });
+    const inContext = (organizationId: string, tenantId: string) => rawPrisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${organizationId}, true), set_config('app.tenant_id', ${tenantId}, true)`;
+      const [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, false) AS counts`);
+      return counts;
+    });
+    // Dry runs from A's context and from a forged context count the same rows: both A's and B's.
+    const fromA = await inContext(a.organizationId, a.tenantId), forged = await inContext(randomUUID(), randomUUID());
+    expect(fromA).toEqual(forged);
+    expect(fromA.invitations).toBeGreaterThanOrEqual(2);
+    await rawPrisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${a.organizationId}, true), set_config('app.tenant_id', ${a.tenantId}, true)`;
+      await tx.$queryRawUnsafe(`SELECT luxia_retention_purge_invitations(5000, true)::text`);
+    });
+    await drain("luxia_retention_purge_invitations", "invitations");
+    expect(await present([inA, inB, youngB])).toEqual([youngB]);
   });
 });
 
@@ -333,7 +431,7 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
       for (const dir of prior) psqlOk(url, ["-1", "-f", `prisma/migrations/${dir}/migration.sql`]);
       const before = catalog();
       psqlOk(url, ["-1", "-f", `prisma/migrations/${NEW}/migration.sql`]);
-      expect(psqlOk(url, ["-c", `SELECT luxia_retention_purge_invitations(10, true)::text`, "-c", `SELECT luxia_retention_pseudonymize_retired(10, false)::text`]).trim().split("\n"))
+      expect(psqlOk(url, ["-c", `SELECT luxia_retention_purge_invitations(10, true)::text`, "-c", `SELECT luxia_retention_pseudonymize_retired(10, false)::text`]).replace(/\r/g, "").trim().split("\n"))
         .toEqual(['{"enforced": true, "invitations": 0}', '{"enforced": false, "subjects": 0, "displayNames": 0, "principalNames": 0}']);
       expect(catalog()).not.toBe(before);
       psqlOk(url, ["-1", "-f", ROLLBACK]);
