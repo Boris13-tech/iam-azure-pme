@@ -15,14 +15,16 @@ const scope = (organization: string, tenant?: string) => {
   const org = `("organizationId" = current_setting('${organization}'::text, true))`;
   return tenant ? `(${org} AND ("tenantId" = current_setting('${tenant}'::text, true)))` : org;
 };
-const SCOPED = [scope("app.organization_id"), scope("app.organization_id", "app.tenant_id"), scope("app.current_organization_id", "app.current_tenant_id")];
+const ORGANIZATION_ONLY = [scope("app.organization_id")];
+const WITH_TENANT = [scope("app.organization_id", "app.tenant_id"), scope("app.current_organization_id", "app.current_tenant_id")];
 
 type Policy = { name: string; permissive: boolean; qual: string | null; check: string | null };
-type Row = { table: string; rls: boolean; force: boolean; policies: Policy[] };
+type Row = { table: string; rls: boolean; force: boolean; hasTenant: boolean; policies: Policy[] };
 
 async function catalog(db: PrismaClient): Promise<Row[]> {
   return db.$queryRawUnsafe<Row[]>(`
     SELECT c.relname AS "table", c.relrowsecurity AS rls, c.relforcerowsecurity AS force,
+      EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'tenantId' AND NOT a.attisdropped) AS "hasTenant",
       COALESCE((SELECT jsonb_agg(jsonb_build_object('name', p.polname, 'permissive', p.polpermissive,
         'qual', pg_get_expr(p.polqual, p.polrelid), 'check', pg_get_expr(p.polwithcheck, p.polrelid)) ORDER BY p.polname)
         FROM pg_policy p WHERE p.polrelid = c.oid), '[]'::jsonb) AS policies
@@ -31,9 +33,13 @@ async function catalog(db: PrismaClient): Promise<Row[]> {
       AND a.attnum > 0 AND NOT a.attisdropped AND a.attname IN ('organizationId', 'expectedOrganizationId'))
     ORDER BY c.relname`);
 }
-// Protected: row-level security on and forced, and every permissive policy scoped. With none, PostgreSQL refuses every row.
-const isProtected = (row: Row) => row.rls && row.force
-  && row.policies.filter((policy) => policy.permissive).every((policy) => SCOPED.includes(policy.qual ?? "") && SCOPED.includes(policy.check ?? ""));
+// Protected: row-level security on and forced, and every permissive policy scoped, to the tenant when the table has one.
+// With no permissive policy, PostgreSQL refuses every row.
+const isProtected = (row: Row) => {
+  const allowed = row.hasTenant ? WITH_TENANT : ORGANIZATION_ONLY;
+  return row.rls && row.force && row.policies.filter((policy) => policy.permissive)
+    .every((policy) => allowed.includes(policy.qual ?? "") && allowed.includes(policy.check ?? ""));
+};
 const unprotected = (rows: Row[]) => rows.filter((row) => !isProtected(row)).map((row) => row.table).sort();
 const digest = (names: string[]) => createHash("sha256").update(names.join(",")).digest("hex");
 
@@ -75,9 +81,11 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
       return result.stdout;
     };
     let owner: PrismaClient, runtime: PrismaClient, tables: string[], closed: string[], baseline: Row[];
-    const orgA = `iso-a-${randomUUID()}`, orgB = `iso-b-${randomUUID()}`, tenantA = `iso-ta-${randomUUID()}`, tenantB = `iso-tb-${randomUUID()}`;
+    const orgA = `iso-a-${randomUUID()}`, orgB = `iso-b-${randomUUID()}`, tenantA = `iso-ta-${randomUUID()}`, tenantA2 = `iso-ta2-${randomUUID()}`, tenantB = `iso-tb-${randomUUID()}`;
+    const OTHER_ORGANIZATION = "another organization's row is visible", OTHER_TENANT = "another tenant's row is visible";
+    const WRITTEN = "a row can be written for another organization", WRITTEN_TENANT = "a row can be written for another tenant", MOVED = "an own row can be moved to another organization";
 
-    /** A row for one table, from its own columns: triggers and foreign keys are off for this fixture only. */
+    /** A row for one table, from its own columns. */
     async function insertSql(table: string, organization: string, tenant: string) {
       const columns = await owner.$queryRawUnsafe<Array<{ column: string; type: string; base: string; udt: string }>>(`
         SELECT a.attname AS "column", format_type(a.atttypid, a.atttypmod) AS type, t.typtype::text AS base, t.typname AS udt
@@ -110,20 +118,32 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
       }).catch((error) => { if (error !== rollback) throw error; });
       return result as T;
     };
+    /** Only row-level security's own refusal counts: any other error would prove nothing about it. */
+    const write = (sql: string) => inContext((tx) => tx.$executeRawUnsafe(sql)).then(() => "written",
+      (error: Error) => /row-level security/.test(error.message) ? "refused" : `refused for another reason: ${error.message.split("\n").pop()}`);
     /** What is wrong for this table as the runtime role. Empty means isolated, with rows of both organizations present. */
     async function breaches(table: string) {
       const found: string[] = [];
-      const counts = await inContext((tx) => tx.$queryRawUnsafe<Array<{ own: number; foreign: number }>>(`
-        SELECT count(*) FILTER (WHERE "organizationId" = '${orgA}')::int AS own, count(*) FILTER (WHERE "organizationId" <> '${orgA}')::int AS foreign FROM "${table}"`));
-      if (counts[0].own < 1) found.push("own row not visible: this proves nothing");
-      if (counts[0].foreign !== 0) found.push("another organization's row is visible");
+      const { hasTenant } = baseline.find((row) => row.table === table)!;
+      const [counts] = await inContext((tx) => tx.$queryRawUnsafe<Array<{ own: number; foreign: number; otherTenant: number }>>(`
+        SELECT count(*) FILTER (WHERE "organizationId" = '${orgA}' ${hasTenant ? `AND "tenantId" = '${tenantA}'` : ""})::int AS own,
+          count(*) FILTER (WHERE "organizationId" <> '${orgA}')::int AS foreign,
+          ${hasTenant ? `count(*) FILTER (WHERE "organizationId" = '${orgA}' AND "tenantId" <> '${tenantA}')::int` : "0"} AS "otherTenant" FROM "${table}"`));
+      if (counts.own < 1) found.push("own row not visible: this proves nothing");
+      if (counts.foreign !== 0) found.push(OTHER_ORGANIZATION);
+      if (counts.otherTenant !== 0) found.push(OTHER_TENANT);
       const [{ n }] = await runtime.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM "${table}"`);
       if (n !== 0) found.push("rows are visible with no context");
-      const written = await inContext((tx) => tx.$executeRawUnsafe(`UPDATE "${table}" SET "organizationId" = "organizationId" WHERE "organizationId" = '${orgB}'`)).catch(() => 0);
-      if (written !== 0) found.push("another organization's row can be updated");
-      const insert = await insertSql(table, orgB, tenantB);
-      const inserted = await inContext((tx) => tx.$executeRawUnsafe(insert)).catch(() => 0);
-      if (inserted !== 0) found.push("a row can be written for another organization");
+      const updated = await inContext((tx) => tx.$executeRawUnsafe(`UPDATE "${table}" SET "organizationId" = "organizationId" WHERE "organizationId" = '${orgB}'`));
+      if (updated !== 0) found.push("another organization's row can be updated");
+      const outcome = async (sql: string, breach: string) => {
+        const result = await write(sql);
+        if (result === "written") found.push(breach);
+        else if (result !== "refused") found.push(`${breach}: ${result}`);
+      };
+      await outcome(await insertSql(table, `iso-w-${randomUUID()}`, `iso-w-${randomUUID()}`), WRITTEN);
+      if (hasTenant) await outcome(await insertSql(table, orgA, `iso-w-${randomUUID()}`), WRITTEN_TENANT);
+      await outcome(`UPDATE "${table}" SET "organizationId" = 'iso-w-${randomUUID()}' WHERE "organizationId" = '${orgA}'`, MOVED);
       return found;
     }
     const stillClean = async () => expect(await catalog(owner)).toEqual(baseline);
@@ -139,17 +159,19 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
       baseline = await catalog(owner);
       tables = baseline.filter((row) => isProtected(row) && row.policies.length > 0).map((row) => row.table);
       closed = baseline.filter((row) => isProtected(row) && row.policies.length === 0).map((row) => row.table);
-      // One generic row per table, on this copy only: its CHECK constraints go, since they play no part in row-level security.
-      psqlOk(url.toString(), ["-c", `DO $$ DECLARE r record; BEGIN FOR r IN SELECT c.conrelid::regclass AS t, c.conname FROM pg_constraint c
-        JOIN pg_class k ON k.oid = c.conrelid WHERE c.contype = 'c' AND k.relnamespace = 'public'::regnamespace LOOP
-        EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', r.t, r.conname); END LOOP; END $$`]);
+      // On this copy only, nothing but row-level security may stop the runtime role: no CHECK, no foreign key, no trigger, every grant.
+      psqlOk(url.toString(), ["-c", `DO $$ DECLARE r record; BEGIN
+        FOR r IN SELECT c.conrelid::regclass AS t, c.conname FROM pg_constraint c JOIN pg_class k ON k.oid = c.conrelid
+          WHERE c.contype IN ('c', 'f') AND k.relnamespace = 'public'::regnamespace LOOP
+          EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', r.t, r.conname); END LOOP;
+        FOR r IN SELECT oid::regclass AS t FROM pg_class WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace LOOP
+          EXECUTE format('ALTER TABLE %s DISABLE TRIGGER ALL', r.t); END LOOP;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
+        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user; END $$`]);
       for (const table of [...tables, ...closed]) {
-        const [a, b] = [await insertSql(table, orgA, tenantA), await insertSql(table, orgB, tenantB)];
-        await owner.$transaction(async (tx) => {
-          await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
-          await tx.$executeRawUnsafe(a);
-          await tx.$executeRawUnsafe(b);
-        });
+        await owner.$executeRawUnsafe(await insertSql(table, orgA, tenantA));
+        await owner.$executeRawUnsafe(await insertSql(table, orgB, tenantB));
+        if (tables.includes(table) && baseline.find((row) => row.table === table)!.hasTenant) await owner.$executeRawUnsafe(await insertSql(table, orgA, tenantA2));
       }
     }, 240_000);
 
@@ -170,9 +192,8 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
     it("a table forced with no policy gives the runtime role nothing, whatever its grants", async () => {
       expect(closed.length).toBeGreaterThan(0);
       for (const table of closed) {
-        psqlOk(url.toString(), ["-c", `GRANT SELECT ON "${table}" TO app_user`]);
         const [{ n }] = await inContext((tx) => tx.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM "${table}"`));
-        psqlOk(url.toString(), ["-c", `REVOKE SELECT ON "${table}" FROM app_user`]);
+        expect(await write(await insertSql(table, orgA, tenantA)), table).toBe("refused");
         expect(n, table).toBe(0);
         const [{ rows }] = await owner.$queryRawUnsafe<Array<{ rows: number }>>(`SELECT count(*)::int AS rows FROM "${table}"`);
         expect(rows, table).toBe(2);
@@ -186,7 +207,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
         const seen = await breaches(table);
         const config = unprotected(await catalog(owner));
         psqlOk(url.toString(), ["-1", "-c", `ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY; ALTER TABLE "${table}" FORCE ROW LEVEL SECURITY`]);
-        expect(seen, table).toContain("another organization's row is visible");
+        expect(seen, table).toContain(OTHER_ORGANIZATION);
         expect(config, table).toContain(table);
       }
       await stillClean();
@@ -199,7 +220,36 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
         const seen = await breaches(table);
         const config = unprotected(await catalog(owner));
         psqlOk(url.toString(), ["-c", `ALTER POLICY "${policy.name}" ON "${table}" USING (${policy.qual}) WITH CHECK (${policy.check})`]);
-        expect(seen, table).toContain("another organization's row is visible");
+        expect(seen, table).toContain(OTHER_ORGANIZATION);
+        expect(config, table).toContain(table);
+      }
+      await stillClean();
+    }, 240_000);
+
+    it("only WITH CHECK opened: behaviour sees the writes and configuration sees the policy, on every table", async () => {
+      for (const table of tables) {
+        const policy = baseline.find((row) => row.table === table)!.policies[0];
+        psqlOk(url.toString(), ["-c", `ALTER POLICY "${policy.name}" ON "${table}" WITH CHECK (true)`]);
+        const seen = await breaches(table);
+        const config = unprotected(await catalog(owner));
+        psqlOk(url.toString(), ["-c", `ALTER POLICY "${policy.name}" ON "${table}" WITH CHECK (${policy.check})`]);
+        expect(seen, table).toContain(WRITTEN); // moving a row stays refused: PostgreSQL also applies USING to the new row
+        expect(seen, table).not.toContain(OTHER_ORGANIZATION);
+        expect(config, table).toContain(table);
+      }
+      await stillClean();
+    }, 240_000);
+
+    it("a policy that loses its tenant condition: behaviour and configuration both see it, on every table with a tenant", async () => {
+      const withTenant = tables.filter((table) => baseline.find((row) => row.table === table)!.hasTenant);
+      expect(withTenant.length).toBeGreaterThan(30);
+      for (const table of withTenant) {
+        const policy = baseline.find((row) => row.table === table)!.policies[0];
+        psqlOk(url.toString(), ["-c", `ALTER POLICY "${policy.name}" ON "${table}" USING (${ORGANIZATION_ONLY[0]}) WITH CHECK (${ORGANIZATION_ONLY[0]})`]);
+        const seen = await breaches(table);
+        const config = unprotected(await catalog(owner));
+        psqlOk(url.toString(), ["-c", `ALTER POLICY "${policy.name}" ON "${table}" USING (${policy.qual}) WITH CHECK (${policy.check})`]);
+        expect(seen, table).toEqual(expect.arrayContaining([OTHER_TENANT, WRITTEN_TENANT]));
         expect(config, table).toContain(table);
       }
       await stillClean();
@@ -211,11 +261,11 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
       expect(await breaches("Subject")).toEqual([]);
       expect(unprotected(await catalog(owner))).not.toContain("Subject");
       psqlOk(url.toString(), ["-c", `ALTER POLICY iso_second ON "Subject" USING (true) WITH CHECK (true)`]);
-      expect(await breaches("Subject")).toContain("another organization's row is visible");
+      expect(await breaches("Subject")).toContain(OTHER_ORGANIZATION);
       expect(unprotected(await catalog(owner))).toContain("Subject");
       psqlOk(url.toString(), ["-c", `ALTER POLICY iso_second ON "Subject" USING (${qual}) WITH CHECK (${qual})`]);
       psqlOk(url.toString(), ["-c", `ALTER TABLE "Subject" DISABLE ROW LEVEL SECURITY`]);
-      expect(await breaches("Subject")).toContain("another organization's row is visible");
+      expect(await breaches("Subject")).toContain(OTHER_ORGANIZATION);
       psqlOk(url.toString(), ["-c", `ALTER TABLE "Subject" ENABLE ROW LEVEL SECURITY`]);
       psqlOk(url.toString(), ["-c", `DROP POLICY iso_second ON "Subject"`]);
       await stillClean();
