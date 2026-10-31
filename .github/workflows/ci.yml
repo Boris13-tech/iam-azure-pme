@@ -15,6 +15,38 @@ permissions:
   contents: read
 
 jobs:
+  # Secret scan of the whole history (P6 compensating control: GitHub's non-provider patterns are not
+  # available on this plan). Official release only, version and SHA-256 pinned, checked before execution.
+  # The public log shows counts, rules, files and commits only, never the matched content.
+  secret-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Gitleaks (official release, pinned version and digest)
+      env:
+        # Provenance: https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1, digest from its
+        # gitleaks_8.30.1_checksums.txt (that file's SHA-256: 061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae).
+        GITLEAKS_VERSION: 8.30.1
+        GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      run: |
+        set -euo pipefail
+        archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        curl -fsSL --proto '=https' -o "$RUNNER_TEMP/$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+        echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+        "$RUNNER_TEMP/gitleaks" git --redact --no-banner --exit-code 0 --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" .
+        count=$(jq 'length' "$RUNNER_TEMP/gitleaks.json")
+        echo "Findings: $count"
+        if [ "$count" != "0" ]; then
+          jq -r '.[] | "\(.RuleID) \(.File) \(.Commit[0:7])"' "$RUNNER_TEMP/gitleaks.json"
+          exit 1
+        fi
+
   test-and-build:
     runs-on: ubuntu-latest
 
