@@ -26,6 +26,8 @@ GRANT EXECUTE ON FUNCTION public.luxia_organization_lock_active(TEXT) TO app_use
 GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
 -- Sovereign providers F2: same grant as the migration gives app_user in Production.
 GRANT EXECUTE ON FUNCTION public.luxia_provider_connection_lock_active(TEXT,TEXT) TO app_user;
+-- R3: the daily retention job (same grant as the migration gives app_user in Production).
+GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO app_user;
 GRANT CONNECT ON DATABASE luxia_db TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
@@ -38,5 +40,8 @@ GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;
 REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEvidence" FROM app_user;
 -- F2: a provider connection is never deleted (same as the migration gives app_user in Production).
 REVOKE DELETE, TRUNCATE ON "ProviderConnection" FROM app_user;
+-- R3: retention run records are owner-only (same as the migration gives app_user in Production).
+REVOKE ALL ON "RetentionRun" FROM app_user;
+REVOKE ALL ON SEQUENCE "RetentionRun_id_seq" FROM app_user;
 -- F3: secret references are revoked, never deleted (same as the migration gives app_user in Production).
 REVOKE DELETE, TRUNCATE ON "ProviderSecretReference" FROM app_user;
