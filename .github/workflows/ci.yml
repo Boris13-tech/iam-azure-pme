@@ -39,8 +39,9 @@ jobs:
         curl -fsSL --proto '=https' -o "$RUNNER_TEMP/$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
         echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
         tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
-        # The configuration stays outside the checkout and inline allow comments count for nothing: a pull request
-        # cannot silence the scan from inside. A throwaway repository tries both ways, with a random token, on every run.
+        # The configuration stays outside the checkout and inline allow comments count for nothing. A throwaway repository
+        # tries both ways, with a random token, on every run. A change to .gitleaksignore or to this job is not stopped
+        # here: it shows in the diff, and the reviewer must catch it.
         printf '[extend]\nuseDefault = true\n' > "$RUNNER_TEMP/gitleaks.toml"
         scan() { "$RUNNER_TEMP/gitleaks" git --config "$RUNNER_TEMP/gitleaks.toml" --ignore-gitleaks-allow --redact --no-banner --exit-code 0 --report-format json --report-path "$2" "$1"; }
         canary="$RUNNER_TEMP/canary"

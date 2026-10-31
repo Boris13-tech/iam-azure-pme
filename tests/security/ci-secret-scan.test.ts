@@ -34,7 +34,7 @@ describe("CI secret scan (gitleaks)", () => {
     expect(job).toMatch(/if \[ "\$count" != "0" \]; then[\s\S]*exit 1/);
   });
 
-  it("a pull request cannot silence the scan from inside, and every run proves it on a canary", () => {
+  it("inline allow comments and a config in the checkout do not silence the scan, and every run proves it on a canary", () => {
     expect(job).toContain(`--config "$RUNNER_TEMP/gitleaks.toml"`);
     expect(job).toContain("--ignore-gitleaks-allow");
     expect(job).toContain("# gitleaks:allow");
