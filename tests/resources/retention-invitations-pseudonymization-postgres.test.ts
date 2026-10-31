@@ -356,6 +356,25 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
   }, 120_000);
   afterAll(async () => { await rawPrisma.$disconnect(); await owner?.$disconnect(); });
 
+  it("each column stands alone: a person half done is found, and only what is left is written and counted", async () => {
+    await drain("luxia_retention_pseudonymize_retired", "subjects");
+    const nameDone = await person(a, "Moitie Nom", { retiredDaysAgo: 31, signIn: true });
+    await owner.$executeRawUnsafe(`UPDATE "Subject" SET "name" = $1 WHERE "id" = $2`, `Ancien membre ${sha(nameDone.subjectId).slice(0, 8)}`, nameDone.subjectId);
+    const onlyPrincipal = { subjects: 1, displayNames: 0, principalNames: 1 };
+    expect(await call("luxia_retention_pseudonymize_retired", 5000, false)).toEqual({ ...onlyPrincipal, enforced: false });
+    expect(await call("luxia_retention_pseudonymize_retired", 5000, true)).toEqual({ ...onlyPrincipal, enforced: true });
+    expect((await snapshot(nameDone)).localIdentity!.principalName).toBe(`ANCIEN-MEMBRE-${sha(nameDone.localIdentityId)}`);
+
+    const principalDone = await person(a, "Moitie Compte", { retiredDaysAgo: 31, signIn: true });
+    await owner.$executeRawUnsafe(`UPDATE "LocalIdentity" SET "principalName" = $1 WHERE "id" = $2`, `ANCIEN-MEMBRE-${sha(principalDone.localIdentityId)}`, principalDone.localIdentityId);
+    const onlyName = { subjects: 1, displayNames: 1, principalNames: 0 };
+    expect(await call("luxia_retention_pseudonymize_retired", 5000, false)).toEqual({ ...onlyName, enforced: false });
+    expect(await call("luxia_retention_pseudonymize_retired", 5000, true)).toEqual({ ...onlyName, enforced: true });
+    expect((await snapshot(principalDone)).subject!.name).toBe(`Ancien membre ${sha(principalDone.subjectId).slice(0, 8)}`);
+
+    expect(await call("luxia_retention_pseudonymize_retired", 5000, true)).toEqual({ subjects: 0, displayNames: 0, principalNames: 0, enforced: true });
+  }, 120_000);
+
   it("replaces exactly the name and the local sign-in name; the journal and the sign-in evidence are byte-identical", async () => {
     await drain("luxia_retention_pseudonymize_retired", "subjects");
     const gone = await person(a, "Jeanne Martin", { retiredDaysAgo: 31, signIn: true });
