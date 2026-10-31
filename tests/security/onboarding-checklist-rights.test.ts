@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHECKLIST_ITEM_RIGHTS, CHECKLIST_ITEMS, readChecklist } from "../../lib/onboarding/checklist";
+import { CHECKLIST_ITEM_RIGHTS, CHECKLIST_ITEMS, readChecklist, type ChecklistItem } from "../../lib/onboarding/checklist";
 import { ENTITLEMENT_CATALOG_V1 } from "../../lib/auth/entitlements-catalog";
 
 // Without the read right, an item's query does not run: every model the checklist touches is recorded.
@@ -18,6 +18,22 @@ const run = async (held: string[]) => {
   const items = await readChecklist(tx, scope, new Set(held), new Date());
   return { items, touched: [...touched].sort() };
 };
+
+// The rule, written out apart from the table it checks, with the models each item may query.
+const RULE: Array<[ChecklistItem, (held: ReadonlySet<string>) => boolean, string[]]> = [
+  ["domainVerified", (held) => held.has("providers.read"), ["organizationDomain"]],
+  ["secondAdministrator", (held) => held.has("assignments.read") && held.has("identity_accounts.read"), ["subject"]],
+  ["recoveryCodes", (held) => held.has("assignments.manage") && held.has("identity_accounts.read"), ["identityAccount", "localRecoveryCode"]],
+  ["teamInvited", (held) => held.has("subjects.read"), ["invitation"]],
+  ["firstResource", (held) => held.has("resources.read"), ["resource"]],
+  ["firstAccessReview", (held) => held.has("access_reviews.read_all") || (held.has("access_reviews.read") && held.has("access_reviews.manage")), ["accessReviewCampaign"]],
+];
+async function expectRule(held: string[]) {
+  const { items, touched } = await run(held);
+  const allowed = RULE.filter(([, may]) => may(new Set(held)));
+  expect(Object.entries(items).filter(([, value]) => value !== null).map(([key]) => key), held.join(" ")).toEqual(allowed.map(([item]) => item));
+  expect(touched, held.join(" ")).toEqual(allowed.flatMap(([, , models]) => models).sort());
+}
 
 describe("Onboarding checklist: per-item read rights", () => {
   it("no right, no query, no answer", async () => {
@@ -57,6 +73,29 @@ describe("Onboarding checklist: per-item read rights", () => {
   it("recovery codes are read only with both of their rights", async () => {
     expect((await run(["assignments.read", "identity_accounts.read"])).touched).not.toContain("localRecoveryCode");
     expect((await run(["assignments.manage", "identity_accounts.read"])).touched).toContain("localRecoveryCode");
+  });
+
+  it("every combination of the table's rights answers and queries exactly what the rule allows", async () => {
+    const rights = ["subjects.read", "providers.read", "assignments.read", "assignments.manage", "identity_accounts.read", "resources.read", "access_reviews.read", "access_reviews.read_all", "access_reviews.manage"];
+    for (let mask = 0; mask < 1 << rights.length; mask++) await expectRule(rights.filter((_, bit) => mask & (1 << bit)));
+  });
+
+  it("no other right of the catalog opens anything, alone or beside the gate's subjects.read", async () => {
+    for (const key of ENTITLEMENT_CATALOG_V1) {
+      await expectRule([key]);
+      await expectRule(["subjects.read", key]);
+    }
+  });
+
+  it("the table is exactly this one: changing it means changing this test", () => {
+    expect(CHECKLIST_ITEM_RIGHTS).toEqual({
+      domainVerified: [["providers.read"]],
+      secondAdministrator: [["assignments.read", "identity_accounts.read"]],
+      recoveryCodes: [["assignments.manage", "identity_accounts.read"]],
+      teamInvited: [["subjects.read"]],
+      firstResource: [["resources.read"]],
+      firstAccessReview: [["access_reviews.read_all"], ["access_reviews.read", "access_reviews.manage"]],
+    });
   });
 
   it("every item declares its rights, from the catalog", () => {
