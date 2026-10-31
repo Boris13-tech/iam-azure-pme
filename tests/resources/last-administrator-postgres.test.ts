@@ -187,6 +187,11 @@ describe.runIf(enabled)("B1 last-administrator guard (app_user, PostgreSQL)", ()
     await expect(updateSubject(as(org, operator.id), admin.id, { lifecycleState: "DISABLED" }, change())).rejects.toMatchObject(refused);
 
     // "Second administrator" in the checklist means a second durable administrator who can sign in.
+    // The viewer holds the two rights that establish it (lib/onboarding/checklist.ts).
+    for (const key of ["assignments.read", "identity_accounts.read"]) {
+      const entitlement = await owner.entitlement.create({ data: { ...scope(org), key, resource: key.split(".")[0], action: key.split(".")[1] } });
+      await owner.assignment.create({ data: { ...scope(org), subjectId: operator.id, entitlementId: entitlement.id, source: "DIRECT", sourceRef: randomUUID() } });
+    }
     expect(await getOnboardingChecklist(as(org, operator.id), change())).toMatchObject({ secondAdministrator: false });
     await person(org, "Second admin", "permanent");
     expect(await getOnboardingChecklist(as(org, operator.id), change())).toMatchObject({ secondAdministrator: true });
