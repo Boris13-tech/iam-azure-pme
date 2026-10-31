@@ -31,9 +31,14 @@ describe("R2 session hash redaction: migration architecture", () => {
     expect(guard).not.toMatch(/now\(\)|clock_timestamp/);
   });
 
+  it("both functions pin their search_path", () => {
+    expect(migration).toMatch(/CREATE OR REPLACE FUNCTION luxia_session_guard\(\) RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS/);
+    expect(migration).toMatch(/CREATE FUNCTION luxia_session_redact_network_hashes\(p_batch integer\) RETURNS integer\s+LANGUAGE plpgsql SET search_path = public, pg_temp AS/);
+  });
+
   it("the redaction is bounded and refuses a role that row-level security would blind", () => {
     const redact = fn(migration, "luxia_session_redact_network_hashes");
-    expect(redact).toContain("p_batch > 10000");
+    expect(redact).toContain("p_batch IS NULL OR p_batch < 1 OR p_batch > 10000");
     expect(redact).toContain("REDACTION_REQUIRES_BYPASSRLS");
     expect(redact).toMatch(/LIMIT p_batch FOR UPDATE/);
     expect(migration).toContain("REVOKE ALL ON FUNCTION luxia_session_redact_network_hashes(integer) FROM app_user");
