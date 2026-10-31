@@ -3,16 +3,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { adminPrisma } from "../helpers/admin-prisma";
 import { purgeTestOrganization } from "../helpers/purge-test-organization";
 
-// The database refuses a row that links two organizations, whoever writes it: the owner connection used here is not
-// subject to row-level security, so only the composite foreign keys can refuse.
+// The database refuses a row that links two organizations or tenants, whoever writes it: the owner connection used here
+// is not subject to row-level security, so only the composite foreign keys can refuse. Row-level security itself is
+// proven as the runtime role in postgres-rls.test.ts.
 describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Composite tenant boundaries (PostgreSQL)", () => {
-  const orgA = randomUUID(), orgB = randomUUID(), tenantA = randomUUID(), tenantB = randomUUID();
+  const orgA = randomUUID(), orgB = randomUUID(), tenantA = randomUUID(), tenantA2 = randomUUID(), tenantB = randomUUID();
   const providerA = randomUUID(), providerB = randomUUID(), subjectA = randomUUID();
   const provider = (id: string, organizationId: string) => ({ id, organizationId, name: id, providerType: "MICROSOFT_ENTRA" as const, externalScopeId: id });
 
   beforeAll(async () => {
     await adminPrisma.organization.createMany({ data: [{ id: orgA, name: "Boundary A" }, { id: orgB, name: "Boundary B" }] });
-    await adminPrisma.tenant.createMany({ data: [{ id: tenantA, organizationId: orgA, name: "A" }, { id: tenantB, organizationId: orgB, name: "B" }] });
+    await adminPrisma.tenant.createMany({ data: [{ id: tenantA, organizationId: orgA, name: "A" }, { id: tenantA2, organizationId: orgA, name: "A2" }, { id: tenantB, organizationId: orgB, name: "B" }] });
     await adminPrisma.providerConnection.createMany({ data: [provider(providerA, orgA), provider(providerB, orgB)] });
     await adminPrisma.subject.create({ data: { id: subjectA, organizationId: orgA, tenantId: tenantA, type: "HUMAN", name: "Alice" } });
   });
@@ -42,6 +43,12 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Composite tenant boun
 
   it("an IdentityAccount cannot link a Subject to another organization's provider", () => refusedThenAccepted((foreign) =>
     adminPrisma.identityAccount.create({ data: { organizationId: orgA, tenantId: tenantA, subjectId: subjectA, providerConnectionId: foreign ? providerB : providerA, externalObjectId: randomUUID() } })));
+
+  it("an IdentityAccount cannot attach to a Subject of another tenant", () => refusedThenAccepted((foreign) =>
+    adminPrisma.identityAccount.create({ data: { organizationId: orgA, tenantId: foreign ? tenantA2 : tenantA, subjectId: subjectA, providerConnectionId: providerA, externalObjectId: randomUUID() } })));
+
+  it("a Resource cannot sit in another organization's tenant", () => refusedThenAccepted((foreign) =>
+    adminPrisma.resource.create({ data: { organizationId: orgA, tenantId: foreign ? tenantB : tenantA, name: randomUUID(), type: "API" } })));
 
   it("a Resource cannot name another organization's provider", () => refusedThenAccepted((foreign) =>
     adminPrisma.resource.create({ data: { organizationId: orgA, tenantId: tenantA, name: randomUUID(), type: "API", providerConnectionId: foreign ? providerB : providerA } })));

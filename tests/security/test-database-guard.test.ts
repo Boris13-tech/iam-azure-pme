@@ -38,8 +38,19 @@ describe("the PostgreSQL suites run only against a test database", () => {
       expect(() => assertTestDatabase({ LUXIA_RESOURCE_RLS: "true", ...clone, [flag]: "true" })).toThrow("ISOLATED_DB_REQUIRED");
   });
 
-  it("does nothing when the PostgreSQL suites are off", () => {
-    expect(() => assertTestDatabase({ DATABASE_URL: local("neondb") })).not.toThrow();
+  it("without the flag, a URL set must still name a test database; none set is fine", () => {
+    expect(() => assertTestDatabase({})).not.toThrow();
+    expect(() => assertTestDatabase({ DATABASE_URL: local("luxia_db"), DATABASE_MIGRATION_URL: local("luxia_db") })).not.toThrow();
+    for (const env of [
+      { DATABASE_URL: local("neondb") },
+      { DATABASE_MIGRATION_URL: local("neondb") },
+      { DATABASE_URL: local("luxia_db"), DATABASE_MIGRATION_URL: local("neondb") },
+      { DATABASE_URL: `${local("luxia_db")}&host=remote.example.test` },
+    ]) expect(() => assertTestDatabase(env), JSON.stringify(env)).toThrow("ISOLATED_DB_REQUIRED");
+  });
+
+  it("with no URL set, Prisma has nothing to take from a local .env file", () => {
+    expect(new URL(process.env.DATABASE_URL!).pathname).toMatch(/^\/luxia_\w+$/);
   });
 
   it("no test file sits at the root of tests/: CI selects by folder and would never run it", () => {
