@@ -1,13 +1,11 @@
 param(
-  [ValidateSet('exact','resources','security','ci','runner-negative','runner')] [string]$Suite='exact',
+  [ValidateSet('exact','resources','security','ci')] [string]$Suite='exact',
   [ValidateRange(1,2)] [int]$Workers=1,
   [string]$Database='luxia_reviews_cert',
   [string]$Seed='serial-fresh-01'
 )
 $ErrorActionPreference='Stop'
-$runnerSuite=$Suite -in @('runner-negative','runner')
-if (($runnerSuite -and $Database -ne 'neondb') -or
-    (!$runnerSuite -and $Database -notmatch '^luxia_(reviews_cert|resources_diag_[a-z0-9_]+)$')) { throw 'CERTIFICATION_DATABASE_DENIED' }
+if ($Database -notmatch '^luxia_(reviews_cert|resources_diag_[a-z0-9_]+)$') { throw 'CERTIFICATION_DATABASE_DENIED' }
 if ($Seed -notmatch '^[a-z0-9_-]{1,64}$') { throw 'DIAGNOSTIC_SEED_INVALID' }
 # Thread-scoped, reversible guard against the observed Windows Idle Timeout standby.
 # No power plan or persistent system setting is modified.
@@ -22,7 +20,7 @@ public static class LuxiaCertificationPowerGuard {
 $prior=[LuxiaCertificationPowerGuard]::SetThreadExecutionState([uint32]2147483649)
 if ($prior -eq 0) { throw 'CERTIFICATION_AWAKE_GUARD_FAILED' }
 $saved=@{}
-foreach ($name in @('DATABASE_URL','DATABASE_MIGRATION_URL','LUXIA_RESOURCE_RLS','LUXIA_RESOURCE_DIAGNOSTICS','LUXIA_RESOURCE_DIAGNOSTIC_SEED','LUXIA_PRODUCTION_RUNNER_NEGATIVES','LUXIA_PRODUCTION_RUNNER_CERTIFICATION','LUXIA_RUNNER_FIXTURE_OWNER_URL')) {
+foreach ($name in @('DATABASE_URL','DATABASE_MIGRATION_URL','LUXIA_RESOURCE_RLS','LUXIA_RESOURCE_DIAGNOSTICS','LUXIA_RESOURCE_DIAGNOSTIC_SEED')) {
   $saved[$name]=[Environment]::GetEnvironmentVariable($name,'Process')
 }
 try {
@@ -34,13 +32,8 @@ try {
       $runtimeUri.AbsolutePath -ne "/$Database" -or $ownerUri.AbsolutePath -ne "/$Database") { throw 'CERTIFICATION_ENDPOINT_DENIED' }
   $env:DATABASE_URL=$runtime; $env:DATABASE_MIGRATION_URL=$owner
   $env:LUXIA_RESOURCE_RLS='true'; $env:LUXIA_RESOURCE_DIAGNOSTICS='true'; $env:LUXIA_RESOURCE_DIAGNOSTIC_SEED=$Seed
-  $env:LUXIA_PRODUCTION_RUNNER_NEGATIVES=if($Suite -eq 'runner-negative'){'true'}else{'false'}
-  $env:LUXIA_PRODUCTION_RUNNER_CERTIFICATION=if($Suite -eq 'runner'){'true'}else{'false'}
-  $env:LUXIA_RUNNER_FIXTURE_OWNER_URL=if($Suite -eq 'runner-negative'){$owner}else{$null}
-  if (!$runnerSuite) {
-    & node scripts/certification/assert-fresh-resources-diagnostic.cjs
-    if ($LASTEXITCODE -ne 0) { throw 'DIAGNOSTIC_FRESH_FIXTURE_GATE_FAILED' }
-  }
+  & node scripts/certification/assert-fresh-resources-diagnostic.cjs
+  if ($LASTEXITCODE -ne 0) { throw 'DIAGNOSTIC_FRESH_FIXTURE_GATE_FAILED' }
   Write-Output ('CERTIFICATION_EXECUTION '+(ConvertTo-Json -Compress @{utc=[DateTime]::UtcNow.ToString('o');suite=$Suite;workers=$Workers;database=$Database;standbyGuard='ACTIVE';production='FORBIDDEN'}))
   $arguments=@('--offline','vitest','run','--maxWorkers',"$Workers",'--reporter=verbose','--reporter=json',"--outputFile.json=docs/certification/operator-$Suite-$Database-results.json",'--testTimeout=120000','--hookTimeout=120000')
   if ($Workers -eq 1) { $arguments+='--no-file-parallelism' }
@@ -48,9 +41,7 @@ try {
     'exact' { $arguments+=@('tests/resources/postgres-rls.test.ts','-t','real create/update/bind/grant/revoke mutations are atomically audited') }
     'resources' { $arguments+='tests/resources' }
     'security' { $arguments+='tests/security' }
-    'runner-negative' { $arguments+='tests/resources/production-bootstrap.test.ts' }
-    'runner' { $arguments+='tests/resources/production-bootstrap.test.ts' }
-    # Match .github/workflows/ci.yml, not the unrelated root-level ad-hoc scripts.
+    # Match .github/workflows/ci.yml.
     'ci' { $arguments+=@('tests/security','tests/resources','tests/provider-adapters','tests/identity','tests/operations') }
   }
   & npx @arguments
