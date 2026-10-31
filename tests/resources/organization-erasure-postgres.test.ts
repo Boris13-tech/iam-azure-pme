@@ -455,6 +455,18 @@ describe.runIf(enabled)("R7: erasure of a CLOSED organization (owner procedure, 
       const prior = readdirSync("prisma/migrations").filter((dir) => /^\d{14}_/.test(dir) && dir < NEW).sort();
       for (const dir of prior) psqlOk(url, ["-1", "-f", `prisma/migrations/${dir}/migration.sql`]);
       const before = catalog();
+      // A write in flight on the second table: the migration gives up within its lock_timeout, and nothing stays.
+      const writer = new PrismaClient({ datasources: { db: { url } } });
+      try {
+        await writer.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(`LOCK TABLE "AuthorizationShadowObservation" IN ROW EXCLUSIVE MODE`);
+          const refused = psql(url, ["-1", "-f", `prisma/migrations/${NEW}/migration.sql`]);
+          expect(refused.status).not.toBe(0);
+          expect(refused.stderr).toMatch(/lock timeout/);
+        }, { timeout: 30_000 });
+      } finally { await writer.$disconnect(); }
+      expect(catalog()).toBe(before);
+      expect(psqlOk(url, ["-c", `SELECT count(*) FROM pg_constraint WHERE conname IN ('AuthTransaction_expectedOrganizationId_fkey', 'AuthorizationShadowObservation_organizationId_fkey')`]).trim()).toBe("0");
       psqlOk(url, ["-1", "-f", `prisma/migrations/${NEW}/migration.sql`]);
       psqlOk(url, ["-1", "-f", ROLLBACK]);
       expect(catalog()).toBe(before);

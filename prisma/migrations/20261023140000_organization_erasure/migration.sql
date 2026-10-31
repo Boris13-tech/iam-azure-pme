@@ -10,6 +10,11 @@
 -- does not bind. The runtime role can call neither function. TRUNCATE stays refused.
 -- Changed guard bodies are the previous ones plus that gate only (static test).
 
+-- Locks: the two constraints below take SHARE ROW EXCLUSIVE on their table and on "Organization", which blocks writes on
+-- them for the instant they hold it. A write in flight would make them wait with new writes queued behind, so they give
+-- up after 5 seconds. Prisma applies this file as one transaction: nothing stays, and the gate can run it again.
+SET lock_timeout = '5s';
+
 -- Every table that carries an organization must make a writer wait for the erasure, and fail once it is done. These
 -- two had no such link. NOT VALID: new rows are checked, existing rows are not scanned or changed.
 ALTER TABLE "AuthTransaction" ADD CONSTRAINT "AuthTransaction_expectedOrganizationId_fkey"
@@ -441,3 +446,5 @@ DO $$ BEGIN
     REVOKE ALL ON SEQUENCE "OrganizationErasure_id_seq" FROM app_user;
   END IF;
 END $$;
+
+RESET lock_timeout;
