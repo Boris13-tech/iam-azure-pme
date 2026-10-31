@@ -206,25 +206,3 @@ jobs:
         DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored?schema=public
         DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored?schema=public
 
-  production-activation:
-    if: "github.event_name == 'push' && github.event.head_commit.message == 'ops: execute production activation gate'"
-    needs: test-and-build
-    uses: ./.github/workflows/production-activation-gate.yml
-    secrets: inherit
-
-  production-identity-preflight:
-    if: "github.event_name == 'push' && github.event.head_commit.message == 'ops(identity): execute production identity preflight'"
-    needs: test-and-build
-    uses: ./.github/workflows/production-activation-gate.yml
-    with:
-      operation: identity-preflight
-    secrets: inherit
-
-  production-identity-apply:
-    if: "github.event_name == 'push' && github.event.head_commit.message == 'ops(identity): execute production identity apply'"
-    needs: test-and-build
-    uses: ./.github/workflows/production-activation-gate.yml
-    with:
-      operation: identity-apply
-      confirmation: APPLY_CANONICAL_IDENTITY_BOOTSTRAP_PRODUCTION
-    secrets: inherit
