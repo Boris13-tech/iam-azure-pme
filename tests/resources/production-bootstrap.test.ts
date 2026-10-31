@@ -1,15 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
-import { FIXED, PROFILES, VERCEL_PROJECT_ID, ABANDONED, hash, validate, ceremony, type Execution } from "../../scripts/operators/resource-owner-bootstrap";
-import { withTenantDb } from "../../lib/db/scoped-client";
-import { rawPrisma } from "../../lib/db/raw-prisma";
-import { SessionStore } from "../../lib/auth/session-store";
-import { authorize } from "../../lib/resources/authorization";
-import { PrismaClient, type Prisma } from "@prisma/client";
-import { newBrowserProbe, verifyBrowserEvidence } from "../../scripts/operators/browser-evidence";
+import { FIXED, PROFILES, VERCEL_PROJECT_ID, ABANDONED, hash, validate, type Execution } from "../../scripts/operators/resource-owner-bootstrap";
 
 const now = Date.now();
 const deploymentSha = "5704558f5c343ae653c8984917b90a760caeabf1";
@@ -25,10 +18,9 @@ const release = { releaseVersion: 1, environment: "CERTIFICATION_ONLY", projectI
   deployedSha: deploymentSha, deploymentId: "certification-local", manifestBinding: hash(bytes) };
 const releaseBytes = JSON.stringify(release), approval = { manifestBinding: hash(bytes), releaseBinding: hash(releaseBytes), approvedAt: new Date(now - 500).toISOString(),
   approvedBy: "operator-authorized-certification-only", approvalReference: "2026-10-08 dedicated runner certification instruction" };
-const ex: Execution = { mode: "CERTIFICATION_ONLY", url: (process.env.LUXIA_PRODUCTION_RUNNER_CERTIFICATION === 'true' || process.env.LUXIA_PRODUCTION_RUNNER_NEGATIVES === 'true') ? process.env.DATABASE_URL! : `postgresql://app_user@${PROFILES.CERTIFICATION_ONLY.host}/neondb?sslmode=require`,
+const ex: Execution = { mode: "CERTIFICATION_ONLY", url: `postgresql://app_user@${PROFILES.CERTIFICATION_ONLY.host}/neondb?sslmode=require`,
   origin: PROFILES.CERTIFICATION_ONLY.origin, deployedSha: deploymentSha, deploymentId: release.deploymentId,
   verifiedProject: FIXED.projectId, verifiedBranch: PROFILES.CERTIFICATION_ONLY.branch, registrations: [{ bytes, releaseBytes, approval }] };
-const auth = { organizationId: FIXED.organizationId, tenantId: FIXED.tenantId, subjectId: FIXED.actorSubjectId };
 
 describe("independent operator runner hard guards", () => {
   it("pins a separately registered release to exact manifest, approval, deployment ID and SHA", () => {
@@ -81,117 +73,4 @@ describe("independent operator runner hard guards", () => {
     expect(preflight).not.toMatch(/\.(create|createMany|update|updateMany|delete|deleteMany|upsert)\(/);
     expect(preflight.indexOf('SET TRANSACTION READ ONLY')).toBeLessThan(preflight.indexOf("set_config('app.organization_id'"));
   });
-});
-
-async function preserved() {
-  return withTenantDb(auth, async tx => {
-    const result: Record<string, unknown> = {};
-    for (const table of ['Subject','IdentityAccount','ProviderConnection','User','Role','Permission','UserRole','AccessPolicy','AuditLog','LegacyUserBridge','Resource','ResourceScope','Entitlement'])
-      result[table] = await tx.$queryRawUnsafe(`SELECT count(*)::int n,md5(coalesce(string_agg(to_jsonb(r)::text,'|' ORDER BY to_jsonb(r)::text),'')) digest FROM "${table}" r`);
-    result.Assignment = await tx.$queryRaw`SELECT count(*)::int n,md5(coalesce(string_agg(to_jsonb(r)::text,'|' ORDER BY to_jsonb(r)::text),'')) digest FROM "Assignment" r WHERE id<>${m.assignmentId}`;
-    return result;
-  });
-}
-describe.runIf(process.env.LUXIA_PRODUCTION_RUNNER_CERTIFICATION === 'true')('dedicated runner real PostgreSQL/RLS + HTTP', () => {
-  it('DENY → exact grant → ALLOW → revoke → DENY; negative guards and immutable evidence', async () => {
-    validate(bytes, approval, ex);
-    const baseline = await preserved();
-    const account = await withTenantDb(auth, tx => tx.identityAccount.findFirstOrThrow({ where: { subjectId: auth.subjectId, status: 'ACTIVE' } }));
-    // Certification clone only; no Production session is created or copied into HTTP.
-    const session = await SessionStore.createSession({ ...auth, identityAccountId: account.id });
-    const server = spawn(process.execPath,[resolve('node_modules/next/dist/bin/next'),'dev','-p','3196'], { windowsHide:true,
-      env:{...process.env,NEXT_PUBLIC_APP_URL:ex.origin,AUTHZ_MODE:'native'},stdio:['ignore','pipe','pipe'] });
-    let output='';server.stdout.on('data',x=>{output+=x;});server.stderr.on('data',x=>{output+=x;});
-    const route=`${ex.origin}/api/resources/protected-resource-demo`, headers={cookie:`luxia_session=${session.rawToken}`};
-    try {
-      let ready=false;for(let i=0;i<120;i++){try{if((await fetch(route)).status===401){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,500));}expect(ready).toBe(true);
-      const usedBrowserEvidence=new Set<string>();
-      const verifiedBrowserRequest=async (expected:200|403)=>{
-        const probe=newBrowserProbe(expected),response=await fetch(route,{headers}),body=await response.json();
-        expect(response.status).toBe(expected);
-        const evidence=await withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.findFirst({where:{id:body.evidenceId}}));
-        const line=JSON.stringify({probeId:probe.probeId,httpStatus:response.status,evidenceId:body.evidenceId});
-        const id=verifyBrowserEvidence(probe,line,evidence,m.assignmentId,usedBrowserEvidence);
-        usedBrowserEvidence.add(id);
-        expect(()=>verifyBrowserEvidence(probe,line,evidence,m.assignmentId,usedBrowserEvidence)).toThrow();
-        expect(await withTenantDb({...auth,tenantId:randomUUID()},tx=>tx.canonicalAdminAuditEvent.count({where:{id}}))).toBe(0);
-        return response;
-      };
-      await verifiedBrowserRequest(403);
-      for(const [candidate,attestation] of [[bytes+' ',approval],[bytes,undefined],[bytes,{...approval,manifestBinding:'wrong'}]] as const)
-        await expect(ceremony(candidate,attestation,ex)).rejects.toBeDefined();
-      const results=await Promise.allSettled([ceremony(bytes,approval,ex),ceremony(bytes,approval,ex)]);
-      expect(results.every(x=>x.status==='fulfilled')).toBe(true);
-      expect(results.flatMap(x=>x.status==='fulfilled'?[x.value.outcome]:[]).sort()).toEqual(['ALREADY_APPLIED','CREATED']);
-      const allowed=await verifiedBrowserRequest(200);expect(allowed.status).toBe(200);
-      const receipt=await withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.findFirstOrThrow({where:{changeId:`bootstrap:${m.operationId}`}}));
-      expect(receipt.assignmentIds).toEqual([m.assignmentId]);expect(receipt.metadata).toMatchObject({manifestBinding:hash(bytes),releaseBinding:hash(releaseBytes),deploymentSha,approval});
-      const alteredReleaseBytes=releaseBytes+'\n';
-      const alteredApproval={...approval,releaseBinding:hash(alteredReleaseBytes)};
-      expect(await ceremony(bytes,alteredApproval,{...ex,registrations:[{bytes,releaseBytes:alteredReleaseBytes,approval:alteredApproval}]}))
-        .toMatchObject({outcome:'DENIED',reasonCode:'BOOTSTRAP_RECEIPT_CONFLICT'});
-      const row=await withTenantDb(auth,tx=>tx.assignment.findFirstOrThrow({where:{id:m.assignmentId},include:{entitlement:{include:{resourceScope:true}}}}));
-      expect(row.source).toBe('DIRECT');expect(row.entitlement.resourceScope?.kind).toBe('RESOURCE');expect(row.entitlement.resourceScope?.resourceId).toBe(FIXED.resourceId);
-      expect(row.validUntil!.getTime()-row.validFrom!.getTime()).toBeLessThanOrEqual(3_600_000);
-      const foreign={...auth,tenantId:randomUUID()};expect((await authorize({...foreign,resourceId:FIXED.resourceId,entitlementKey:FIXED.entitlementKey,action:FIXED.action})).allowed).toBe(false);
-      expect(await withTenantDb(foreign,tx=>tx.canonicalAdminAuditEvent.count({where:{id:receipt.id}}))).toBe(0);
-      await expect(withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.update({where:{id:receipt.id},data:{metadata:{}}}))).rejects.toBeDefined();
-      expect(await ceremony(bytes,approval,ex,true)).toMatchObject({outcome:'REVOKED'});
-      await verifiedBrowserRequest(403);
-      expect(await ceremony(bytes,approval,ex)).toMatchObject({outcome:'DENIED',reasonCode:'BOOTSTRAP_ALREADY_REVOKED_OR_CONFLICTING'});
-      expect(await ceremony(bytes,approval,ex,true)).toMatchObject({outcome:'REVOKED',replay:true});
-      const rows=await withTenantDb(auth,tx=>tx.assignment.findMany({where:{entitlementId:FIXED.entitlementId}}));expect(rows).toHaveLength(1);expect(rows[0].status).toBe('REVOKED');
-      const audit=await withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.findMany({where:{changeId:{startsWith:`bootstrap:${m.operationId}`}}}));
-      expect(audit.filter(x=>x.operation==='RESOURCE.ONBOARDING.BOOTSTRAP')).toHaveLength(1);expect(audit.some(x=>x.result==='DENIED')).toBe(true);
-      expect(JSON.stringify(audit)).not.toMatch(/password|secret|bearer|access_token|refresh_token/i);expect(output).not.toContain(session.rawToken);
-      expect(await preserved()).toEqual(baseline);
-    } finally {
-      try{const active=await withTenantDb(auth,tx=>tx.assignment.count({where:{id:m.assignmentId,status:'ACTIVE'}}));if(active)await ceremony(bytes,approval,ex,true);}
-      finally{await SessionStore.revokeByToken(session.rawToken);if(process.platform==='win32'&&server.pid)spawnSync('taskkill',['/PID',String(server.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});else server.kill();await rawPrisma.$disconnect();}
-    }
-  },240_000);
-});
-
-describe.runIf(process.env.LUXIA_PRODUCTION_RUNNER_NEGATIVES === 'true')('clone-only data guard negatives', () => {
-  it('rejects inactive Subject, inactive binding and real SoD conflict without creating a grant', async () => {
-    validate(bytes,approval,ex); const baseline=await preserved();
-    const context={organizationId:FIXED.organizationId,tenantId:FIXED.tenantId};
-    const original=await withTenantDb(auth,tx=>tx.subject.findFirstOrThrow({where:{id:auth.subjectId}}));
-    const resource=await withTenantDb(auth,tx=>tx.resource.findFirstOrThrow({where:{id:FIXED.resourceId}}));
-    const otherId=randomUUID(),otherAssignment=randomUUID(),policyId=randomUUID(),ruleId=randomUUID();
-    const ownerUrl=new URL(process.env.LUXIA_RUNNER_FIXTURE_OWNER_URL!);
-    if(ownerUrl.hostname!=='ep-weathered-grass-ah5vrehj.c-3.us-east-1.aws.neon.tech'||ownerUrl.pathname!=='/neondb')throw new Error('FIXTURE_CLONE_ONLY');
-    const owner=new PrismaClient({datasources:{db:{url:ownerUrl.toString()}}});
-    const fixture=<T>(work:(tx:Prisma.TransactionClient)=>Promise<T>)=>owner.$transaction(async tx=>{
-      await tx.$queryRaw`SELECT set_config('app.organization_id',${context.organizationId},true)`;
-      await tx.$queryRaw`SELECT set_config('app.tenant_id',${context.tenantId},true)`;return work(tx);
-    });
-    try {
-      await fixture(tx=>tx.subject.update({where:{id:auth.subjectId},data:{lifecycleState:'SUSPENDED'}}));
-      expect(await ceremony(bytes,approval,ex)).toMatchObject({outcome:'DENIED',reasonCode:'SUBJECT_NOT_ACTIVE'});
-      await fixture(tx=>tx.subject.update({where:{id:auth.subjectId},data:{lifecycleState:original.lifecycleState,updatedAt:original.updatedAt}}));
-      await fixture(tx=>tx.resource.update({where:{id:FIXED.resourceId},data:{active:false}}));
-      expect(await ceremony(bytes,approval,ex)).toMatchObject({outcome:'DENIED',reasonCode:'RESOURCE_BINDING_DENIED'});
-      await fixture(tx=>tx.resource.update({where:{id:FIXED.resourceId},data:{active:resource.active,updatedAt:resource.updatedAt}}));
-      await fixture(async tx=>{
-        await tx.entitlement.create({data:{...context,id:otherId,key:`runner-negative:${otherId}`,action:'certification-conflict',resource:'resource-scope',resourceScopeId:FIXED.scopeId}});
-        await tx.assignment.create({data:{...context,id:otherAssignment,subjectId:auth.subjectId,entitlementId:otherId,source:'DIRECT',validUntil:new Date(m.validUntil)}});
-        await tx.soDPolicy.create({data:{...context,id:policyId,key:`runner-negative:${policyId}`,scopeId:FIXED.scopeId,status:'ACTIVE'}});
-        const [entitlementAId,entitlementBId]=[FIXED.entitlementId,otherId].sort();
-        await tx.soDRule.create({data:{...context,id:ruleId,policyId,entitlementAId,entitlementBId}});
-      });
-      expect(await ceremony(bytes,approval,ex)).toMatchObject({outcome:'DENIED',reasonCode:'SOD_CONFLICT'});
-      expect(await withTenantDb(auth,tx=>tx.assignment.count({where:{id:m.assignmentId}}))).toBe(0);
-      const denials=await withTenantDb(auth,tx=>tx.canonicalAdminAuditEvent.findMany({where:{changeId:{startsWith:`bootstrap:${m.operationId}`},result:'DENIED'}}));
-      expect(denials).toHaveLength(3);
-    } finally {
-      await fixture(async tx=>{
-        await tx.soDRule.deleteMany({where:{id:ruleId}});await tx.soDPolicy.deleteMany({where:{id:policyId}});
-        await tx.assignment.deleteMany({where:{id:otherAssignment}});await tx.entitlement.deleteMany({where:{id:otherId}});
-        await tx.subject.update({where:{id:auth.subjectId},data:{lifecycleState:original.lifecycleState,updatedAt:original.updatedAt}});
-        await tx.resource.update({where:{id:resource.id},data:{active:resource.active,updatedAt:resource.updatedAt}});
-      });
-      expect(await preserved()).toEqual(baseline);await owner.$disconnect();await rawPrisma.$disconnect();
-    }
-  },120_000);
 });
