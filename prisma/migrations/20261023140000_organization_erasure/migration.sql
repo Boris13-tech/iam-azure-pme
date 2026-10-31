@@ -12,7 +12,8 @@
 
 -- Locks: the two constraints below take SHARE ROW EXCLUSIVE on their table and on "Organization", which blocks writes on
 -- them for the instant they hold it. A write in flight would make them wait with new writes queued behind, so they give
--- up after 5 seconds. Prisma applies this file as one transaction: nothing stays, and the gate can run it again.
+-- up after 5 seconds. Prisma applies this file as one transaction: nothing stays. Its record then blocks `migrate deploy`
+-- until the operator has read the catalog and run `migrate resolve --rolled-back`; see the rollback script.
 SET lock_timeout = '5s';
 
 -- Every table that carries an organization must make a writer wait for the erasure, and fail once it is done. These
