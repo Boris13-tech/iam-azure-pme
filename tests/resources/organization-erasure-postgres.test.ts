@@ -57,7 +57,7 @@ async function organization(): Promise<Org> {
     resourceIds: [randomUUID()], assignmentVersion: new Date(), entitlementVersion: new Date(), reviewerSubjectId: reviewer.id } });
   const org = { slug, organizationId, tenantId, local: local.id, subjectId: subject.id, accountId: account.id };
   // Product rows: two sessions with their sign-in evidence, a challenge, a Microsoft transaction, the signup code.
-  for (let i = 0; i < 2; i++) await SessionStore.createSession({ ...scope, subjectId: subject.id, identityAccountId: account.id }, undefined, undefined,
+  for (let i = 0; i < 2; i++) await SessionStore.createSession({ ...scope, subjectId: subject.id, identityAccountId: account.id },
     { evidence: entraSignInEvidence({ ...scope, subjectId: subject.id, identityAccountId: account.id, providerConnectionId: local.id }, "VERIFIED", "R7_TEST") });
   await owner.localAuthChallenge.create({ data: { ...scope, identityAccountId: account.id, purpose: "AUTHENTICATION", challengeHash: sha(randomUUID()), expiresAt: new Date(Date.now() + 60_000) } });
   await owner.authTransaction.create({ data: { id: randomUUID(), stateHash: sha(randomUUID()), nonce: "n", codeVerifier: "v", expectedOrganizationId: organizationId,
