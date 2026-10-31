@@ -39,6 +39,7 @@ describe.runIf(enabled)("R2: one-way redaction of session network hashes (Postgr
       for (const dir of prior) psqlOk(url, ["-1", "-f", `prisma/migrations/${dir}/migration.sql`]);
       const before = catalog();
       psqlOk(url, ["-1", "-f", `prisma/migrations/${NEW}/migration.sql`]);
+      const applied = catalog();
 
       db = new PrismaClient({ datasources: { db: { url } } });
       const org = randomUUID(), tenant = randomUUID(), subjectId = randomUUID(), accountId = randomUUID(), provider = randomUUID();
@@ -98,6 +99,7 @@ describe.runIf(enabled)("R2: one-way redaction of session network hashes (Postgr
       const redact = (batch: number) => db!.$queryRawUnsafe<Array<{ n: number }>>(`SELECT luxia_session_redact_network_hashes(${batch}) AS n`).then((rows) => rows[0].n);
       expect(await settle(redact(0))).toMatch(/REDACTION_BATCH_OUT_OF_RANGE/);
       expect(await settle(redact(10001))).toMatch(/REDACTION_BATCH_OUT_OF_RANGE/);
+      expect(await settle(db.$queryRawUnsafe("SELECT luxia_session_redact_network_hashes(NULL)"))).toMatch(/REDACTION_BATCH_OUT_OF_RANGE/);
       expect(await redact(1)).toBe(1);
       expect(await redact(10000)).toBe(2);
       expect(await redact(10000)).toBe(0);
@@ -111,8 +113,12 @@ describe.runIf(enabled)("R2: one-way redaction of session network hashes (Postgr
       // Rollback restores the previous guard exactly; the migration applies again.
       psqlOk(url, ["-1", "-f", ROLLBACK]);
       expect(catalog()).toBe(before);
+      // Lossless: every row stays, cleared hashes stay cleared, and the restored guard still lets an active session live.
+      const list = ids.map((id) => `'${id}'`).join(",");
+      expect(psqlOk(url, ["-c", `SELECT count(*) FROM "Session" WHERE "id" IN (${list}) AND "ipHash" IS NULL AND "userAgentHash" IS NULL`]).trim()).toBe("3");
+      psqlOk(url, ["-c", `UPDATE "Session" SET "lastSeenAt" = now() WHERE "id" = '${other}'`]);
       psqlOk(url, ["-1", "-f", `prisma/migrations/${NEW}/migration.sql`]);
-      expect(catalog()).not.toBe(before);
+      expect(catalog()).toBe(applied);
     } finally {
       await db?.$disconnect();
       psql(admin, ["-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`]);
