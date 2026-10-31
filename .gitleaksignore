@@ -1,0 +1,7 @@
+# Reviewed false positives only (fingerprint = commit:file:rule:line). Never add a real secret here: rotate it instead.
+# Prose in an ADR ("signature/encryption" next to "key purposes"), entropy 3.68; reviewed 2026-10-18.
+5f831354288d10d65a8735c87d41e9fd8b23e171:docs/architecture/ADR-POST-6C-IDENTITY-REALIGNMENT.md:generic-api-key:203
+# A public Azure identifier, not a secret: the built-in role "Key Vault Secrets User" (documented by Microsoft, same in every tenant); branch of #132; reviewed 2026-10-30
+a7f5b284485a85fef4094ef06cfd82429672ecac:infra/backup/backup-job.bicep:generic-api-key:26
+# Same public identifier, in the test that checks the file above; branch of #132; reviewed 2026-10-30.
+a7f5b284485a85fef4094ef06cfd82429672ecac:tests/security/backup-on-azure.test.ts:generic-api-key:91
