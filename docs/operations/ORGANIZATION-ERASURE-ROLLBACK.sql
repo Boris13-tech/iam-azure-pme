@@ -4,6 +4,8 @@
 -- organization has been erased: the OrganizationErasure records are then the only trace of it (forward fix only).
 -- The table lock waits for an erasure in flight, so its record is seen. row_security = off makes the check fail with an
 -- error, rather than see nothing, for a role that row-level security would filter.
+-- If the job died while the migration ran, Prisma's record can say "not finished" with the objects present or absent.
+-- Read the catalog first: `migrate resolve --rolled-back` is right only when they are absent.
 SET lock_timeout = '5s';
 SET LOCAL row_security = off;
 LOCK TABLE "OrganizationErasure" IN ACCESS EXCLUSIVE MODE;
