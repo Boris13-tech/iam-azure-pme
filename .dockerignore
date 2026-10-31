@@ -1,0 +1,3 @@
+# Only the backup job image is built from this repository (infra/backup/Dockerfile): send nothing else.
+*
+!scripts/backup/
