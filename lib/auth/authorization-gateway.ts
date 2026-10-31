@@ -16,18 +16,34 @@ type ShadowComparisonStatus =
   | "NATIVE_ERROR"
   | "LEGACY_ERROR";
 
+const VALID_MODES: readonly AuthorizationMode[] = ["legacy", "shadow", "native-shadow-legacy", "native"];
+
+/**
+ * The authorization mode from the environment. In Production (Vercel or LUXIA marks it, or a production process
+ * that no platform marks as something else), a missing or unknown AUTHZ_MODE resolves to null: every authorization
+ * is refused (fail closed, I3), never a silent fallback to legacy. Elsewhere (development, CI, previews) the legacy
+ * fallback is kept.
+ */
+export function resolveAuthorizationMode(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): AuthorizationMode | null {
+  const rawMode = env.AUTHZ_MODE;
+  if (VALID_MODES.includes(rawMode as AuthorizationMode)) return rawMode as AuthorizationMode;
+  if (env.VERCEL_ENV === "production" || env.APP_ENV === "production") return null;
+  if (env.NODE_ENV === "production" && !env.VERCEL_ENV && !env.APP_ENV) return null;
+  if (rawMode) console.warn(`[AUTHZ] Unknown AUTHZ_MODE '${rawMode}', falling back to 'legacy' fail-safe`);
+  return "legacy";
+}
+
 export async function checkPermission(
   auth: AuthContext,
   request: AuthorizationRequest
 ): Promise<boolean> {
-  const rawMode = process.env.AUTHZ_MODE || "legacy";
-  const validModes: AuthorizationMode[] = ["legacy", "shadow", "native-shadow-legacy", "native"];
-  const mode: AuthorizationMode = validModes.includes(rawMode as AuthorizationMode) 
-    ? (rawMode as AuthorizationMode) 
-    : "legacy";
-
-  if (rawMode !== mode) {
-    console.warn(`[AUTHZ] Unknown AUTHZ_MODE '${rawMode}', falling back to 'legacy' fail-safe`);
+  const mode = resolveAuthorizationMode();
+  if (mode === null) {
+    // Safe error code only: the configured value is not logged.
+    console.error("[AUTHZ] AUTHZ_MODE_INVALID: missing or unknown in Production, authorization refused");
+    return false;
   }
 
   // 1. Evaluate Legacy and Native in parallel (if not strictly legacy)
