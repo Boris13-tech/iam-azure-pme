@@ -154,3 +154,7 @@ docs/certification/operator-*-results.json
 # Independent backup: age private keys and local backup files (never committed)
 *.agekey
 luxia-backup-*/
+
+# Playwright output (local)
+test-results/
+playwright-report/
