@@ -34,6 +34,25 @@ describe("CI secret scan (gitleaks)", () => {
     expect(job).toMatch(/if \[ "\$count" != "0" \]; then[\s\S]*exit 1/);
   });
 
+  it("a pull request cannot silence the scan from inside, and every run proves it on a canary", () => {
+    expect(job).toContain(`--config "$RUNNER_TEMP/gitleaks.toml"`);
+    expect(job).toContain("--ignore-gitleaks-allow");
+    expect(job).toContain("# gitleaks:allow");
+    expect(job).toContain(`"$canary/.gitleaks.toml"`);
+    const canary = job.indexOf(`scan "$canary"`);
+    expect(canary).toBeGreaterThan(0);
+    expect(canary).toBeLessThan(job.indexOf(`scan . "$RUNNER_TEMP/gitleaks.json"`));
+    expect(job).toMatch(/\[ "\$\(jq 'length' "\$RUNNER_TEMP\/canary\.json"\)" = "0" \]; then[\s\S]*?exit 1/);
+  });
+
+  it("a failed check stops the job, and a report only ever reaches jq", () => {
+    expect(job).toContain("set -euo pipefail");
+    expect(job).toMatch(/\| sha256sum -c -\n/);
+    expect(job).not.toContain("|| true");
+    for (const line of job.split("\n").filter((l) => /\.json/.test(l) && !l.includes("uses:")))
+      expect(line, line).toMatch(/\bjq\b|scan (\.|"\$canary") "\$RUNNER_TEMP/);
+  });
+
   it("the ignore file holds reviewed fingerprints only, each with its reason", () => {
     const lines = readFileSync(".gitleaksignore", "utf8").replace(/\r\n/g, "\n").split("\n").filter(Boolean);
     const entries = lines.filter((l) => !l.startsWith("#"));

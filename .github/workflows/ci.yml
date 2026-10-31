@@ -39,7 +39,22 @@ jobs:
         curl -fsSL --proto '=https' -o "$RUNNER_TEMP/$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
         echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
         tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
-        "$RUNNER_TEMP/gitleaks" git --redact --no-banner --exit-code 0 --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" .
+        # The configuration stays outside the checkout and inline allow comments count for nothing: a pull request
+        # cannot silence the scan from inside. A throwaway repository tries both ways, with a random token, on every run.
+        printf '[extend]\nuseDefault = true\n' > "$RUNNER_TEMP/gitleaks.toml"
+        scan() { "$RUNNER_TEMP/gitleaks" git --config "$RUNNER_TEMP/gitleaks.toml" --ignore-gitleaks-allow --redact --no-banner --exit-code 0 --report-format json --report-path "$2" "$1"; }
+        canary="$RUNNER_TEMP/canary"
+        git init -q "$canary"
+        printf 'token=ghp_%s # gitleaks:allow\n' "$(openssl rand -hex 18)" > "$canary/a.txt"
+        printf '[allowlist]\npaths = ["a"]\n' > "$canary/.gitleaks.toml"
+        git -C "$canary" add -A
+        git -C "$canary" -c user.name=canary -c user.email=canary@example.test commit -q -m canary
+        scan "$canary" "$RUNNER_TEMP/canary.json"
+        if [ "$(jq 'length' "$RUNNER_TEMP/canary.json")" = "0" ]; then
+          echo "The scan missed its canary"
+          exit 1
+        fi
+        scan . "$RUNNER_TEMP/gitleaks.json"
         count=$(jq 'length' "$RUNNER_TEMP/gitleaks.json")
         echo "Findings: $count"
         if [ "$count" != "0" ]; then
