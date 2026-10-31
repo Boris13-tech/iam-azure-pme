@@ -83,7 +83,8 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Onboarding checklist:
 
   it("the administrators' recovery state needs the rights to appoint them and to read accounts", async () => {
     expect(await read(["subjects.read", "identity_accounts.read"])).toMatchObject({ recoveryCodes: null });
-    expect(await read(["subjects.read", "assignments.manage", "identity_accounts.read"])).toMatchObject({ recoveryCodes: false });
+    expect(await read(["subjects.read", "assignments.manage"])).toMatchObject({ recoveryCodes: null });
+    expect(await read(["subjects.read", "assignments.manage", "identity_accounts.read"])).toEqual({ ...ALL_NULL, teamInvited: true, recoveryCodes: false });
   });
 
   it("access_reviews.read gets null even when a campaign exists, never a false 'not done'; a global view gets the fact", async () => {

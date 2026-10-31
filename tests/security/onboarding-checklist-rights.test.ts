@@ -46,6 +46,14 @@ describe("Onboarding checklist: per-item read rights", () => {
     expect(Object.values(items).every((value) => value === null)).toBe(true);
   });
 
+  it.each([
+    [["assignments.read", "identity_accounts.read"], "secondAdministrator"],
+    [["assignments.manage", "identity_accounts.read"], "recoveryCodes"],
+  ])("%j answers only %s", async (held, item) => {
+    const { items } = await run(held);
+    expect(Object.entries(items).filter(([, value]) => value !== null).map(([key]) => key)).toEqual([item]);
+  });
+
   it("recovery codes are read only with both of their rights", async () => {
     expect((await run(["assignments.read", "identity_accounts.read"])).touched).not.toContain("localRecoveryCode");
     expect((await run(["assignments.manage", "identity_accounts.read"])).touched).toContain("localRecoveryCode");
