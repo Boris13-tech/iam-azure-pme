@@ -18,7 +18,7 @@ const A = { organizationId: org, tenantId: tenantA }, B = { organizationId: org,
 const entra = randomUUID(), local = randomUUID();
 const S = randomUUID(), X = randomUUID(), O = randomUUID(), SB = randomUUID();
 const accS = randomUUID(), accSLocal = randomUUID(), accX = randomUUID(), accO = randomUUID(), accSB = randomUUID();
-const MARK = { ip: `IP-${randomUUID()}`, ua: `UA-${randomUUID()}`, cred: `CRED-${randomUUID()}`, pub: `PUB-${randomUUID()}` };
+const MARK = { cred: `CRED-${randomUUID()}`, pub: `PUB-${randomUUID()}` };
 let owner: PrismaClient;
 const ident = (subjectId: string, identityAccountId: string, scope = A) => ({ ...scope, subjectId, identityAccountId, providerConnectionId: entra });
 const sessionCtx = (subjectId: string, identityAccountId: string, scope = A) => ({ ...scope, subjectId, identityAccountId });
@@ -64,7 +64,6 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Security Journal v1 â
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ outcome: "VERIFIED", source: "EXTERNAL_PROVIDER", assuranceLevel: "LOW", userVerification: "PROVIDER_ASSERTED",
       phishingResistant: false, hardwareBound: false, identityAccountId: accS, reasonCode: "ENTRA_OIDC_VERIFIED" });
-    expect(JSON.stringify(rows[0])).not.toContain(MARK.ip);
     expect(await withTenantDb(A, tx => tx.session.count({ where: { id: session.id } }))).toBe(1);
     // E15 / R1: the stored session carries no network identifier.
     expect(await owner.session.findUniqueOrThrow({ where: { id: session.id }, select: { ipHash: true, userAgentHash: true } }))
@@ -158,7 +157,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Security Journal v1 â
     expect(sessions.length).toBeGreaterThan(0);
     expect(sessions.filter(s => s.current)).toHaveLength(1);
     expect(JSON.stringify(sessions)).not.toMatch(/[0-9a-f]{64}/); // no stored session id/hash
-    expect(JSON.stringify(sessions)).not.toContain(MARK.ip);
+    expect(JSON.stringify(sessions)).not.toMatch(/ipHash|userAgentHash/);
     const { sessionRef } = await import("../../lib/auth/self-service");
     await expect(revokeMySession(auth, sessionRef(others.session.id), `self:${randomUUID()}`)).rejects.toMatchObject({ code: "NOT_FOUND" });
     const target = sessions.find(s => !s.current)!;

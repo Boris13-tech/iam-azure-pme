@@ -19,8 +19,21 @@ describe("R1: no network identifier is stored with a session", () => {
     for (const path of ["app/api/auth/local/complete/route.ts", "app/auth/callback/route.ts"]) {
       const route = read(path);
       expect(route, path).not.toMatch(/user-agent/i);
-      expect(route, path).not.toMatch(/headers\.get\("x-forwarded-for"\)/);
+      expect(route, path).not.toMatch(/x-forwarded-for|x-real-ip/i);
+      // The only arguments are the context and the evidence: no address can reach the session.
       expect(route, path).toMatch(/SessionStore\.createSession\(\{[\s\S]*?\},\s*\{ evidence:/);
     }
+  });
+
+  it("recovery sessions are written without network identifiers, and no administrator response returns them", () => {
+    const recovery = read("lib/auth/recovery.ts");
+    expect(recovery).toMatch(/tx\.session\.create\(/);
+    expect(recovery).not.toMatch(/ipHash|userAgentHash/);
+    const admin = read("lib/admin/canonical-administration.ts");
+    expect(admin).not.toMatch(/ipHash: true|userAgentHash: true/);
+    // Every session read in the administration library uses the explicit projection.
+    const reads = admin.match(/tx\.session\.find\w*\([^;]*/g) ?? [];
+    expect(reads.length).toBeGreaterThanOrEqual(3);
+    for (const call of reads) if (!/findFirst\(\{ where: \{ id: sessionId, revokedAt: null \} \}\)/.test(call)) expect(call).toContain("SESSION_ADMIN_FIELDS");
   });
 });
