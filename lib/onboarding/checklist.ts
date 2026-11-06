@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { operation } from "../resources/service";
 import type { AuthContext } from "../auth/authorization-engine";
-import { countDurableAdministrators, durableAdministratorWhere } from "../admin/last-administrator";
+import { countDurableAdministrators } from "../admin/last-administrator";
 
 // Customer Self-Onboarding v1, step 7. Each item is a fact read from canonical data (true or false),
 // never a score or an estimate. null means the item is not shown: it does not apply to this organization, or the
@@ -16,12 +16,13 @@ export const ONBOARDING_CHECKLIST_PERMISSION = "subjects.read";
  * could already establish that fact from what they may read, not to whoever holds a right named after its table.
  * - firstAccessReview is about the organization: it needs a view of every campaign, so read alone (a partial view,
  *   which would show a false "not done") gets nothing, and manage alone cannot read campaigns.
- * - recoveryCodes has no reader elsewhere (a person reads only their own): it goes to who appoints administrators.
+ * - recoveryCodes is about the viewer's own account only (a person reads only their own recovery state), so it needs
+ *   no right beyond the checklist's own; no right shows another person's recovery state.
  */
 export const CHECKLIST_ITEM_RIGHTS: Readonly<Record<ChecklistItem, ReadonlyArray<readonly string[]>>> = {
   domainVerified: [["providers.read"]],
   secondAdministrator: [["assignments.read", "identity_accounts.read"]],
-  recoveryCodes: [["assignments.manage", "identity_accounts.read"]],
+  recoveryCodes: [["subjects.read"]],
   teamInvited: [["subjects.read"]],
   firstResource: [["resources.read"]],
   firstAccessReview: [["access_reviews.read_all"], ["access_reviews.read", "access_reviews.manage"]],
@@ -39,28 +40,26 @@ async function heldRights(tx: Prisma.TransactionClient, auth: AuthContext, now: 
 }
 
 /** Runs only the queries of the items the viewer may read. Sequential: one transaction connection. */
-export async function readChecklist(tx: Prisma.TransactionClient, scope: { organizationId: string; tenantId: string }, held: ReadonlySet<string>, now: Date) {
+export async function readChecklist(tx: Prisma.TransactionClient, scope: { organizationId: string; tenantId: string }, held: ReadonlySet<string>, now: Date,
+  viewer: { identityAccountId?: string } = {}) {
   const domainVerified = async () => await tx.organizationDomain.count({ where: { ...scope, status: "VERIFIED" } }) > 0;
   // Durable administrators, same definition as the last-administrator guard (B1): a permanent grant
   // and an active identity account, so the second one can sign in and cannot expire on its own.
   const secondAdministrator = async () => await countDurableAdministrators(tx, scope, now) >= 2;
-  // B5: the LUXIA local accounts of the durable administrators that sign in with a passkey or a
-  // security key. Each one should hold at least one usable recovery code (B2), the only way back in
-  // for a passkey-only administrator who loses the key. Counts only: no code or hash is read.
+  // B5: the viewer's own LUXIA local account, when it signs in with a passkey or a security key, should hold at least
+  // one usable recovery code (B2), the only way back in if the key is lost. Only the viewer's own account is read:
+  // another person's recovery state is never shown. Counts only: no code or hash is read.
   const recoveryCodes = async () => {
-    const localAdministratorAccounts = await tx.identityAccount.findMany({
+    if (!viewer.identityAccountId) return null;
+    const own = await tx.identityAccount.findFirst({
       where: {
-        ...scope, status: "ACTIVE", subject: durableAdministratorWhere(scope, now), providerConnection: { providerType: "LUXIA_LOCAL" },
+        ...scope, id: viewer.identityAccountId, status: "ACTIVE", providerConnection: { providerType: "LUXIA_LOCAL" },
         localIdentity: { status: "ACTIVE", authenticators: { some: { status: "ACTIVE", type: { in: ["PASSKEY", "SECURITY_KEY"] } } } },
       },
       select: { id: true },
     });
-    if (localAdministratorAccounts.length === 0) return null;
-    const accountsWithCodes = (await tx.localRecoveryCode.groupBy({
-      by: ["identityAccountId"],
-      where: { ...scope, identityAccountId: { in: localAdministratorAccounts.map((account) => account.id) }, usedAt: null, revokedAt: null },
-    })).length;
-    return accountsWithCodes === localAdministratorAccounts.length;
+    if (!own) return null;
+    return await tx.localRecoveryCode.count({ where: { ...scope, identityAccountId: own.id, usedAt: null, revokedAt: null } }) > 0;
   };
   const teamInvited = async () => await tx.invitation.count({ where: scope }) > 0 || await tx.subject.count({ where: { ...scope, type: "HUMAN" } }) > 1;
   const firstResource = async () => await tx.resource.count({ where: scope }) > 0;
@@ -76,10 +75,10 @@ export async function readChecklist(tx: Prisma.TransactionClient, scope: { organ
   return items;
 }
 
-export function getOnboardingChecklist(auth: AuthContext, changeId: string) {
+export function getOnboardingChecklist(auth: AuthContext & { identityAccountId?: string }, changeId: string) {
   return operation(auth, changeId, "ONBOARDING.CHECKLIST.READ", ONBOARDING_CHECKLIST_PERMISSION, async (tx) => {
     const now = new Date();
     const held = await heldRights(tx, auth, now);
-    return { value: await readChecklist(tx, { organizationId: auth.organizationId, tenantId: auth.tenantId }, held, now) };
+    return { value: await readChecklist(tx, { organizationId: auth.organizationId, tenantId: auth.tenantId }, held, now, { identityAccountId: auth.identityAccountId }) };
   });
 }

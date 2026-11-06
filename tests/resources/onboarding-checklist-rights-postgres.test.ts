@@ -81,10 +81,12 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Onboarding checklist:
     expect(await read(["subjects.read", "assignments.read", "identity_accounts.read"])).toEqual({ ...ALL_NULL, teamInvited: true, secondAdministrator: true });
   });
 
-  it("the administrators' recovery state needs the rights to appoint them and to read accounts", async () => {
+  it("no right shows another person's recovery state: the item is only ever about the viewer's own account", async () => {
+    // These viewers have no LUXIA local account of their own, so the item is not shown, whatever rights they hold,
+    // although the organization has administrators.
     expect(await read(["subjects.read", "identity_accounts.read"])).toEqual({ ...ALL_NULL, teamInvited: true });
     expect(await read(["subjects.read", "assignments.manage"])).toEqual({ ...ALL_NULL, teamInvited: true });
-    expect(await read(["subjects.read", "assignments.manage", "identity_accounts.read"])).toEqual({ ...ALL_NULL, teamInvited: true, recoveryCodes: false });
+    expect(await read(["subjects.read", "assignments.manage", "identity_accounts.read"])).toEqual({ ...ALL_NULL, teamInvited: true });
   });
 
   it("access_reviews.read gets null even when a campaign exists, never a false 'not done'; a global view gets the fact", async () => {
