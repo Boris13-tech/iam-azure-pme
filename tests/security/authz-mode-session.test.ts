@@ -2,9 +2,12 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAuthContext } from "../../lib/auth/auth-context";
 import { SessionStore } from "../../lib/auth/session-store";
+import { getRecoveryContext } from "../../lib/auth/recovery-session";
+import { requireNative } from "../../lib/resources/service";
+import { grantAdministrator } from "../../lib/onboarding/provisioning";
 
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => ({ value: "token" }) }) }));
-vi.mock("../../lib/auth/session-store", () => ({ SessionStore: { getSession: vi.fn() } }));
+vi.mock("../../lib/auth/session-store", () => ({ SessionStore: { getSession: vi.fn(), getRecoverySession: vi.fn() } }));
 
 // P5, every path: resources, SoD, access reviews, onboarding and the dashboard authorize from the session without
 // going through the gateway. So with no valid mode in Production, no session is honoured at all.
@@ -15,7 +18,11 @@ function setEnv(values: Record<string, string | undefined>) {
 }
 const session = { id: "s", organizationId: "o", tenantId: "t", subjectId: "u", identityAccountId: "a" };
 
-beforeEach(() => { vi.clearAllMocks(); vi.mocked(SessionStore.getSession).mockResolvedValue(session as never); });
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(SessionStore.getSession).mockResolvedValue(session as never);
+  vi.mocked(SessionStore.getRecoverySession).mockResolvedValue({ ...session, expiresAt: new Date(Date.now() + 60_000) } as never); });
+// A database client that records any use: a refusal must come before the first query.
+const untouched = () => { const used: string[] = []; return { used, tx: new Proxy({}, { get: (_t, model) => { used.push(String(model)); return new Proxy({}, { get: () => async () => null }); } }) as never }; };
+const PRODUCTION_WITHOUT_MODE = [{ VERCEL_ENV: "production" }, { APP_ENV: "production", AUTHZ_MODE: "off" }, { NODE_ENV: "production", APP_ENV: "prod" }];
 afterEach(() => { setEnv(saved); vi.restoreAllMocks(); });
 
 describe("P5: no session is honoured in Production without a valid authorization mode", () => {
@@ -36,7 +43,49 @@ describe("P5: no session is honoured in Production without a valid authorization
     }
   });
 
-  it("the paths that skip the gateway all start from this session", () => {
+  it("paths without a full session refuse too: requireNative decides nothing, before any query", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const env of PRODUCTION_WITHOUT_MODE) {
+      setEnv(env);
+      const { used, tx } = untouched();
+      await expect(requireNative(tx, { organizationId: "o", tenantId: "t", subjectId: "u" }, "assignments.manage"), JSON.stringify(env))
+        .rejects.toMatchObject({ code: "FORBIDDEN", httpStatus: 403 });
+      expect(used, JSON.stringify(env)).toEqual([]);
+    }
+    setEnv({ VERCEL_ENV: "production", AUTHZ_MODE: "native" });
+    const { used, tx } = untouched();
+    await expect(requireNative(tx, { organizationId: "o", tenantId: "t", subjectId: "u" }, "assignments.manage")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(used).toContain("subject"); // with a valid mode it does look the subject up
+  });
+
+  it("no administrator is granted (signup, invitation acceptance, break-glass invitation), before any query", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const env of PRODUCTION_WITHOUT_MODE) {
+      setEnv(env);
+      const { used, tx } = untouched();
+      await expect(grantAdministrator(tx, { organizationId: "o", tenantId: "t" }, { subjectId: "u", actorSubjectId: "u", changePrefix: "x", metadata: {} }), JSON.stringify(env))
+        .rejects.toMatchObject({ code: "AUTHZ_MODE_INVALID" });
+      expect(used, JSON.stringify(env)).toEqual([]);
+    }
+    // Both grant paths go through it, and invitation acceptance checks the inviter through requireNative.
+    expect(readFileSync("lib/onboarding/signup.ts", "utf8")).toContain("await grantAdministrator(tx, context,");
+    const invitations = readFileSync("lib/onboarding/invitations.ts", "utf8");
+    expect(invitations).toContain("await grantAdministrator(tx, scope,");
+    expect(invitations).toContain('await requireNative(tx, { ...scope, subjectId: row.invitedBySubjectId }, "assignments.manage")');
+  });
+
+  it("a recovery session is not honoured either, and never looked up; with a valid mode it is", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const env of PRODUCTION_WITHOUT_MODE) {
+      setEnv(env);
+      expect(await getRecoveryContext(), JSON.stringify(env)).toBeNull();
+    }
+    expect(SessionStore.getRecoverySession).not.toHaveBeenCalled();
+    setEnv({ VERCEL_ENV: "production", AUTHZ_MODE: "native" });
+    expect(await getRecoveryContext()).toMatchObject({ recovery: { sessionId: "s", subjectId: "u" } });
+  });
+
+  it("the session paths that skip the gateway start from getAuthContext", () => {
     expect(readFileSync("lib/admin/http.ts", "utf8")).toMatch(/requireAuth|getAuthContext/);
     expect(readFileSync("lib/auth/require-auth.ts", "utf8")).toContain("getAuthContext");
     expect(readFileSync("app/api/platform/context/route.ts", "utf8")).toContain("getAuthContext");

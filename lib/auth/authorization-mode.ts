@@ -21,3 +21,20 @@ export function resolveAuthorizationMode(
   if (rawMode) console.warn("[AUTHZ] Unknown AUTHZ_MODE outside Production, falling back to 'legacy'");
   return "legacy";
 }
+
+/** The error of a path refused because the mode is missing or unknown in Production. */
+export class AuthorizationModeInvalidError extends Error {
+  readonly code = "AUTHZ_MODE_INVALID";
+  constructor() { super("AUTHZ_MODE_INVALID"); }
+}
+
+/**
+ * Fail closed outside the session too. Every path that decides or grants authority without a full session
+ * (requireNative, the administrator grant behind signup and invitation acceptance, the recovery session) calls this
+ * first: with no valid mode in Production nothing is decided, granted or honoured. Sign-out stays possible.
+ */
+export function authorizationModeValid(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  if (resolveAuthorizationMode(env) !== null) return true;
+  console.error("[AUTHZ] AUTHZ_MODE_INVALID: missing or unknown in Production, refused");
+  return false;
+}
