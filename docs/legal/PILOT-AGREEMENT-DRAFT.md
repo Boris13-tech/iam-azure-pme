@@ -45,6 +45,7 @@ The Pilot is **free of charge**. No fee is due, and none becomes due without a n
 1. LUXIA operates the Pilot with reasonable care and skill. It applies the technical and organisational measures described in [the DPA annexes](DPA-ANNEXES-DRAFT.md), annex B.
 2. LUXIA processes the Customer's personal data only as a **processor**, on the Customer's documented instructions, under the data processing agreement in section 8.
 3. LUXIA journals its own operator interventions on the Customer's organization, and the Customer can see them.
+4. **How the software was reviewed.** Most of LUXIA Identity's code is written with AI agents. For the Pilot, its security-critical changes were reviewed by **two independent AI reviewers**, with automated tests and recorded evidence, and **not by an independent human security expert**. LUXIA will have them reviewed by a competent human before general availability. On request, LUXIA tells the Customer which changes this covers.
 
 ## 7. No service levels during the Pilot
 
@@ -61,7 +62,7 @@ The Pilot is provided **without any availability, performance or support-time co
 
 ## 9. Retention, return and deletion
 
-1. **During the Pilot:** the periods of [DATA-RETENTION-AND-DELETION.md](DATA-RETENTION-AND-DELETION.md) apply. Default proposal: the journal and sign-in records are kept 1 year.
+1. **During the Pilot:** the periods of [DATA-RETENTION-AND-DELETION.md](DATA-RETENTION-AND-DELETION.md) apply. Default proposal: the journal and sign-in records are kept 1 year. **Some automatic deletions start only from day [30] of the Pilot**, namely the purge of finished invitations and the deletion of a closed organization. Until then the data concerned is kept, protected like the rest.
 2. **At the end of the Pilot:**
    - on request made within **[15] days**, LUXIA provides an export of the Customer's data in a machine-readable format within **[15] days**;
    - LUXIA then deletes the Customer's organization and its data within **[90] days**, and confirms it in writing;
