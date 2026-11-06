@@ -39,23 +39,44 @@ jobs:
         curl -fsSL --proto '=https' -o "$RUNNER_TEMP/$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
         echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
         tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
-        # The configuration stays outside the checkout and inline allow comments count for nothing. A throwaway repository
-        # tries both ways, with a random token, on every run. A change to .gitleaksignore or to this job is not stopped
-        # here: it shows in the diff, and the reviewer must catch it.
+        # The configuration stays outside the checkout and inline allow comments count for nothing. The ignore file
+        # that counts is a trusted one: on a pull request, the base branch's (already reviewed and merged), so an entry a
+        # pull request adds never applies to its own scan; on main, the repository's own. A throwaway repository tries all
+        # three ways (inline comment, config, ignore file), with a random token, on every run. A change to this job itself
+        # is not stopped here: it shows in the diff, and the reviewer must catch it.
         printf '[extend]\nuseDefault = true\n' > "$RUNNER_TEMP/gitleaks.toml"
-        scan() { "$RUNNER_TEMP/gitleaks" git --config "$RUNNER_TEMP/gitleaks.toml" --ignore-gitleaks-allow --redact --no-banner --exit-code 0 --report-format json --report-path "$2" "$1"; }
+        trusted="$RUNNER_TEMP/trusted.gitleaksignore"
+        if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          if git cat-file -e "origin/$GITHUB_BASE_REF:.gitleaksignore" 2>/dev/null; then
+            git show "origin/$GITHUB_BASE_REF:.gitleaksignore" > "$trusted"
+          else
+            : > "$trusted"
+          fi
+          if [ -f .gitleaksignore ] && ! cmp -s .gitleaksignore "$trusted"; then
+            echo "This pull request changes .gitleaksignore: its entries apply only after merge, once reviewed."
+          fi
+        elif [ -f .gitleaksignore ]; then
+          cp .gitleaksignore "$trusted"
+        else
+          : > "$trusted"
+        fi
+        # The scanned directory's own ignore file is replaced by the trusted one before every scan.
+        scan() { cp "$3" "$1/.gitleaksignore"; "$RUNNER_TEMP/gitleaks" git --config "$RUNNER_TEMP/gitleaks.toml" --gitleaks-ignore-path "$3" --ignore-gitleaks-allow --redact --no-banner --exit-code 0 --report-format json --report-path "$2" "$1"; }
         canary="$RUNNER_TEMP/canary"
         git init -q "$canary"
         printf 'token=ghp_%s # gitleaks:allow\n' "$(openssl rand -hex 18)" > "$canary/a.txt"
         printf '[allowlist]\npaths = ["a"]\n' > "$canary/.gitleaks.toml"
         git -C "$canary" add -A
         git -C "$canary" -c user.name=canary -c user.email=canary@example.test commit -q -m canary
-        scan "$canary" "$RUNNER_TEMP/canary.json"
+        # The canary also plants an ignore entry for its own token, as a pull request could.
+        printf '%s:a.txt:github-pat:1\n' "$(git -C "$canary" rev-parse HEAD)" > "$canary/.gitleaksignore"
+        : > "$RUNNER_TEMP/empty.gitleaksignore"
+        scan "$canary" "$RUNNER_TEMP/canary.json" "$RUNNER_TEMP/empty.gitleaksignore"
         if [ "$(jq 'length' "$RUNNER_TEMP/canary.json")" = "0" ]; then
           echo "The scan missed its canary"
           exit 1
         fi
-        scan . "$RUNNER_TEMP/gitleaks.json"
+        scan . "$RUNNER_TEMP/gitleaks.json" "$trusted"
         count=$(jq 'length' "$RUNNER_TEMP/gitleaks.json")
         echo "Findings: $count"
         if [ "$count" != "0" ]; then

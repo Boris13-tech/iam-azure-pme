@@ -45,6 +45,20 @@ describe("CI secret scan (gitleaks)", () => {
     expect(job).toMatch(/\[ "\$\(jq 'length' "\$RUNNER_TEMP\/canary\.json"\)" = "0" \]; then[\s\S]*?exit 1/);
   });
 
+  it("a pull request's own ignore entries never apply to its own scan: the trusted file is the base branch's", () => {
+    // Every scan replaces the scanned directory's ignore file with the trusted one, and passes it explicitly.
+    expect(job).toContain(`scan() { cp "$3" "$1/.gitleaksignore"; "$RUNNER_TEMP/gitleaks" git --config "$RUNNER_TEMP/gitleaks.toml" --gitleaks-ignore-path "$3" `);
+    const pr = job.indexOf(`if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then`);
+    expect(pr).toBeGreaterThan(0);
+    expect(job.indexOf(`git show "origin/$GITHUB_BASE_REF:.gitleaksignore" > "$trusted"`)).toBeGreaterThan(pr);
+    expect(job).toContain(`scan . "$RUNNER_TEMP/gitleaks.json" "$trusted"`);
+    // The canary plants an ignore entry for its own token, as a pull request could, and must still be found.
+    expect(job).toContain(`> "$canary/.gitleaksignore"`);
+    expect(job).toContain(`scan "$canary" "$RUNNER_TEMP/canary.json" "$RUNNER_TEMP/empty.gitleaksignore"`);
+    // No GitHub expression reaches the shell: the base ref comes from the runner's environment.
+    expect(job).not.toContain("${{");
+  });
+
   it("a failed check stops the job, and a report only ever reaches jq", () => {
     expect(job).toContain("set -euo pipefail");
     expect(job).toMatch(/\| sha256sum -c -\n/);
