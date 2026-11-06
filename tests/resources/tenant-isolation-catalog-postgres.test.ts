@@ -29,7 +29,7 @@ async function catalog(db: PrismaClient): Promise<Row[]> {
         'qual', pg_get_expr(p.polqual, p.polrelid), 'check', pg_get_expr(p.polwithcheck, p.polrelid)) ORDER BY p.polname)
         FROM pg_policy p WHERE p.polrelid = c.oid), '[]'::jsonb) AS policies
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind = 'r' AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid
       AND a.attnum > 0 AND NOT a.attisdropped AND a.attname IN ('organizationId', 'expectedOrganizationId'))
     ORDER BY c.relname`);
 }
@@ -164,7 +164,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
         FOR r IN SELECT c.conrelid::regclass AS t, c.conname FROM pg_constraint c JOIN pg_class k ON k.oid = c.conrelid
           WHERE c.contype IN ('c', 'f') AND k.relnamespace = 'public'::regnamespace LOOP
           EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', r.t, r.conname); END LOOP;
-        FOR r IN SELECT oid::regclass AS t FROM pg_class WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace LOOP
+        FOR r IN SELECT oid::regclass AS t FROM pg_class WHERE relkind IN ('r', 'p') AND relnamespace = 'public'::regnamespace LOOP
           EXECUTE format('ALTER TABLE %s DISABLE TRIGGER ALL', r.t); END LOOP;
         GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
         GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user; END $$`]);
@@ -286,6 +286,16 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
       psqlOk(url.toString(), ["-c", `CREATE TABLE "IsoProbe" ("id" TEXT PRIMARY KEY, "organizationId" TEXT NOT NULL); GRANT ALL ON "IsoProbe" TO app_user`]);
       expect(digest(unprotected(await catalog(owner)))).not.toBe(before);
       psqlOk(url.toString(), ["-c", `DROP TABLE "IsoProbe"`]);
+      await stillClean();
+    }, 60_000);
+
+    it("a partitioned parent holding an organization counts too, not only its partitions", async () => {
+      const before = digest(unprotected(await catalog(owner)));
+      // A parent alone (no partition yet): reading through it is what must be protected.
+      psqlOk(url.toString(), ["-c", `CREATE TABLE "IsoProbeParted" ("id" TEXT, "organizationId" TEXT NOT NULL) PARTITION BY LIST ("organizationId")`]);
+      expect((await catalog(owner)).map((row) => row.table)).toContain("IsoProbeParted");
+      expect(digest(unprotected(await catalog(owner)))).not.toBe(before);
+      psqlOk(url.toString(), ["-c", `DROP TABLE "IsoProbeParted"`]);
       await stillClean();
     }, 60_000);
   });
