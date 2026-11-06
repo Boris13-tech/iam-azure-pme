@@ -6,7 +6,7 @@ import { withTenantDb } from "../../lib/db/scoped-client";
 import { LUXIA_ORG_ADMIN_V1 } from "../../lib/auth/native-role-catalog";
 import { GOVERNANCE_ADMIN_V2 } from "../../lib/resources/admin-bundle";
 import { signupCodeHash } from "../../lib/onboarding/signup";
-import { generateSignupCode, issueFromPlan, planMarker, planSignupCode, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
+import { generateSignupCode, issueFromPlan, planMarker, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
 import { POST as signupBegin } from "../../app/api/auth/signup/begin/route";
 import { POST as signupComplete } from "../../app/api/auth/signup/complete/route";
 import { POST as loginBegin } from "../../app/api/auth/local/begin/route";
@@ -154,6 +154,13 @@ describe.runIf(enabled)("Beta-code signup: atomic organization and first adminis
     const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `late ${suffix}` },
       { host: "localhost", database: "ci", schema: "public", role: "ci" }, "c".repeat(40), new Date(Date.now() - 3_600_000));
     await expect(issueFromPlan(owner, plan, digest)).rejects.toThrow("PLAN_EXPIRED");
+    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(0);
+  });
+
+  it("a plan whose deadline passes during the write leaves no row (wall clock, checked after the insert)", async () => {
+    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `slow ${suffix}` },
+      { host: "localhost", database: "ci", schema: "public", role: "ci" }, "c".repeat(40), new Date(Date.now() - SIGNUP_PLAN_VALIDITY_MS + 1_000));
+    await expect(issueFromPlan(owner, plan, digest, new Date(), { beforeWrite: () => new Promise((done) => setTimeout(done, 2_000)) })).rejects.toThrow("PLAN_EXPIRED");
     expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(0);
   });
 

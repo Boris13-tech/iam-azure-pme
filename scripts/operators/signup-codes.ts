@@ -58,6 +58,12 @@ export function checkSignupPlan(saved: unknown, confirm: string | undefined, cur
   const plan = file!.plan!;
   if (planDigest(plan) !== file!.digest) refuse("PLAN_TAMPERED");
   if (!confirm || confirm !== file!.digest) refuse("CONFIRMATION_MISMATCH");
+  // The whole plan is checked, not only its deadline: a plan rebuilt by hand with a longer window, a future start or
+  // out-of-range days is refused even when its digest is recomputed and confirmed.
+  const issued = Date.parse(plan.issuedAt), deadline = Date.parse(plan.notAfter);
+  if (!Number.isFinite(issued) || !Number.isFinite(deadline) || deadline - issued !== SIGNUP_PLAN_VALIDITY_MS || issued > now.getTime() + 60_000)
+    refuse("PLAN_WINDOW_INVALID");
+  if (!Number.isInteger(plan.days) || plan.days < 1 || plan.days > 30) refuse("DAYS_OUT_OF_RANGE");
   if (!(now.getTime() <= Date.parse(plan.notAfter))) refuse("PLAN_EXPIRED");
   if (canonicalJson(plan.target) !== canonicalJson(current.target)) refuse("TARGET_MISMATCH");
   if (plan.toolVersion !== current.toolVersion) refuse("TOOL_VERSION_MISMATCH");
@@ -67,18 +73,23 @@ export function checkSignupPlan(saved: unknown, confirm: string | undefined, cur
 /** The plan marker stored in the code's note: it makes each plan usable once. */
 export const planMarker = (digest: string) => `plan:${digest.slice(0, 16)}`;
 
-export async function issueFromPlan(db: PrismaClient, plan: SignupPlan, digest: string, now = new Date()) {
+export async function issueFromPlan(db: PrismaClient, plan: SignupPlan, digest: string, now = new Date(),
+  test: { beforeWrite?: () => Promise<void> } = {}) {
   const marker = planMarker(digest);
   const code = generateSignupCode();
   const row = await db.$transaction(async (tx) => {
-    // By the database's clock, at the write: a wait before this point cannot carry a plan past its deadline.
-    const [clock] = await tx.$queryRaw<Array<{ open: boolean }>>`SELECT now() <= ${plan.notAfter}::timestamptz AS open`;
-    if (!clock.open) refuse("PLAN_EXPIRED");
+    // By the database's wall clock (clock_timestamp, not the transaction's start), before and again after the write:
+    // a row exists only if the deadline still held once it was written; otherwise the transaction rolls back.
+    const open = async () => (await tx.$queryRaw<Array<{ open: boolean }>>`SELECT clock_timestamp() <= ${plan.notAfter}::timestamptz AS open`)[0].open;
+    if (!(await open())) refuse("PLAN_EXPIRED");
     if (await tx.signupCode.findFirst({ where: { note: { startsWith: marker } }, select: { id: true } })) refuse("PLAN_ALREADY_USED");
-    return tx.signupCode.create({ data: {
+    await test.beforeWrite?.(); // tests only: a slow write
+    const created = await tx.signupCode.create({ data: {
       codeHash: signupCodeHash(code)!, issuedBy: plan.by, note: plan.note ? `${marker} ${plan.note}` : marker, createdAt: now,
       expiresAt: new Date(now.getTime() + plan.days * 86_400_000),
     } });
+    if (!(await open())) refuse("PLAN_EXPIRED");
+    return created;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   return { code, row };
 }

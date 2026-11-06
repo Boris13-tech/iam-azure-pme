@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkSignupPlan, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
+import { planDigest } from "../../lib/operators/break-glass";
 
 // Standard, section 10: issuing a signup code (a Production write) needs a plan, its digest as the
 // confirmation, the same database and tool commit, and a fresh plan.
@@ -41,5 +42,16 @@ describe("signup-code issuance gate", () => {
     expect(refusal(() => checkSignupPlan({ plan, digest }, digest, { target, toolVersion: "b".repeat(40) }, at))).toBe("TOOL_VERSION_MISMATCH");
     expect(refusal(() => checkSignupPlan({ digest }, digest, current, at))).toBe("NOT_A_SIGNUP_PLAN");
     expect(refusal(() => checkSignupPlan(null, digest, current, at))).toBe("NOT_A_SIGNUP_PLAN");
+  });
+
+  it("a plan rebuilt by hand is refused even with its digest recomputed and confirmed: window, start and days", () => {
+    const { plan } = made();
+    const current = { target, toolVersion: commit };
+    const forged = (changes: Partial<typeof plan>) => { const p = { ...plan, ...changes }; const d = planDigest(p); return refusal(() => checkSignupPlan({ plan: p, digest: d }, d, current, at)); };
+    expect(forged({ issuedAt: "2026-10-22T10:00:00.000Z", notAfter: "2026-10-24T10:00:00.000Z" })).toBe("PLAN_WINDOW_INVALID"); // 48 hours
+    expect(forged({ issuedAt: "2026-10-23T11:00:00.000Z", notAfter: "2026-10-23T11:15:00.000Z" })).toBe("PLAN_WINDOW_INVALID"); // starts in the future
+    expect(forged({ issuedAt: "not a date" })).toBe("PLAN_WINDOW_INVALID");
+    expect(forged({ days: 365 })).toBe("DAYS_OUT_OF_RANGE");
+    expect(forged({ note: "another note" })).toBe("ACCEPTED"); // a legitimate change, confirmed, stays possible
   });
 });
