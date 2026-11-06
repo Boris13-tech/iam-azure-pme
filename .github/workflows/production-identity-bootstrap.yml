@@ -1,20 +1,7 @@
 name: Production Identity Bootstrap
 
+# Reached only through the Production activation gate, whose first job checks the commit and its CI run.
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Read-only preflight or approved canonical bootstrap apply
-        required: true
-        type: choice
-        default: preflight
-        options:
-          - preflight
-          - apply
-      confirmation:
-        description: Required only for apply
-        required: false
-        type: string
   workflow_call:
     inputs:
       mode:
