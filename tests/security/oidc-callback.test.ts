@@ -61,7 +61,8 @@ describe("OIDC Callback Security", () => {
   });
 
   afterAll(async () => {
-    await rawPrisma.authTransaction.deleteMany({});
+    // Cleanup as the owner: the runtime role has no DELETE on sign-in transactions (only the purge function deletes them).
+    await adminPrisma.authTransaction.deleteMany({});
     // Security Journal v1: sign-in evidence now references the identity account. T0: evidence is
     // append-only, so the test organization is purged through the test-database-only helper.
     await purgeTestOrganization(async (tx) => {
