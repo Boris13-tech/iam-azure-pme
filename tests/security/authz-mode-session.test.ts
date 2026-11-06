@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAuthContext } from "../../lib/auth/auth-context";
 import { SessionStore } from "../../lib/auth/session-store";
 import { getRecoveryContext } from "../../lib/auth/recovery-session";
+import { recoverySignIn } from "../../lib/auth/recovery";
+import { resolveLoginOrganization } from "../../lib/auth/organization-login";
 import { requireNative } from "../../lib/resources/service";
 import { grantAdministrator } from "../../lib/onboarding/provisioning";
 
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => ({ value: "token" }) }) }));
 vi.mock("../../lib/auth/session-store", () => ({ SessionStore: { getSession: vi.fn(), getRecoverySession: vi.fn() } }));
+vi.mock("../../lib/auth/organization-login", async (original) => ({ ...(await original<object>()), resolveLoginOrganization: vi.fn(async () => null) }));
 
 // P5, every path: resources, SoD, access reviews, onboarding and the dashboard authorize from the session without
 // going through the gateway. So with no valid mode in Production, no session is honoured at all.
@@ -83,6 +86,19 @@ describe("P5: no session is honoured in Production without a valid authorization
     expect(SessionStore.getRecoverySession).not.toHaveBeenCalled();
     setEnv({ VERCEL_ENV: "production", AUTHZ_MODE: "native" });
     expect(await getRecoveryContext()).toMatchObject({ recovery: { sessionId: "s", subjectId: "u" } });
+  });
+
+  it("recovery sign-in refuses before any lookup, so no single-use code is consumed; with a valid mode it proceeds", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const input = { organization: "acme", principalName: "admin", code: "ABCDE-FGHJK-MNPQR-STVWX" };
+    for (const env of PRODUCTION_WITHOUT_MODE) {
+      setEnv(env);
+      expect(await recoverySignIn(input), JSON.stringify(env)).toBeNull();
+    }
+    expect(resolveLoginOrganization).not.toHaveBeenCalled();
+    setEnv({ VERCEL_ENV: "production", AUTHZ_MODE: "native" });
+    expect(await recoverySignIn(input)).toBeNull(); // unknown organization here (mocked), but it was looked up
+    expect(resolveLoginOrganization).toHaveBeenCalled();
   });
 
   it("the session paths that skip the gateway start from getAuthContext", () => {
