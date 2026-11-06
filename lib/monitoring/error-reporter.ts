@@ -33,11 +33,16 @@ export function scrub(text: string): string {
     .slice(0, MAX_MESSAGE);
 }
 
+/** The deployment root (process.cwd()): only a file under it is named; nothing is guessed from folder names. */
+const deploymentRoot = () => (typeof process.cwd === "function" ? process.cwd().replace(/\\/g, "/").replace(/\/+$/, "") : "");
+
 /** The project-relative part of a stack path; any other path says nothing about the machine or a person. */
 function projectPath(raw: string) {
-  const path = raw.replace(/\\/g, "/").replace(/^file:\/\//, "");
-  // The last project root in the path wins: a machine folder named app or lib earlier in the path never leaves.
-  const relative = /(?:^|^.*\/)((?:app|lib|node_modules|\.next)\/.+)$/.exec(path)?.[1];
+  const path = raw.replace(/\\/g, "/").replace(/^file:\/\/\/([A-Za-z]:)/, "$1").replace(/^file:\/\//, "");
+  const root = deploymentRoot();
+  // Only files under the deployment root, and only its code folders: a machine folder named app or lib never leaves.
+  if (!root || !path.startsWith(`${root}/`)) return "<external>";
+  const relative = /^((?:app|lib|node_modules|\.next)\/.+)$/.exec(path.slice(root.length + 1))?.[1];
   if (!relative) return "<external>";
   const parts = relative.split("/"), file = parts.pop()!;
   // Folders hold no dot except .next, and only a package scope may hold @: a name or an address fails here.
@@ -51,7 +56,8 @@ const functionName = (raw: string | undefined) =>
   raw && /^(?:async )?(?:new )?[\w$.<>]+(?: \[as [\w$]+\])?$/.test(raw) ? scrub(raw).slice(0, 80) : "?";
 
 /** Free text can hold anything, so only a plain error code leaves; the type and the stack frames locate the rest. */
-const safeMessage = (message: string) => (/^[A-Z][A-Z0-9_]{2,80}$/.test(message) ? message : "<withheld>");
+// An error code has the shape WORD_WORD (at least one underscore): a lone upper-case word may be a secret.
+const safeMessage = (message: string) => (message.length <= 80 && /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(message) ? message : "<withheld>");
 
 function frames(stack: string | undefined) {
   if (!stack) return [];
@@ -78,7 +84,8 @@ export function buildEvent(error: unknown, component: ErrorComponent, routePath?
     ...(release && /^[0-9a-f]{40}$/.test(release) ? { release } : {}),
     tags: { component, ...(route ? { route } : {}) },
     exception: { values: [{
-      type: (err.name || "Error").replace(/[^\w]/g, "").slice(0, 60) || "Error",
+      // The type leaves only when it is shaped like an error class (SomethingError); any other name says "Error".
+      type: /^[A-Z][A-Za-z0-9]{0,58}Error$/.test(err.name) ? err.name : "Error",
       value: safeMessage(err.message || ""),
       stacktrace: { frames: frames(err.stack) },
     }] },

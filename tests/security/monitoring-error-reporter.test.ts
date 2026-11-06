@@ -65,19 +65,39 @@ describe("Monitoring slice 2: scrubbed error events, Sentry envelope protocol, n
   });
 
   it("a stack path outside the project says nothing about the machine", async () => {
+    const root = process.cwd().replace(/\\/g, "/");
     const error = new Error("X_CODE");
-    error.stack = "Error: X_CODE\n    at run (/home/jane.doe/secret-client/worker.js:1:1)\n    at go (/srv/deploy/lib/auth/session.ts:2:2)";
+    error.stack = `Error: X_CODE\n    at run (/home/jane.doe/secret-client/worker.js:1:1)\n    at go (${root}/lib/auth/session.ts:2:2)`;
     await reportError(error, "session");
     const files = sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename);
     expect(files.sort()).toEqual(["<external>", "lib/auth/session.ts"]);
     expect(sentBody()).not.toContain("jane.doe");
     fetchMock.mockClear();
     const hidden = new Error("X_CODE");
-    hidden.stack = "Error: X_CODE\n    at a (/srv/project/lib/jane.doe@example.com.ts:1:1)\n    at b (/home/lib/jane.doe@example.com/x.js:1:1)\n    at c (/app/jane.doe/worker.js:1:1)\n    at d (/x/node_modules/@scope/pkg/index.js:1:1)";
+    hidden.stack = `Error: X_CODE\n    at a (${root}/lib/jane.doe@example.com.ts:1:1)\n    at b (/home/lib/jane.doe@example.com/x.js:1:1)\n    at c (/app/jane.doe/worker.js:1:1)\n    at d (${root}/node_modules/@scope/pkg/index.js:1:1)`;
     await reportError(hidden, "session");
     expect(sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename).sort())
       .toEqual(["<external>", "<external>", "<external>", "node_modules/@scope/pkg/index.js"]);
     expect(sentBody()).not.toContain("jane.doe");
+  });
+
+  it("only what code defines leaves: a computed function name, a lone upper-case word or a custom error name do not", async () => {
+    const root = process.cwd().replace(/\\/g, "/");
+    // A function name computed from data (JavaScript allows it), a message that is one upper-case word, a non-error type.
+    const holder = { ["Jane Doe password=hunter2"]() { const e = new Error("HUNTER2"); e.name = "JaneDoe"; return e; } };
+    const error = holder["Jane Doe password=hunter2"]();
+    error.stack = `JaneDoe: HUNTER2\n    at Object.Jane Doe password=hunter2 (${root}/lib/a.ts:1:1)\n    at go (/home/lib/JaneDoe/worker.js:2:2)\n    at run (${root}/lib/auth/session.ts:3:3)`;
+    await reportError(error, "session");
+    const value = sentEvent().exception.values[0];
+    expect(value.type).toBe("Error");
+    expect(value.value).toBe("<withheld>");
+    expect(value.stacktrace.frames.map((frame: { function: string }) => frame.function).sort()).toEqual(["?", "go", "run"]);
+    expect(value.stacktrace.frames.map((frame: { filename: string }) => frame.filename).sort()).toEqual(["<external>", "lib/a.ts", "lib/auth/session.ts"]);
+    for (const leak of ["Jane", "hunter2", "HUNTER2"]) expect(sentBody()).not.toContain(leak);
+    fetchMock.mockClear();
+    const typed = new TypeError("SESSION_RESOLUTION_FAILED");
+    await reportError(typed, "session");
+    expect(sentEvent().exception.values[0]).toMatchObject({ type: "TypeError", value: "SESSION_RESOLUTION_FAILED" });
   });
 
   it("a frame without a function name, in a folder with a space and a parenthesis, leaves no path or name", async () => {
@@ -90,13 +110,16 @@ describe("Monitoring slice 2: scrubbed error events, Sentry envelope protocol, n
     for (const leak of ["Jane", "home", "Program Files", "Users", "acme"]) expect(sentBody()).not.toContain(leak);
   });
 
-  it("the last project root in a path wins: a machine folder before it never leaves", async () => {
+  it("only files under the deployment root are named: a machine folder called app or lib elsewhere never leaves", async () => {
+    const root = process.cwd().replace(/\\/g, "/");
     const error = new Error("X_CODE");
-    error.stack = "Error: X_CODE\n    at go (/var/lib/luxia_corp_deploy/app/api/auth.ts:2:2)\n    at run (/opt/app/client_tenant/lib/auth.ts:1:1)";
+    // A path as long as the root but outside it: only the prefix check tells it apart.
+    const lookalike = `${"x".repeat(root.length)}/lib/JaneDoe/x.ts`;
+    error.stack = `Error: X_CODE\n    at go (/var/lib/luxia_corp_deploy/app/api/auth.ts:2:2)\n    at run (/opt/app/client_tenant/lib/auth.ts:1:1)\n    at ok (${root}/app/api/auth.ts:3:3)\n    at url (file:///${root.replace(/^\//, "")}/lib/x.ts:4:4)\n    at near (${lookalike}:5:5)`;
     await reportError(error, "session");
     expect(sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename).sort())
-      .toEqual(["app/api/auth.ts", "lib/auth.ts"]);
-    for (const leak of ["luxia_corp_deploy", "client_tenant", "/var/", "/opt/"]) expect(sentBody()).not.toContain(leak);
+      .toEqual(["<external>", "<external>", "<external>", "app/api/auth.ts", "lib/x.ts"]);
+    for (const leak of ["luxia_corp_deploy", "client_tenant", "/var/", "/opt/", "JaneDoe"]) expect(sentBody()).not.toContain(leak);
   });
 
   it("scrub removes connection strings, e-mails, IP addresses and tokens (it guards function names and paths)", () => {
