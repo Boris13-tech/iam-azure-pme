@@ -75,6 +75,17 @@ describe("P5: the authorization mode fails closed in Production", () => {
     expect(await checkPermission(auth, req)).toBe(false);
   });
 
+  it("a production process with an unknown or blank platform marker counts as Production", () => {
+    for (const mark of [{ NODE_ENV: "production", APP_ENV: "prod" }, { NODE_ENV: "production", APP_ENV: " " }, { NODE_ENV: "production", VERCEL_ENV: "unknown" }, { NODE_ENV: "production", VERCEL_ENV: "Preview" }])
+      for (const mode of [undefined, "off"]) expect(resolveAuthorizationMode({ ...mark, AUTHZ_MODE: mode }), `${JSON.stringify(mark)} ${mode}`).toBeNull();
+  });
+
+  it("outside Production, an unknown mode is never written to the logs", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(resolveAuthorizationMode({ VERCEL_ENV: "preview", AUTHZ_MODE: "s3cr3t-looking-value" })).toBe("legacy");
+    expect(warn.mock.calls.flat().join("\n")).not.toContain("s3cr3t");
+  });
+
   it("outside Production, the legacy fallback is unchanged", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     for (const mark of [{}, { VERCEL_ENV: "preview" }, { APP_ENV: "staging" }, { NODE_ENV: "production", VERCEL_ENV: "preview" }, { NODE_ENV: "production", APP_ENV: "staging" }]) {

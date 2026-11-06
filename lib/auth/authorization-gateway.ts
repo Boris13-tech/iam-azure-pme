@@ -2,8 +2,9 @@ import { AuthContext } from "./authorization-engine";
 import { authorize, AuthorizationRequest, AuthorizationDecision, AuthorizationInfrastructureError } from "./authorization-engine";
 import { hasLegacyPermission } from "./legacy-auth-adapter";
 import { withTenantDb } from "../db/scoped-client";
+import { resolveAuthorizationMode, type AuthorizationMode } from "./authorization-mode";
 
-export type AuthorizationMode = "legacy" | "shadow" | "native-shadow-legacy" | "native";
+export type { AuthorizationMode } from "./authorization-mode";
 
 export type LegacyAuthorizationDecision = {
   allowed: boolean;
@@ -16,24 +17,7 @@ type ShadowComparisonStatus =
   | "NATIVE_ERROR"
   | "LEGACY_ERROR";
 
-const VALID_MODES: readonly AuthorizationMode[] = ["legacy", "shadow", "native-shadow-legacy", "native"];
-
-/**
- * The authorization mode from the environment. In Production (Vercel or LUXIA marks it, or a production process
- * that no platform marks as something else), a missing or unknown AUTHZ_MODE resolves to null: every authorization
- * is refused (fail closed, I3), never a silent fallback to legacy. Elsewhere (development, CI, previews) the legacy
- * fallback is kept.
- */
-export function resolveAuthorizationMode(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): AuthorizationMode | null {
-  const rawMode = env.AUTHZ_MODE;
-  if (VALID_MODES.includes(rawMode as AuthorizationMode)) return rawMode as AuthorizationMode;
-  if (env.VERCEL_ENV === "production" || env.APP_ENV === "production") return null;
-  if (env.NODE_ENV === "production" && !env.VERCEL_ENV && !env.APP_ENV) return null;
-  if (rawMode) console.warn(`[AUTHZ] Unknown AUTHZ_MODE '${rawMode}', falling back to 'legacy' fail-safe`);
-  return "legacy";
-}
+export { resolveAuthorizationMode } from "./authorization-mode";
 
 export async function checkPermission(
   auth: AuthContext,
