@@ -1544,3 +1544,12 @@ model ProviderSecretReference {
 
   @@index([organizationId, providerConnectionId], map: "ProviderSecretReference_connection_idx")
 }
+
+/// R7 (retention design): one row per erased organization, with the counts deleted per table. Owner-only table
+/// (no app_user access); written by the database function luxia_organization_erase. The identifier is opaque.
+model OrganizationErasure {
+  id             BigInt   @id @default(autoincrement())
+  organizationId String   @unique
+  erasedAt       DateTime @default(now()) @db.Timestamptz(6)
+  counts         Json
+}
