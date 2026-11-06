@@ -1,0 +1,168 @@
+name: Production deploy
+
+# The only way to change the code running in Production (docs/operations/PRODUCTION-CHANGE-RECORD.md, GOV-001).
+# It starts with the exact commit; the deploy job waits in the protected "Production" environment until an account
+# holding the approval right approves it in GitHub, which records that account, when, and for which run. The job then deploys that
+# commit through the Vercel API (gitSource), checks Production from outside, and promotes back the previous
+# deployment if a check fails. No local command line and no personal credential is involved.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-character commit SHA on main, with a green CI run
+        required: true
+        type: string
+      reason:
+        description: Why this deployment (recorded in the run summary)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: The commit is on main and its CI passed
+        env:
+          SHA: ${{ inputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full 40-character lowercase commit SHA"; exit 1; }
+          status="$(gh api "repos/$REPO/compare/$SHA...main" --jq .status)"
+          [[ "$status" == "ahead" || "$status" == "identical" ]] || { echo "::error::$SHA is not on main ($status)"; exit 1; }
+          green="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&status=success&per_page=10" --jq '[.workflow_runs[] | select(.head_branch == "main")] | length')"
+          [[ "$green" -ge 1 ]] || { echo "::error::no successful CI run on main for $SHA"; exit 1; }
+          echo "verified: $SHA is on main with a green CI run"
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-24.04
+    # A required reviewer on the environment. Nothing below runs before that approval.
+    environment: Production
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    env:
+      SHA: ${{ inputs.sha }}
+      REASON: ${{ inputs.reason }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN }}
+      TEAM: ${{ vars.VERCEL_TEAM_ID }}
+      PROJECT: ${{ vars.VERCEL_PROJECT_ID }}
+      REPO_ID: ${{ vars.GITHUB_REPOSITORY_ID_FOR_VERCEL }}
+      BASE: https://iam-azure-pme.vercel.app
+    steps:
+      - name: Deploy the exact commit and wait until it serves Production
+        id: deploy
+        run: |
+          set -euo pipefail
+          for v in VERCEL_TOKEN TEAM PROJECT REPO_ID; do [[ -n "${!v}" ]] || { echo "::error::$v is not configured on the Production environment"; exit 1; }; done
+          api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          previous="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
+          [[ -n "$previous" ]] || { echo "::error::cannot read the current Production deployment"; exit 1; }
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          # The run is recorded on the deployment: if the answer to this request is lost, the rollback still finds it.
+          body="$(jq -n --arg sha "$SHA" --argjson repo "$REPO_ID" --arg project "$PROJECT" --arg run "$GITHUB_RUN_ID" \
+            '{name: "iam-azure-pme", project: $project, target: "production", meta: {luxiaRun: $run}, gitSource: {type: "github", repoId: $repo, ref: "main", sha: $sha}}')"
+          created="$(api -X POST "https://api.vercel.com/v13/deployments?forceNew=1&teamId=$TEAM" -d "$body")"
+          id="$(jq -r .id <<< "$created")"
+          echo "deployment=$id" >> "$GITHUB_OUTPUT"
+          [[ "$(jq -r .projectId <<< "$created")" == "$PROJECT" ]] || { echo "::error::deployment $id is not in the configured project"; exit 1; }
+          for i in $(seq 1 60); do
+            state="$(api "https://api.vercel.com/v13/deployments/$id?teamId=$TEAM" | jq -r .readyState)"
+            [[ "$state" == "READY" ]] && break
+            [[ "$state" == "ERROR" || "$state" == "CANCELED" ]] && { echo "::error::deployment $id ended $state"; exit 1; }
+            (( SECONDS < 600 )) || break
+            sleep 10
+          done
+          if [[ "$state" != "READY" ]]; then
+            # Stopped before failing: an unattended build must not reach Production after this run has reported failure.
+            api -X PATCH "https://api.vercel.com/v12/deployments/$id/cancel?teamId=$TEAM" > /dev/null || echo "::warning::cancel of $id was refused"
+            echo "::error::deployment $id not ready after 10 minutes"; exit 1
+          fi
+          current="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
+          [[ "$current" == "$id" ]] || { echo "::error::Production serves $current, not $id"; exit 1; }
+          echo "Production now serves $id (previous $previous)"
+
+      - name: Check Production from outside
+        id: checks
+        run: |
+          set -u
+          check() {
+            login=$(curl -s -o login.html -w '%{http_code}' --max-time 20 "$BASE/login") || login=000
+            root=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "$BASE/") || root="000 -"
+            api=$(curl -s -o api.json -w '%{http_code}' --max-time 20 "$BASE/api/canonical/sessions") || api=000
+            [ "$login" = "200" ] && grep -q '<title>LUXIA' login.html && [ "$root" = "307 $BASE/login" ] \
+              && [ "$api" = "401" ] && grep -q '"error":"Unauthorized"' api.json
+          }
+          for attempt in 1 2 3; do
+            if check; then echo "after-checks passed (attempt $attempt)"; exit 0; fi
+            echo "attempt $attempt failed: login=$login root=$root api=$api"; sleep 20
+          done
+          echo "::error::after-checks failed"; exit 1
+
+      - name: Promote the previous deployment back if a check failed
+        id: rollback
+        if: (failure() || cancelled()) && steps.deploy.outputs.previous != ''
+        env:
+          PREVIOUS: ${{ steps.deploy.outputs.previous }}
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
+        run: |
+          set -euo pipefail
+          api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          # Every deployment of this run must be finished first, or it could still reach Production after the promotion.
+          # By metadata when the answer to its creation was lost.
+          ids="$DEPLOYMENT"
+          [[ -n "$ids" ]] || ids="$(api "https://api.vercel.com/v6/deployments?projectId=$PROJECT&teamId=$TEAM&limit=10&meta-luxiaRun=$GITHUB_RUN_ID" | jq -r '.deployments[].uid')"
+          for one in $ids; do
+            for i in $(seq 1 12); do
+              state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r .readyState)"
+              [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] && break
+              api -X PATCH "https://api.vercel.com/v12/deployments/$one/cancel?teamId=$TEAM" > /dev/null || true
+              sleep 10
+            done
+            [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] || { echo "::error::ROLLBACK NOT CONFIRMED: deployment $one is still $state"; exit 1; }
+          done
+          api -X POST "https://api.vercel.com/v10/projects/$PROJECT/promote/$PREVIOUS?teamId=$TEAM" > /dev/null
+          # The answer only means the request was accepted: success is Production serving the previous deployment.
+          for i in $(seq 1 18); do
+            current="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
+            if [[ "$current" == "$PREVIOUS" ]]; then echo "::warning::rolled back: Production serves $PREVIOUS"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::ROLLBACK NOT CONFIRMED: Production serves ${current:-unknown}, not $PREVIOUS"; exit 1
+
+      - name: Record the change (approval, commit, deployments, checks)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
+          PREVIOUS: ${{ steps.deploy.outputs.previous }}
+          CHECKS: ${{ steps.checks.outcome }}
+          ROLLBACK: ${{ steps.rollback.outcome }}
+        run: |
+          approvals="$(gh api "repos/$REPO/actions/runs/$RUN_ID/approvals" --jq '[.[] | "\(.user.login) \(.state) at run \(env.RUN_ID): \(.comment // "")"] | join("; ")' || echo unreadable)"
+          {
+            echo "## Production change record"
+            echo "| Item | Value |"; echo "|---|---|"
+            echo "| Commit | \`$SHA\` |"
+            echo "| Reason | $REASON |"
+            echo "| Approval (GitHub environment Production) | $approvals |"
+            echo "| Deployment | \`${DEPLOYMENT:-none}\` |"
+            echo "| Previous (rollback target) | \`${PREVIOUS:-unknown}\` |"
+            echo "| After-checks | ${CHECKS:-not run} |"
+            echo "| Rollback | ${ROLLBACK:-not needed} |"
+          } >> "$GITHUB_STEP_SUMMARY"
