@@ -36,13 +36,19 @@ export function scrub(text: string): string {
 /** The project-relative part of a stack path; any other path says nothing about the machine or a person. */
 function projectPath(raw: string) {
   const path = raw.replace(/\\/g, "/").replace(/^file:\/\//, "");
-  const relative = /(?:^|\/)((?:app|lib|node_modules|\.next)\/.+)$/.exec(path)?.[1];
+  // The last project root in the path wins: a machine folder named app or lib earlier in the path never leaves.
+  const relative = /(?:^|^.*\/)((?:app|lib|node_modules|\.next)\/.+)$/.exec(path)?.[1];
   if (!relative) return "<external>";
   const parts = relative.split("/"), file = parts.pop()!;
   // Folders hold no dot except .next, and only a package scope may hold @: a name or an address fails here.
   const safe = parts.every((part) => /^(\.next|@?[\w()[\]-]+)$/.test(part)) && /^[\w()[\]-]+(\.[\w-]+)*$/.test(file);
   return safe ? scrub(relative) : "<external>";
 }
+
+/** A function name leaves only when it looks like code (identifiers, dots, "async", "new", "[as x]"); a path
+ *  that a frame without a name put in its place (a folder with " (" in it) becomes "?". */
+const functionName = (raw: string | undefined) =>
+  raw && /^(?:async )?(?:new )?[\w$.<>]+(?: \[as [\w$]+\])?$/.test(raw) ? scrub(raw).slice(0, 80) : "?";
 
 /** Free text can hold anything, so only a plain error code leaves; the type and the stack frames locate the rest. */
 const safeMessage = (message: string) => (/^[A-Z][A-Z0-9_]{2,80}$/.test(message) ? message : "<withheld>");
@@ -51,7 +57,7 @@ function frames(stack: string | undefined) {
   if (!stack) return [];
   return stack.split("\n").slice(1).map((line) => /at (?:(.+?) \()?(.+?):(\d+):\d+\)?$/.exec(line.trim())).filter(Boolean)
     .slice(0, MAX_FRAMES).reverse().map((m) => ({
-      function: scrub(m![1] ?? "?").slice(0, 80),
+      function: functionName(m![1]),
       // Paths are reduced to the project-relative part; machine prefixes never leave.
       filename: projectPath(m![2]).slice(0, 160),
       lineno: Number(m![3]),

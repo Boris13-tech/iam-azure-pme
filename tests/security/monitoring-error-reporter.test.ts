@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/headers", () => ({ cookies: vi.fn(async () => ({ get: () => ({ value: "raw-session-token" }) })) }));
 vi.mock("../../lib/auth/session-store", () => ({ SessionStore: { getSession: vi.fn() } }));
 
-import { REPORT_TIMEOUT_MS, buildEvent, envelopeTarget, reportError } from "../../lib/monitoring/error-reporter";
+import { REPORT_TIMEOUT_MS, buildEvent, envelopeTarget, reportError, scrub } from "../../lib/monitoring/error-reporter";
 import { SessionStore } from "../../lib/auth/session-store";
 import { getAuthContext } from "../../lib/auth/auth-context";
 import { onRequestError } from "../../instrumentation";
@@ -80,7 +80,35 @@ describe("Monitoring slice 2: scrubbed error events, Sentry envelope protocol, n
     expect(sentBody()).not.toContain("jane.doe");
   });
 
-  it("scrubs connection strings, e-mails, IP addresses and tokens from the message", async () => {
+  it("a frame without a function name, in a folder with a space and a parenthesis, leaves no path or name", async () => {
+    const error = new Error("X_CODE");
+    error.stack = ["Error: X_CODE", "    at /home/Jane Doe (work)/luxia/app/a.ts:3:4", String.raw`    at C:\Users\Jane Doe\Program Files (x86)\acme\lib\b.js:1:2`,
+      "    at Object.handler (/var/task/.next/server/app/(auth)/route.js:10:5)", "    at async Promise.all (/var/task/lib/x.ts:1:1)"].join("\n");
+    await reportError(error, "session");
+    const frames = sentEvent().exception.values[0].stacktrace.frames as Array<{ function: string; filename: string }>;
+    expect(frames.map((frame) => frame.function).sort()).toEqual(["?", "?", "Object.handler", "async Promise.all"]);
+    for (const leak of ["Jane", "home", "Program Files", "Users", "acme"]) expect(sentBody()).not.toContain(leak);
+  });
+
+  it("the last project root in a path wins: a machine folder before it never leaves", async () => {
+    const error = new Error("X_CODE");
+    error.stack = "Error: X_CODE\n    at go (/var/lib/luxia_corp_deploy/app/api/auth.ts:2:2)\n    at run (/opt/app/client_tenant/lib/auth.ts:1:1)";
+    await reportError(error, "session");
+    expect(sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename).sort())
+      .toEqual(["app/api/auth.ts", "lib/auth.ts"]);
+    for (const leak of ["luxia_corp_deploy", "client_tenant", "/var/", "/opt/"]) expect(sentBody()).not.toContain(leak);
+  });
+
+  it("scrub removes connection strings, e-mails, IP addresses and tokens (it guards function names and paths)", () => {
+    const text = scrub("postgresql://app_user:s3cr3t@ep-x.neon.tech/db jane.doe@example.com 203.0.113.42 2001:db8::8a2e:370:7334 9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e");
+    for (const secret of ["s3cr3t", "app_user:", "jane.doe", "203.0.113.42", "8a2e:370", "9f8e7d6c5b4a39281706f5e4d3c2b1a0"]) expect(text).not.toContain(secret);
+    expect(text).toContain("<url>");
+    expect(text).toContain("<email>");
+    expect(text).toContain("<ip>");
+    expect(text).toContain("<token>");
+  });
+
+  it("a message with secrets is withheld whole (free text never leaves)", async () => {
     const secrets = ["postgresql://app_user:s3cr3t@ep-x.eu-central-1.aws.neon.tech/neondb", "jane.doe@example.com", "203.0.113.42",
       "2001:db8::8a2e:370:7334", "luxia_session=9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a3928"];
     await reportError(new Error(`failed for ${secrets.join(" and ")}`), "session");
