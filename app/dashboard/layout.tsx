@@ -3,15 +3,17 @@ import { redirect } from "next/navigation";
 import { getAuthContext } from "@/lib/auth/auth-context";
 import { loadPlatformContext } from "@/lib/platform/context";
 import { AppShell, type NavItem } from "@/components/app-shell/app-shell";
+import { REVIEW_READ_RIGHTS } from "@/lib/resources/access-review-visibility";
 
-const navigation: Array<NavItem & { entitlement: string | null }> = [
+// An item shows when the viewer holds its right, or any one of its rights (the same rule as the page behind it).
+const navigation: Array<NavItem & { entitlement: string | readonly string[] | null }> = [
   { href: "/dashboard", label: "Vue d’ensemble", icon: "overview", group: "Pilotage", entitlement: null },
   { href: "/dashboard/users", label: "Identités", icon: "users", group: "Identités et accès", entitlement: "subjects.read" },
   { href: "/dashboard/organization", label: "Organisation", icon: "organization", group: "Identités et accès", entitlement: "subjects.read" },
   { href: "/dashboard/settings", label: "Authentification", icon: "authentication", group: "Identités et accès", entitlement: "providers.read" },
   { href: "/dashboard/resources", label: "Ressources", icon: "resources", group: "Gouvernance", entitlement: "resources.read" },
   { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: "sod", group: "Gouvernance", entitlement: "sod.read" },
-  { href: "/dashboard/governance/access-reviews", label: "Revues d’accès", icon: "reviews", group: "Gouvernance", entitlement: "access_reviews.read" },
+  { href: "/dashboard/governance/access-reviews", label: "Revues d’accès", icon: "reviews", group: "Gouvernance", entitlement: REVIEW_READ_RIGHTS },
   { href: "/dashboard/audit", label: "Journal d’audit", icon: "audit", group: "Sécurité", entitlement: "audit.read" },
 ];
 
@@ -21,7 +23,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const auth = await getAuthContext();
   if (!auth) redirect("/login");
   const platform = await loadPlatformContext(auth);
-  const allowedNavigation = navigation.filter(item => !item.entitlement || platform.entitlements.includes(item.entitlement));
+  const allowedNavigation = navigation.filter(item => !item.entitlement ||
+    (typeof item.entitlement === "string" ? [item.entitlement] : item.entitlement).some(key => platform.entitlements.includes(key)));
   const initials = platform.subject.name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
   return (
     <AppShell items={allowedNavigation.map(({ entitlement: _entitlement, ...item }) => item)}
