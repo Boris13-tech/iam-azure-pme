@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const queryRaw = vi.fn();
 vi.mock("@/lib/db/raw-prisma", () => ({ rawPrisma: { $queryRaw: (...args: unknown[]) => queryRaw(...args) } }));
 
-const { cronAuthorized, retentionEnforced, RETENTION_BATCH } = await import("../../lib/retention/purge");
+const { cronAuthorized, retentionEnforced, RETENTION_BATCH, RETENTION_MAX_ROUNDS, purgeExpiredTransactions } = await import("../../lib/retention/purge");
 const { GET } = await import("../../app/api/internal/retention/route");
 const { middleware } = await import("../../middleware");
 
@@ -53,12 +53,34 @@ describe("R3 retention job: authorization", () => {
     const response = await GET(new Request("https://example.test/api/internal/retention", { headers: { authorization: `Bearer ${SECRET}` } }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: false });
+    expect(await response.json()).toEqual({ localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: false, rounds: 1, backlog: false });
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(queryRaw.mock.calls[0].slice(1)).toEqual([RETENTION_BATCH, false]);
     vi.stubEnv("LUXIA_RETENTION_ENFORCE", "true");
     await GET(new Request("https://example.test/api/internal/retention", { headers: { authorization: `Bearer ${SECRET}` } }));
     expect(queryRaw.mock.calls[1].slice(1)).toEqual([RETENTION_BATCH, true]);
+  });
+
+  it("a day with more than one batch is drained: calls repeat while full, counts add up, and a remainder is a backlog", async () => {
+    const counts = (n: number, enforced = true) => [{ counts: { localAuthChallenges: n, authTransactions: Math.min(n, 5), retentionRuns: 0, enforced } }];
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    queryRaw.mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(7));
+    expect(await purgeExpiredTransactions(true)).toEqual({ localAuthChallenges: 3 * RETENTION_BATCH + 7, authTransactions: 20, retentionRuns: 0, enforced: true, rounds: 4, backlog: false });
+    expect(queryRaw).toHaveBeenCalledTimes(4);
+    expect(error).not.toHaveBeenCalled();
+    // Always full: it stops at the round limit and reports a backlog (counts only).
+    queryRaw.mockReset(); queryRaw.mockResolvedValue(counts(RETENTION_BATCH));
+    expect(await purgeExpiredTransactions(true)).toMatchObject({ rounds: RETENTION_MAX_ROUNDS, backlog: true });
+    expect(queryRaw).toHaveBeenCalledTimes(RETENTION_MAX_ROUNDS);
+    expect(error.mock.calls.flat().join(" ")).toContain("backlog");
+    // The time budget stops it too.
+    queryRaw.mockReset(); queryRaw.mockResolvedValue(counts(RETENTION_BATCH));
+    expect(await purgeExpiredTransactions(true, undefined, { rounds: RETENTION_MAX_ROUNDS, budgetMs: 0 })).toMatchObject({ rounds: 1, backlog: true });
+    // A dry run deletes nothing: one call, and a full count is a backlog.
+    queryRaw.mockReset(); queryRaw.mockResolvedValue(counts(RETENTION_BATCH, false));
+    expect(await purgeExpiredTransactions(false)).toMatchObject({ rounds: 1, backlog: true, enforced: false });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    error.mockRestore();
   });
 
   it("a database failure gives a generic error, never its message", async () => {

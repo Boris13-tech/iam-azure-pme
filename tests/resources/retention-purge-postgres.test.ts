@@ -7,7 +7,7 @@ import { readdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
-import { purgeExpiredTransactions } from "../../lib/retention/purge";
+import { purgeExpiredTransactions, RETENTION_BATCH } from "../../lib/retention/purge";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const NEW = "20261023130000_retention_purge_transactions";
@@ -71,6 +71,18 @@ describe.runIf(enabled)("R3: purge of expired challenges and transactions (Postg
     expect(await exists(all)).toEqual({ challenges: [...kept.challenges].sort(), transactions: [...kept.transactions].sort() });
     expect((await purgeExpiredTransactions(true, rawPrisma)).localAuthChallenges).toBe(0);
   });
+
+  it("more than one batch expired in a day: one daily run drains it in several bounded calls", async () => {
+    const ids = Array.from({ length: Math.floor(RETENTION_BATCH * 1.5) }, () => randomUUID());
+    await owner.authTransaction.createMany({ data: ids.map((id) => ({ id, stateHash: sha(id), nonce: "n", codeVerifier: "v",
+      expectedOrganizationId: scope.organizationId, expectedTenantId: scope.tenantId, expectedProviderConnectionId: "p",
+      expiresAt: new Date(Date.now() - 9 * DAY) })) });
+    const run = await purgeExpiredTransactions(true, rawPrisma);
+    expect(run.rounds).toBeGreaterThanOrEqual(2);
+    expect(run.backlog).toBe(false);
+    expect(run.authTransactions).toBeGreaterThanOrEqual(ids.length);
+    expect(await owner.authTransaction.count({ where: { id: { in: ids } } })).toBe(0);
+  }, 120_000);
 
   it("the history of past runs is bounded by the batch too, in the dry run and when enforcing", async () => {
     const call = (batch: number, enforce: boolean) =>
