@@ -62,6 +62,9 @@ DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
     REVOKE ALL ON "RetentionRun" FROM app_user;
     REVOKE ALL ON SEQUENCE "RetentionRun_id_seq" FROM app_user;
+    -- Only this function deletes expired sign-in rows: no application path deletes them, and a direct DELETE would
+    -- skip the cutoff, the batch and the run record.
+    REVOKE DELETE, TRUNCATE ON "AuthTransaction", "LocalAuthChallenge" FROM app_user;
     GRANT EXECUTE ON FUNCTION luxia_retention_purge_transactions(integer, boolean) TO app_user;
   END IF;
 END $$;

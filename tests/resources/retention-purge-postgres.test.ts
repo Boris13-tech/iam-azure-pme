@@ -102,6 +102,9 @@ describe.runIf(enabled)("R3: purge of expired challenges and transactions (Postg
     for (const run of runs) expect(Object.keys(run.counts as object).sort()).toEqual(["authTransactions", "localAuthChallenges", "retentionRuns"]);
     expect(await settle(rawPrisma.$queryRawUnsafe(`SELECT count(*) FROM "RetentionRun"`))).toMatch(/permission denied/);
     expect(await settle(rawPrisma.$executeRawUnsafe(`INSERT INTO "RetentionRun" ("enforced", "counts") VALUES (true, '{}')`))).toMatch(/permission denied/);
+    // Only the function deletes expired sign-in rows: the runtime role has no direct DELETE on either table.
+    for (const table of ["AuthTransaction", "LocalAuthChallenge"])
+      expect(await settle(rawPrisma.$executeRawUnsafe(`DELETE FROM "${table}" WHERE false`)), table).toMatch(/permission denied/);
   });
 
   it("drill: the migration applies on a scratch database, the rollback restores the catalog, and it applies again", () => {

@@ -104,6 +104,15 @@ describe("R3 retention job: migration architecture", () => {
     expect(readFileSync(".github/workflows/production-activation-gate.yml", "utf8")).toContain("GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO app_user;");
     expect(migration.match(/GRANT [^;]+;/g)).toEqual(["GRANT EXECUTE ON FUNCTION luxia_retention_purge_transactions(integer, boolean) TO app_user;"]);
     expect(migration).toContain('REVOKE ALL ON "RetentionRun" FROM app_user;');
+    // The gate's broad grant comes after the migrations: it must take these back too, like the CI bootstrap.
+    const gate = readFileSync(".github/workflows/production-activation-gate.yml", "utf8"), bootstrap = readFileSync("scripts/ci/bootstrap-app-user.sql", "utf8");
+    for (const line of ['REVOKE ALL ON "RetentionRun" FROM app_user;', 'REVOKE ALL ON SEQUENCE "RetentionRun_id_seq" FROM app_user;', 'REVOKE DELETE, TRUNCATE ON "AuthTransaction", "LocalAuthChallenge" FROM app_user;']) {
+      expect(gate, line).toContain(line);
+      expect(bootstrap, line).toContain(line);
+      expect(gate.indexOf(line), line).toBeGreaterThan(gate.indexOf("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;"));
+    }
+    expect(migration).toContain('REVOKE DELETE, TRUNCATE ON "AuthTransaction", "LocalAuthChallenge" FROM app_user;');
+    expect(rollback).toContain('GRANT DELETE ON "AuthTransaction", "LocalAuthChallenge" TO app_user;');
     expect(migration).toContain('ALTER TABLE "RetentionRun" FORCE ROW LEVEL SECURITY;');
     expect(rollback).toContain("DROP FUNCTION luxia_retention_purge_transactions(integer, boolean);");
     expect(rollback).toContain('DROP TABLE "RetentionRun";');

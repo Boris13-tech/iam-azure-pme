@@ -212,6 +212,10 @@ jobs:
           REVOKE ALL ON "OrganizationDomain", "Invitation" FROM app_user;
           GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;
           REVOKE UPDATE, DELETE, TRUNCATE ON "CanonicalAdminAuditEvent", "AuthenticationEvidence" FROM app_user;
+          -- R3: retention runs are owner-only, and only the purge function deletes expired sign-in rows.
+          REVOKE ALL ON "RetentionRun" FROM app_user;
+          REVOKE ALL ON SEQUENCE "RetentionRun_id_seq" FROM app_user;
+          REVOKE DELETE, TRUNCATE ON "AuthTransaction", "LocalAuthChallenge" FROM app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public

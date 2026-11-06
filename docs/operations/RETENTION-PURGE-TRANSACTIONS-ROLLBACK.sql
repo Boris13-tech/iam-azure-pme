@@ -5,6 +5,12 @@
 SET lock_timeout = '5s';
 DROP FUNCTION luxia_retention_purge_transactions(integer, boolean);
 DROP TABLE "RetentionRun";
+-- The runtime role had DELETE on these two tables before (the activation gate's broad grant).
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+    GRANT DELETE ON "AuthTransaction", "LocalAuthChallenge" TO app_user;
+  END IF;
+END $$;
 DO $$ BEGIN
   IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
     DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20261023130000_retention_purge_transactions';
