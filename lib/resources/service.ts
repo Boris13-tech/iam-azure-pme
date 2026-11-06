@@ -87,6 +87,8 @@ export function createScope(auth: AuthContext, input: { key: string; kind: Resou
         (input.kind !== "RESOURCE" && input.resourceId) || (input.kind === "TENANT" && ids.length) || new Set(ids).size !== ids.length)
       throw new CanonicalAdminError("INVALID_SCOPE", 400);
     if (ids.length && await tx.resource.count({ where: { ...context(auth), id: { in: ids } } }) !== ids.length) return notFound();
+    // Race-free under the shared resource-governance lock; a unique violation would abort the transaction and its DENY evidence.
+    if (await tx.resourceScope.findFirst({ where: { ...context(auth), key: input.key }, select: { id: true } })) throw new CanonicalAdminError("SCOPE_KEY_TAKEN", 409);
     const value = await tx.resourceScope.create({ data: { ...context(auth), key: input.key, kind: input.kind,
       resourceId: input.resourceId ?? null } });
     if (input.kind === "RESOURCE_GROUP" && ids.length) await tx.resourceScopeMember.createMany({ data: ids.map(resourceId => ({ ...context(auth), scopeId: value.id, resourceId })) });
@@ -101,6 +103,8 @@ export function createEntitlement(auth: AuthContext, input: { scopeId: string; a
   return operation(auth, changeId, "RESOURCE.ENTITLEMENT.CREATE", "resources.manage", async tx => {
     if (!await tx.resourceScope.findFirst({ where: { ...context(auth), id: input.scopeId, active: true } })) return notFound();
     const key = `resource-scope:${input.scopeId}:${input.action}`;
+    // A retired (inactive) entitlement keeps its key: same scope and action is still taken.
+    if (await tx.entitlement.findFirst({ where: { ...context(auth), key }, select: { id: true } })) throw new CanonicalAdminError("ENTITLEMENT_KEY_TAKEN", 409);
     const value = await tx.entitlement.create({ data: { ...context(auth), key, action: input.action,
       resource: "resource-scope", resourceScopeId: input.scopeId, description: input.label } });
     return { value, metadata: { entitlementId: value.id, scopeId: input.scopeId, action: input.action } };
