@@ -9,7 +9,9 @@ const shell = read("components/app-shell/app-shell.tsx");
 
 describe("Signed-in frame (app shell)", () => {
   it("the server filters navigation by entitlements before the client frame sees it", () => {
-    expect(layout).toContain("navigation.filter(item => !item.entitlement || platform.entitlements.includes(item.entitlement))");
+    // An item shows for its right, or any one of its rights (follow-up of #140); the filter still runs on the server.
+    expect(layout).toContain("navigation.filter(item => !item.entitlement ||");
+    expect(layout).toContain(".some(key => platform.entitlements.includes(key))");
     expect(layout).toContain("<AppShell items={allowedNavigation.map(");
     expect(layout).toContain('if (!auth) redirect("/login")');
     // The client frame adds no navigation entry of its own: its only link is the logo to the overview.
