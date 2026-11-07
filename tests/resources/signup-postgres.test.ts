@@ -201,6 +201,11 @@ describe.runIf(enabled)("Beta-code signup: atomic organization and first adminis
     const results = await Promise.allSettled([0, 1].map(() => issueFromPlan(owner, plan, digest, new Date(), { beforeWrite: barrier })));
     expect(reached, "both transactions passed the replay check before either wrote").toBe(2);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    // The other one was stopped by the database's serialization check (Prisma P2034, SQLSTATE 40001), not by the replay
+    // check, which it had already passed: Serializable isolation is what keeps the second code out.
+    const [rejected] = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(rejected.reason).not.toBeInstanceOf(SignupPlanRefusal);
+    expect(`${(rejected.reason as { code?: string }).code ?? ""} ${String(rejected.reason)}`).toMatch(/P2034|40001|could not serialize/);
     expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(1);
     // And without the barrier, through the command's path.
     const again = planSignupCode({ by: "ci", days: "2", note: `race2 ${suffix}` }, target, "c".repeat(40));
