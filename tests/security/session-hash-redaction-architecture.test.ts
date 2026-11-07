@@ -18,13 +18,14 @@ describe("R2 session hash redaction: migration architecture", () => {
   it("closed world: the migration and its rollback are exactly the reviewed files", () => {
     // Review follow-up of #181 (third pass): static reading cannot rule out every way SQL can be written (a second
     // definition, dynamic SQL, quoting tricks). The migration is already on main and is immutable once applied (Prisma
-    // checks its checksum); the rollback goes with it. Any byte change to either fails here and must come with a new
+    // checks its checksum); the rollback goes with it. Any change to the text of either (line endings and a leading BOM
+    // aside, which change no SQL) fails here and must come with a new
     // AI cross review and a new fingerprint. The checks below explain what was reviewed; the effective privileges are
     // proven on PostgreSQL by tests/resources/session-hash-redaction-postgres.test.ts.
     const fingerprint = (text: string) => createHash("sha256").update(text.replace(/^\uFEFF/, "")).digest("hex");
     expect(fingerprint(migration), "migration").toBe("5cd04ed8e32792201cecfdd7e80881a49990839e57cecc87a1218e90db358d36");
     expect(fingerprint(rollback), "rollback").toBe("dfa5754c421cff37ebfa21122466c8ce1329978b890720c6b871c4594d0d8836");
-    // Each bypass the reviewers found changes the bytes, so the fingerprint refuses it.
+    // Each bypass the reviewers found changes the text, so the fingerprint refuses it.
     for (const mutated of [
       `${migration}\nCREATE OR REPLACE FUNCTION luxia_session_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;\n`,
       `${migration}\nDO $$ BEGIN EXECUTE 'GR' || 'ANT EXECUTE ON FUNCTION luxia_session_guard() TO PUBLIC'; END $$;\n`,
