@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
@@ -258,10 +258,17 @@ describe("B4 break-glass: authority matrix and inputs", () => {
       const preloaded = JSON.parse(execFileSync(process.execPath, [tsx, cjs], { cwd: process.cwd(), encoding: "utf8",
         env: { ...process.env, NODE_OPTIONS: `--require "${preload.replace(/\\/g, "/")}"` } }).trim().split("\n").pop()!) as string[];
       expect(preloaded).toEqual([]);
+      // Codex, fifth pass: a path that only passes through node_modules ("node_modules/..") is not a dependency.
+      const traversal = `./node_modules/../${relative(process.cwd(), preload).replace(/\\/g, "/")}`;
+      const traversed = JSON.parse(execFileSync(process.execPath, [tsx, cjs], { cwd: process.cwd(), encoding: "utf8",
+        env: { ...process.env, NODE_OPTIONS: `--require "${traversal}"` } }).trim().split("\n").pop()!) as string[];
+      expect(traversed).toEqual([]);
       for (const [execArgv, options, outside] of [
         [["--require", "C:\\x\\node_modules\\tsx\\dist\\preflight.cjs", "--import", "file:///C:/x/node_modules/tsx/dist/loader.mjs"], "", 0],
         [[], "--import /tmp/evil.mjs", 1], [[], "--require=./evil.js", 1], [[], "-r evil-package", 0], [[], `--import "C:\\Users\\a b\\evil.mjs"`, 1],
         [["--loader", "file:///tmp/evil.mjs"], "", 1], [[], "--max-old-space-size=4096", 0], [[], "--import @scope/package", 0], [[], "--import ../x/evil.mjs", 1],
+        [[], "--import ./node_modules/../evil.mjs", 1], [[], "--import=file:///C:/x/node_modules/../evil.mjs", 1], [[], "-r=./node_modules/../evil.js", 1],
+        [[], "--import package/../../evil.mjs", 1], [[], "--import \"C:\\x\\node_modules\\..\\evil.mjs\"", 1],
       ] as const) expect(outsidePreloads(execArgv, options), JSON.stringify([execArgv, options])).toHaveLength(outside);
     } finally {
       rmSync(dir, { recursive: true, force: true });

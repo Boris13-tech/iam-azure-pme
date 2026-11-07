@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * The commit that the given source files come from, or "unknown" when it cannot be proven. It is proven only when the
@@ -54,7 +55,14 @@ export function loadedSources(entry: string = process.argv[1] ?? "", cache: Reco
   if (outsidePreloads(process.execArgv, process.env.NODE_OPTIONS ?? "").length > 0) return [];
   // An entry run as an ES module is not in the CommonJS cache, and neither are the ES modules it imports: refuse.
   if (!Object.prototype.hasOwnProperty.call(cache, resolve(entry))) return [];
-  return [entry, ...Object.keys(cache)].filter((path) => !/[\\/]node_modules[\\/]/.test(path)).map((path) => resolve(path));
+  return [entry, ...Object.keys(cache)].map((path) => resolve(path)).filter((path) => !inDependencies(path));
+}
+
+/** Whether a path, once resolved (relative parts, "..", symbolic links), lies inside a node_modules folder. */
+function inDependencies(path: string): boolean {
+  let real = resolve(path);
+  try { real = realpathSync.native(real); } catch { /* a missing file is judged by its resolved path */ }
+  return /[\\/]node_modules[\\/]/.test(real);
 }
 
 /** Preloaded modules (--require/-r, --import, --loader, --experimental-loader) that are not dependencies in node_modules. */
@@ -63,14 +71,20 @@ export function outsidePreloads(execArgv: readonly string[], nodeOptions: string
   const flags = /^(--require|-r|--import|--loader|--experimental-loader)$/;
   const values: string[] = [];
   tokens.forEach((token, index) => {
-    const joined = /^(--require|--import|--loader|--experimental-loader)=(.+)$/.exec(token);
+    const joined = /^(--require|-r|--import|--loader|--experimental-loader)=(.+)$/.exec(token);
     if (joined) values.push(joined[2]);
     else if (flags.test(token) && index + 1 < tokens.length) values.push(tokens[index + 1]);
   });
+  // A path or file URL is resolved first ("./node_modules/../x" is not a dependency); a bare package name resolves
+  // into node_modules. Anything that cannot be read as either is refused.
   const insideDependencies = (value: string) => {
-    const path = value.startsWith("file:") ? decodeURIComponent(new URL(value).pathname) : value;
-    const isPath = /^[./\\]|^[A-Za-z]:[\\/]|^file:/.test(value);
-    return isPath ? /[\\/]node_modules[\\/]/.test(path) : !/[\\/]/.test(value.replace(/^@[^/]+\//, "")); // a bare package name
+    try {
+      if (value.startsWith("file:")) return inDependencies(fileURLToPath(value));
+      if (/^[./\\]|^[A-Za-z]:[\\/]/.test(value)) return inDependencies(value);
+      return /^(@[\w.-]+\/)?[\w.-]+(\/[\w./-]*)?$/.test(value) && !value.split("/").includes(".."); // a bare package name
+    } catch {
+      return false;
+    }
   };
   return values.filter((value) => !insideDependencies(value));
 }
