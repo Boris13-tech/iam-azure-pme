@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Monitoring slice 2 (M-C, SLI-03): errors leave LUXIA only as events it builds itself, scrubbed, to a
@@ -6,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/headers", () => ({ cookies: vi.fn(async () => ({ get: () => ({ value: "raw-session-token" }) })) }));
 vi.mock("../../lib/auth/session-store", () => ({ SessionStore: { getSession: vi.fn() } }));
 
-import { REPORT_TIMEOUT_MS, buildEvent, envelopeTarget, reportError, scrub } from "../../lib/monitoring/error-reporter";
+import { KNOWN_ERROR_CODES, KNOWN_ERROR_TYPES, REPORT_TIMEOUT_MS, buildEvent, envelopeTarget, reportError } from "../../lib/monitoring/error-reporter";
 import { SessionStore } from "../../lib/auth/session-store";
 import { getAuthContext } from "../../lib/auth/auth-context";
 import { onRequestError } from "../../instrumentation";
@@ -55,89 +56,42 @@ describe("Monitoring slice 2: scrubbed error events, Sentry envelope protocol, n
     for (const key of ["request", "user", "contexts", "breadcrumbs", "server_name", "extra"]) expect(event).not.toHaveProperty(key);
   });
 
-  it("sends no free text: only a plain error code leaves in the message", async () => {
+  it("only listed values leave: a listed code and type do; free text, shaped look-alikes and unknown types never", async () => {
+    // Codex's cases (review of d2f784a): shapes alone proved nothing. Only constants of the two lists are sent.
     await reportError(new Error('password=hunter2 body={"name":"Jane Doe","phone":"+40123456789"} fe80::1'), "session");
     for (const secret of ["hunter2", "Jane Doe", "+40123456789", "fe80::1"]) expect(sentBody()).not.toContain(secret);
-    expect(sentEvent().exception.values[0].value).toBe("<withheld>");
+    expect(sentEvent().exception.values[0]).toEqual({ type: "Error", value: "<withheld>" });
+    for (const [name, message] of [["JaneDoeError", "SECRET_PASSWORD"], ["JaneDoe", "JANE_DOE"], ["Error", "HUNTER2"]]) {
+      fetchMock.mockClear();
+      const error = new Error(message); error.name = name;
+      await reportError(error, "session");
+      expect(sentEvent().exception.values[0], `${name} ${message}`).toEqual({ type: "Error", value: "<withheld>" });
+      for (const leak of ["Jane", "SECRET_PASSWORD", "JANE_DOE", "HUNTER2"]) expect(sentBody()).not.toContain(leak);
+    }
     fetchMock.mockClear();
-    await reportError(new Error("SESSION_RESOLUTION_FAILED"), "session");
-    expect(sentEvent().exception.values[0].value).toBe("SESSION_RESOLUTION_FAILED");
+    const listed = new TypeError("ORGANIZATION_NOT_FOUND");
+    await reportError(listed, "session");
+    expect(sentEvent().exception.values[0]).toEqual({ type: "TypeError", value: "ORGANIZATION_NOT_FOUND" });
   });
 
-  it("a stack path outside the project says nothing about the machine", async () => {
+  it("no stack leaves: no function name, no file path, whatever the frames say", async () => {
     const root = process.cwd().replace(/\\/g, "/");
-    const error = new Error("X_CODE");
-    error.stack = `Error: X_CODE\n    at run (/home/jane.doe/secret-client/worker.js:1:1)\n    at go (${root}/lib/auth/session.ts:2:2)`;
-    await reportError(error, "session");
-    const files = sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename);
-    expect(files.sort()).toEqual(["<external>", "lib/auth/session.ts"]);
-    expect(sentBody()).not.toContain("jane.doe");
-    fetchMock.mockClear();
-    const hidden = new Error("X_CODE");
-    hidden.stack = `Error: X_CODE\n    at a (${root}/lib/jane.doe@example.com.ts:1:1)\n    at b (/home/lib/jane.doe@example.com/x.js:1:1)\n    at c (/app/jane.doe/worker.js:1:1)\n    at d (${root}/node_modules/@scope/pkg/index.js:1:1)`;
-    await reportError(hidden, "session");
-    expect(sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename).sort())
-      .toEqual(["<external>", "<external>", "<external>", "node_modules/@scope/pkg/index.js"]);
-    expect(sentBody()).not.toContain("jane.doe");
-  });
-
-  it("only what code defines leaves: a computed function name, a lone upper-case word or a custom error name do not", async () => {
-    const root = process.cwd().replace(/\\/g, "/");
-    // A function name computed from data (JavaScript allows it), a message that is one upper-case word, a non-error type.
-    const holder = { ["Jane Doe password=hunter2"]() { const e = new Error("HUNTER2"); e.name = "JaneDoe"; return e; } };
-    const error = holder["Jane Doe password=hunter2"]();
-    error.stack = `JaneDoe: HUNTER2\n    at Object.Jane Doe password=hunter2 (${root}/lib/a.ts:1:1)\n    at go (/home/lib/JaneDoe/worker.js:2:2)\n    at run (${root}/lib/auth/session.ts:3:3)`;
+    const holder = { ["JaneDoe"]() { return new Error("RUNTIME_NOT_READY"); } };
+    const error = holder.JaneDoe();
+    error.stack = [`Error: RUNTIME_NOT_READY`, `    at Object.JaneDoe (${root}/lib/JaneDoe/profile.ts:1:1)`, `    at /home/Jane Doe (work)/app/a.ts:2:2`].join("\n");
     await reportError(error, "session");
     const value = sentEvent().exception.values[0];
-    expect(value.type).toBe("Error");
-    expect(value.value).toBe("<withheld>");
-    expect(value.stacktrace.frames.map((frame: { function: string }) => frame.function).sort()).toEqual(["?", "go", "run"]);
-    expect(value.stacktrace.frames.map((frame: { filename: string }) => frame.filename).sort()).toEqual(["<external>", "lib/a.ts", "lib/auth/session.ts"]);
-    for (const leak of ["Jane", "hunter2", "HUNTER2"]) expect(sentBody()).not.toContain(leak);
-    fetchMock.mockClear();
-    const typed = new TypeError("SESSION_RESOLUTION_FAILED");
-    await reportError(typed, "session");
-    expect(sentEvent().exception.values[0]).toMatchObject({ type: "TypeError", value: "SESSION_RESOLUTION_FAILED" });
+    expect(value).toEqual({ type: "Error", value: "RUNTIME_NOT_READY" });
+    expect(value).not.toHaveProperty("stacktrace");
+    for (const leak of ["JaneDoe", "Jane", "profile", "/home", "lib/"]) expect(sentBody()).not.toContain(leak);
   });
 
-  it("a frame without a function name, in a folder with a space and a parenthesis, leaves no path or name", async () => {
-    const error = new Error("X_CODE");
-    error.stack = ["Error: X_CODE", "    at /home/Jane Doe (work)/luxia/app/a.ts:3:4", String.raw`    at C:\Users\Jane Doe\Program Files (x86)\acme\lib\b.js:1:2`,
-      "    at Object.handler (/var/task/.next/server/app/(auth)/route.js:10:5)", "    at async Promise.all (/var/task/lib/x.ts:1:1)"].join("\n");
-    await reportError(error, "session");
-    const frames = sentEvent().exception.values[0].stacktrace.frames as Array<{ function: string; filename: string }>;
-    expect(frames.map((frame) => frame.function).sort()).toEqual(["?", "?", "Object.handler", "async Promise.all"]);
-    for (const leak of ["Jane", "home", "Program Files", "Users", "acme"]) expect(sentBody()).not.toContain(leak);
-  });
-
-  it("only files under the deployment root are named: a machine folder called app or lib elsewhere never leaves", async () => {
-    const root = process.cwd().replace(/\\/g, "/");
-    const error = new Error("X_CODE");
-    // A path as long as the root but outside it: only the prefix check tells it apart.
-    const lookalike = `${"x".repeat(root.length)}/lib/JaneDoe/x.ts`;
-    error.stack = `Error: X_CODE\n    at go (/var/lib/luxia_corp_deploy/app/api/auth.ts:2:2)\n    at run (/opt/app/client_tenant/lib/auth.ts:1:1)\n    at ok (${root}/app/api/auth.ts:3:3)\n    at url (file:///${root.replace(/^\//, "")}/lib/x.ts:4:4)\n    at near (${lookalike}:5:5)`;
-    await reportError(error, "session");
-    expect(sentEvent().exception.values[0].stacktrace.frames.map((frame: { filename: string }) => frame.filename).sort())
-      .toEqual(["<external>", "<external>", "<external>", "app/api/auth.ts", "lib/x.ts"]);
-    for (const leak of ["luxia_corp_deploy", "client_tenant", "/var/", "/opt/", "JaneDoe"]) expect(sentBody()).not.toContain(leak);
-  });
-
-  it("scrub removes connection strings, e-mails, IP addresses and tokens (it guards function names and paths)", () => {
-    const text = scrub("postgresql://app_user:s3cr3t@ep-x.neon.tech/db jane.doe@example.com 203.0.113.42 2001:db8::8a2e:370:7334 9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e");
-    for (const secret of ["s3cr3t", "app_user:", "jane.doe", "203.0.113.42", "8a2e:370", "9f8e7d6c5b4a39281706f5e4d3c2b1a0"]) expect(text).not.toContain(secret);
-    expect(text).toContain("<url>");
-    expect(text).toContain("<email>");
-    expect(text).toContain("<ip>");
-    expect(text).toContain("<token>");
-  });
-
-  it("a message with secrets is withheld whole (free text never leaves)", async () => {
-    const secrets = ["postgresql://app_user:s3cr3t@ep-x.eu-central-1.aws.neon.tech/neondb", "jane.doe@example.com", "203.0.113.42",
-      "2001:db8::8a2e:370:7334", "luxia_session=9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a3928"];
-    await reportError(new Error(`failed for ${secrets.join(" and ")}`), "session");
-    const body = sentBody();
-    for (const secret of ["s3cr3t", "app_user:", "jane.doe", "203.0.113.42", "8a2e:370", "9f8e7d6c5b4a39281706f5e4d3c2b1a0"]) expect(body).not.toContain(secret);
-    expect(sentEvent().exception.values[0].value).toBe("<withheld>");
+  it("every error class and code that lib/ and app/ define is listed, so a new one is seen in review", () => {
+    const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? files(join(dir, entry.name)) : entry.name.endsWith(".ts") || entry.name.endsWith(".tsx") ? [join(dir, entry.name)] : []);
+    const source = [...files("lib"), ...files("app")].map((path) => readFileSync(path, "utf8")).join("\n");
+    for (const [, name] of source.matchAll(/class ([A-Z][A-Za-z]*Error) extends/g)) expect(KNOWN_ERROR_TYPES.has(name), name).toBe(true);
+    for (const [, code] of source.matchAll(/new Error\("([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)"\)/g)) expect(KNOWN_ERROR_CODES.has(code), code).toBe(true);
   });
 
   it("drops a route value that is not a plain route pattern", () => {
