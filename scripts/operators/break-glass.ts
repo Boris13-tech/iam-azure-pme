@@ -11,7 +11,7 @@
 // plan, digest and result, never a token, link, code or secret.
 import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { applyBreakGlass, BreakGlassRefusal, planBreakGlass } from "../../lib/operators/break-glass";
 
@@ -19,8 +19,11 @@ function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(`--${name}`);
   return at >= 0 ? args[at + 1] : undefined;
 }
+/** The commit of this script's own repository; "unknown" if its tracked files differ from that commit (refused). */
 function toolVersion(): string {
-  try { return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return "unknown"; }
+  const cwd = dirname(resolve(process.argv[1]));
+  const git = (command: string) => execSync(command, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  try { return git("git status --porcelain --untracked-files=no") ? "unknown" : git("git rev-parse HEAD"); } catch { return "unknown"; }
 }
 function writeEvidence(dir: string, name: string, value: unknown) {
   mkdirSync(dir, { recursive: true });

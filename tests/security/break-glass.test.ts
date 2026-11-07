@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import {
-  applyBreakGlass, AUTHORITY, BREAK_GLASS_ACTIONS, canonicalJson, planDigest, validateInput, type BreakGlassAction,
+  applyBreakGlass, AUTHORITY, BREAK_GLASS_ACTIONS, canonicalJson, planBreakGlass, planDigest, validateInput, type BreakGlassAction,
 } from "../../lib/operators/break-glass";
 
 // First Admin / Break-glass v1, B4: input validation, authority matrix (D7 + Q1) and plan digest.
@@ -88,11 +89,25 @@ describe("B4 break-glass: authority matrix and inputs", () => {
     ]) expect(planDigest(changed)).not.toBe(planDigest(base));
   });
 
+  it("plan and apply refuse an unknown tool version before touching the database (a modified checkout proves no commit)", async () => {
+    const untouchable = new Proxy({}, { get: () => { throw new Error("DATABASE_TOUCHED"); } }) as unknown as PrismaClient;
+    const issuedAt = new Date("2026-10-12T10:00:00Z");
+    const close = input("CLOSE_ORGANIZATION", { type: "LUXIA_CERTIFICATION", id: "CERT-1" }, "luxia-cert-b2-r6");
+    for (const toolVersion of ["unknown", "", "t", "A".repeat(40), "a".repeat(39)]) {
+      expect(await planBreakGlass(untouchable, close, { issuedAt, toolVersion }).then(() => "OK", (error) => error.code ?? error.message), toolVersion).toBe("TOOL_VERSION_UNKNOWN");
+      expect(await applyBreakGlass(untouchable, close, { issuedAt, toolVersion, confirm: "c".repeat(64), now: issuedAt })
+        .then(() => "OK", (error) => error.code ?? error.message), toolVersion).toBe("TOOL_VERSION_UNKNOWN");
+    }
+    // The command reports "unknown" for a checkout whose tracked files differ from its commit.
+    const cli = readFileSync("scripts/operators/break-glass.ts", "utf8");
+    expect(cli).toContain('git("git status --porcelain --untracked-files=no") ? "unknown" : git("git rev-parse HEAD")');
+  });
+
   it("apply refuses before touching the database: expired plan, missing confirmation, missing typed identifier", async () => {
     const untouchable = new Proxy({}, { get: () => { throw new Error("DATABASE_TOUCHED"); } }) as unknown as PrismaClient;
     const issuedAt = new Date("2026-10-12T10:00:00Z");
     const close = input("CLOSE_ORGANIZATION", { type: "LUXIA_CERTIFICATION", id: "CERT-1" }, "luxia-cert-b2-r6");
-    const run = (options: Record<string, unknown>) => applyBreakGlass(untouchable, close, { issuedAt, toolVersion: "t", confirm: "c".repeat(64), ...options })
+    const run = (options: Record<string, unknown>) => applyBreakGlass(untouchable, close, { issuedAt, toolVersion: "a".repeat(40), confirm: "c".repeat(64), ...options })
       .then(() => "OK", (error) => error.code ?? error.message);
     expect(await run({ now: new Date(issuedAt.getTime() + 15 * 60_000 + 1) })).toBe("PLAN_EXPIRED");
     expect(await run({ now: issuedAt, confirm: "" })).toBe("CONFIRMATION_REQUIRED");
