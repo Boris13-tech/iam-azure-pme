@@ -1,9 +1,13 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import {
   applyBreakGlass, AUTHORITY, BREAK_GLASS_ACTIONS, canonicalJson, planBreakGlass, planDigest, validateInput, type BreakGlassAction,
 } from "../../lib/operators/break-glass";
+import { toolVersion } from "../../scripts/operators/tool-version";
 
 // First Admin / Break-glass v1, B4: input validation, authority matrix (D7 + Q1) and plan digest.
 const UUID = "0b9d0b8e-5555-4c2a-9a55-000000000001";
@@ -98,10 +102,44 @@ describe("B4 break-glass: authority matrix and inputs", () => {
       expect(await applyBreakGlass(untouchable, close, { issuedAt, toolVersion, confirm: "c".repeat(64), now: issuedAt })
         .then(() => "OK", (error) => error.code ?? error.message), toolVersion).toBe("TOOL_VERSION_UNKNOWN");
     }
-    // The command reports "unknown" for a checkout whose tracked files differ from its commit.
+    // The command takes its version from its own checkout, never from the caller (behaviour tested below).
     const cli = readFileSync("scripts/operators/break-glass.ts", "utf8");
-    expect(cli).toContain('git("git status --porcelain --untracked-files=no") ? "unknown" : git("git rev-parse HEAD")');
+    expect(cli.match(/toolVersion: [^,}]+/g)?.map((call) => call.trim())).toEqual(Array(2).fill("toolVersion: toolVersion(dirname(resolve(process.argv[1])))"));
   });
+
+  it("the command's version is the commit of a clean checkout, and \"unknown\" otherwise (real Git repository)", () => {
+    // Review follow-up of #183: run Git for real, in a disposable repository, from a foreign working directory.
+    const repo = mkdtempSync(join(tmpdir(), "luxia-tool-version-"));
+    const elsewhere = mkdtempSync(join(tmpdir(), "luxia-elsewhere-"));
+    const previous = process.cwd();
+    try {
+      const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=test", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" }).toString().trim();
+      expect(toolVersion(repo), "not a checkout").toBe("unknown");
+      git("init", "-q");
+      expect(toolVersion(repo), "no commit yet").toBe("unknown");
+      writeFileSync(join(repo, "tool.ts"), "export const a = 1;\n");
+      git("add", "tool.ts");
+      git("commit", "-q", "-m", "one");
+      const head = git("rev-parse", "HEAD");
+      process.chdir(elsewhere); // the caller's directory plays no part
+      expect(toolVersion(repo), "clean").toBe(head);
+      writeFileSync(join(repo, "notes.txt"), "untracked\n");
+      expect(toolVersion(repo), "untracked file only").toBe(head);
+      writeFileSync(join(repo, "tool.ts"), "export const a = 2;\n");
+      expect(toolVersion(repo), "modified, unstaged").toBe("unknown");
+      git("add", "tool.ts");
+      expect(toolVersion(repo), "modified, staged").toBe("unknown");
+      git("commit", "-q", "-m", "two");
+      expect(toolVersion(repo), "committed again").toBe(git("rev-parse", "HEAD"));
+      rmSync(join(repo, "tool.ts"));
+      expect(toolVersion(repo), "tracked file deleted").toBe("unknown");
+      expect(toolVersion(join(elsewhere, "missing")), "missing directory").toBe("unknown");
+    } finally {
+      process.chdir(previous);
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  }, 30_000); // a dozen real Git processes: slow on a loaded Windows runner
 
   it("apply refuses before touching the database: expired plan, missing confirmation, missing typed identifier", async () => {
     const untouchable = new Proxy({}, { get: () => { throw new Error("DATABASE_TOUCHED"); } }) as unknown as PrismaClient;
