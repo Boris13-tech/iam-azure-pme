@@ -4,10 +4,12 @@ export function middleware(req: NextRequest) {
   const sessionToken = req.cookies.get("luxia_session")?.value;
 
   const isRuntimeInfo = req.nextUrl.pathname === "/api/internal/runtime-info";
+  // R3 daily retention job (exact path): the route checks the platform cron secret itself.
+  const isRetentionJob = req.nextUrl.pathname === "/api/internal/retention";
   const isProtectedPath = req.nextUrl.pathname.startsWith("/dashboard") || 
                          (req.nextUrl.pathname.startsWith("/api/") && 
                           !req.nextUrl.pathname.startsWith("/api/auth") && 
-                          !isRuntimeInfo);
+                          !isRuntimeInfo && !isRetentionJob);
 
   if (isProtectedPath && !sessionToken) {
     if (req.nextUrl.pathname.startsWith("/api/")) {
