@@ -6,7 +6,7 @@ import { withTenantDb } from "../../lib/db/scoped-client";
 import { LUXIA_ORG_ADMIN_V1 } from "../../lib/auth/native-role-catalog";
 import { GOVERNANCE_ADMIN_V2 } from "../../lib/resources/admin-bundle";
 import { signupCodeHash } from "../../lib/onboarding/signup";
-import { generateSignupCode, issueFromPlan, planMarker, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
+import { generateSignupCode, issueConfirmed, issueFromPlan, planMarker, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
 import { POST as signupBegin } from "../../app/api/auth/signup/begin/route";
 import { POST as signupComplete } from "../../app/api/auth/signup/complete/route";
 import { POST as loginBegin } from "../../app/api/auth/local/begin/route";
@@ -165,14 +165,31 @@ describe.runIf(enabled)("Beta-code signup: atomic organization and first adminis
   });
 
   it("the operator gate issues one usable code per confirmed plan, and only its hash is stored", async () => {
-    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `gate ${suffix}` },
-      { host: "localhost", database: "ci", schema: "public", role: "ci" }, "c".repeat(40));
-    const { code, row } = await issueFromPlan(owner, plan, digest);
+    // Through issueConfirmed, the command's only path to the write (review follow-up of #121).
+    const target = { host: "localhost", database: "ci", schema: "public", role: "ci" };
+    const current = { target, toolVersion: "c".repeat(40) };
+    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `gate ${suffix}` }, target, "c".repeat(40));
+    const count = () => owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } });
+    for (const [confirm, now, reason] of [[undefined, current, "CONFIRMATION_MISMATCH"], [digest, { ...current, target: { ...target, role: "other" } }, "TARGET_MISMATCH"],
+      [digest, { ...current, toolVersion: "unknown" }, "TOOL_VERSION_UNKNOWN"]] as const) {
+      await expect(issueConfirmed(owner, { plan, digest }, confirm, now)).rejects.toThrow(reason);
+      expect(await count(), reason).toBe(0);
+    }
+    const { code, row } = await issueConfirmed(owner, { plan, digest }, digest, current);
     expect(row).toMatchObject({ status: "ISSUED", issuedBy: "ci", note: `${planMarker(digest)} gate ${suffix}`, codeHash: signupCodeHash(code) });
     expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(2 * 86_400_000);
-    await expect(issueFromPlan(owner, plan, digest)).rejects.toThrow(SignupPlanRefusal);
-    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(1);
+    await expect(issueConfirmed(owner, { plan, digest }, digest, current)).rejects.toThrow(SignupPlanRefusal);
+    expect(await count()).toBe(1);
     const begin = await call(signupBegin, "/api/auth/signup/begin", request(code, `gate-${suffix}`));
     expect(begin.status).toBe(200);
+  });
+
+  it("two concurrent issuances of one plan write one code at most", async () => {
+    const target = { host: "localhost", database: "ci", schema: "public", role: "ci" };
+    const current = { target, toolVersion: "c".repeat(40) };
+    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `race ${suffix}` }, target, "c".repeat(40));
+    const results = await Promise.allSettled(Array.from({ length: 4 }, () => issueConfirmed(owner, { plan, digest }, digest, current)));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(1);
   });
 });

@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { checkSignupPlan, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
+import { checkSignupPlan, issueConfirmed, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
 import { planDigest } from "../../lib/operators/break-glass";
 
 // Standard, section 10: issuing a signup code (a Production write) needs a plan, its digest as the
@@ -62,5 +64,26 @@ describe("signup-code issuance gate", () => {
     expect(refusal(() => checkSignupPlan({ plan: unknown, digest }, digest, { target, toolVersion: commit }, at))).toBe("TOOL_VERSION_UNKNOWN");
     const { digest: good } = made();
     expect(refusal(() => checkSignupPlan({ plan, digest: good }, good, { target, toolVersion: "unknown" }, at))).toBe("TOOL_VERSION_UNKNOWN");
+  });
+
+  it("the command writes only through issueConfirmed, which refuses before touching the database", async () => {
+    // Review follow-up of #121: the checks are proven at the boundary between the command and the write.
+    const untouchable = new Proxy({}, { get: () => { throw new Error("DATABASE_TOUCHED"); } }) as unknown as PrismaClient;
+    const { plan, digest } = made();
+    const current = { target, toolVersion: commit };
+    const outcome = (saved: unknown, confirm: string | undefined, now = current) =>
+      issueConfirmed(untouchable, saved, confirm, now, at).then(() => "WRITTEN", (error) => (error instanceof SignupPlanRefusal ? error.message : `OTHER ${String(error)}`));
+    expect(await outcome({ plan, digest }, undefined)).toBe("CONFIRMATION_MISMATCH");
+    expect(await outcome({ plan, digest }, "0".repeat(64))).toBe("CONFIRMATION_MISMATCH");
+    expect(await outcome({ plan, digest }, digest, { target: { ...target, database: "other" }, toolVersion: commit })).toBe("TARGET_MISMATCH");
+    expect(await outcome({ plan, digest }, digest, { target, toolVersion: "unknown" })).toBe("TOOL_VERSION_UNKNOWN");
+    const unknownPlan = { ...plan, toolVersion: "unknown" };
+    expect(await outcome({ plan: unknownPlan, digest: planDigest(unknownPlan) }, planDigest(unknownPlan), { target, toolVersion: "unknown" })).toBe("TOOL_VERSION_UNKNOWN");
+    // A valid plan reaches the database (and this fake one refuses to be touched): the checks were the only gate.
+    expect(await outcome({ plan, digest }, digest)).toBe("OTHER Error: DATABASE_TOUCHED");
+    const cli = readFileSync("scripts/operators/signup-codes.ts", "utf8").replace(/\r\n/g, "\n");
+    expect(cli.match(/issueFromPlan\(/g)).toHaveLength(2); // its definition and its single call, inside issueConfirmed
+    expect(cli).toMatch(/const plan = checkSignupPlan\(saved, confirm, current, now\);\n\s+return issueFromPlan\(db, plan, planDigest\(plan\), now\);/);
+    expect(cli).toContain('await issueConfirmed(db, saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() })');
   });
 });

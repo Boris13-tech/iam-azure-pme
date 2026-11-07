@@ -72,6 +72,13 @@ export function checkSignupPlan(saved: unknown, confirm: string | undefined, cur
   return plan;
 }
 
+/** The only path from a saved plan to a write: every check of the plan first, then the write with the checked plan. */
+export async function issueConfirmed(db: PrismaClient, saved: unknown, confirm: string | undefined,
+  current: { target: SignupTarget; toolVersion: string }, now = new Date()) {
+  const plan = checkSignupPlan(saved, confirm, current, now);
+  return issueFromPlan(db, plan, planDigest(plan), now);
+}
+
 /** The plan marker stored in the code's note: it makes each plan usable once. */
 export const planMarker = (digest: string) => `plan:${digest.slice(0, 16)}`;
 
@@ -137,8 +144,7 @@ async function main() {
       const file = option(args, "plan");
       if (!file) throw new Error("issue needs --plan <plan.json> --confirm <digest>. Run plan first: it writes nothing.");
       const saved = JSON.parse(readFileSync(file, "utf8")) as { plan: SignupPlan; digest: string };
-      const plan = checkSignupPlan(saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() });
-      const { code, row } = await issueFromPlan(db, plan, saved.digest);
+      const { code, row } = await issueConfirmed(db, saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() });
       // The code is committed: it is shown before anything else can fail, since it cannot be recovered from its hash.
       console.log(`Code id   : ${row.id}`);
       console.log(`Expires   : ${row.expiresAt.toISOString()}`);
