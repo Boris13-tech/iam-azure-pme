@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { withTenantDb } from "../../lib/db/scoped-client";
@@ -205,7 +205,10 @@ describe.runIf(enabled)("Beta-code signup: atomic organization and first adminis
     // check, which it had already passed: Serializable isolation is what keeps the second code out.
     const [rejected] = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     expect(rejected.reason).not.toBeInstanceOf(SignupPlanRefusal);
-    expect(`${(rejected.reason as { code?: string }).code ?? ""} ${String(rejected.reason)}`).toMatch(/P2034|40001|could not serialize/);
+    // Structured fields only, never the message text (Codex, fourth pass of #121).
+    expect(rejected.reason).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    const error = rejected.reason as Prisma.PrismaClientKnownRequestError;
+    expect([error.code, (error.meta as { code?: string } | undefined)?.code]).toEqual(expect.arrayContaining([expect.stringMatching(/^(P2034|40001)$/)]));
     expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(1);
     // And without the barrier, through the command's path.
     const again = planSignupCode({ by: "ci", days: "2", note: `race2 ${suffix}` }, target, "c".repeat(40));
