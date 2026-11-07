@@ -117,6 +117,11 @@ describe.runIf(enabled)("B4 operator break-glass procedure (owner command, app_u
 
     const later = options(org, { issuedAt: new Date(opts.issuedAt.getTime() + 1000) });
     const second = await planBreakGlass(owner, revoke, later);
+    // The tool version alone, on an unchanged state (review follow-up of #183): planning again gives the same digest,
+    // and the same plan applied by another version is refused, with nothing written.
+    expect((await planBreakGlass(owner, revoke, later)).digest).toBe(second.digest);
+    expect(await codeOf(applyBreakGlass(owner, revoke, { ...later, toolVersion: "b".repeat(40), confirm: second.digest }))).toBe("DIGEST_MISMATCH");
+    expect(await events(org)).toHaveLength(2);
     await signIn(org); // the state changes after the dry run
     expect(await codeOf(applyBreakGlass(owner, revoke, { ...later, confirm: second.digest }))).toBe("DIGEST_MISMATCH");
     // Another input, another tool version, or a later time: refused, nothing written.

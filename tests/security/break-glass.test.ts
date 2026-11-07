@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -118,15 +118,21 @@ describe("B4 break-glass: authority matrix and inputs", () => {
       git("init", "-q");
       expect(toolVersion(repo), "no commit yet").toBe("unknown");
       writeFileSync(join(repo, "tool.ts"), "export const a = 1;\n");
-      git("add", "tool.ts");
+      // The command passes its own folder (scripts/operators), a subdirectory of the checkout.
+      const cliFolder = join(repo, "scripts", "operators");
+      mkdirSync(cliFolder, { recursive: true });
+      writeFileSync(join(cliFolder, "cli.ts"), "export {};\n");
+      git("add", "tool.ts", "scripts/operators/cli.ts");
       git("commit", "-q", "-m", "one");
       const head = git("rev-parse", "HEAD");
-      process.chdir(elsewhere); // the caller's directory plays no part
+      process.chdir(elsewhere); // the caller's working directory plays no part
       expect(toolVersion(repo), "clean").toBe(head);
+      expect(toolVersion(cliFolder), "clean, from the command's folder").toBe(head);
       writeFileSync(join(repo, "notes.txt"), "untracked\n");
       expect(toolVersion(repo), "untracked file only").toBe(head);
       writeFileSync(join(repo, "tool.ts"), "export const a = 2;\n");
       expect(toolVersion(repo), "modified, unstaged").toBe("unknown");
+      expect(toolVersion(cliFolder), "a change outside the command's folder, seen from it").toBe("unknown");
       git("add", "tool.ts");
       expect(toolVersion(repo), "modified, staged").toBe("unknown");
       git("commit", "-q", "-m", "two");
@@ -134,6 +140,25 @@ describe("B4 break-glass: authority matrix and inputs", () => {
       rmSync(join(repo, "tool.ts"));
       expect(toolVersion(repo), "tracked file deleted").toBe("unknown");
       expect(toolVersion(join(elsewhere, "missing")), "missing directory").toBe("unknown");
+      // Inherited Git variables cannot point the lookup at another, clean checkout (review follow-up of #183).
+      const clean = join(elsewhere, "clean");
+      execFileSync("git", ["init", "-q", clean], { stdio: "pipe" });
+      writeFileSync(join(clean, "a.txt"), "a");
+      execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=test", "-c", "commit.gpgsign=false", "add", "a.txt"], { cwd: clean, stdio: "pipe" });
+      execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=test", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "c"], { cwd: clean, stdio: "pipe" });
+      expect(toolVersion(clean), "the other checkout is clean").toMatch(/^[0-9a-f]{40}$/);
+      writeFileSync(join(repo, "tool.ts"), "export const a = 3;\n"); // the tool's own checkout is dirty again
+      const names = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "git_dir"];
+      try {
+        for (const variables of [{ GIT_DIR: join(clean, ".git"), GIT_WORK_TREE: clean }, { GIT_DIR: join(clean, ".git") }, { GIT_WORK_TREE: clean },
+          { GIT_INDEX_FILE: join(clean, ".git", "index") }, { git_dir: join(clean, ".git"), GIT_WORK_TREE: clean }]) {
+          Object.assign(process.env, variables);
+          expect(toolVersion(repo), JSON.stringify(Object.keys(variables))).toBe("unknown");
+          for (const name of names) delete process.env[name];
+        }
+      } finally {
+        for (const name of names) delete process.env[name];
+      }
     } finally {
       process.chdir(previous);
       rmSync(repo, { recursive: true, force: true });

@@ -348,7 +348,8 @@ export async function computePlan(tx: Tx, input: BreakGlassInput, options: Break
 
 /** Dry run: READ ONLY, nothing is written. */
 /** A plan and its application carry a commit-shaped tool version; "unknown" (a modified or unknown checkout) is refused.
- * This checks the shape only: the provenance comes from the command, which reads its own clean checkout (tool-version.ts). */
+ * This checks the shape only: the provenance comes from the command, which asks Git about its own checkout, with no
+ * inherited GIT_* variable, and requires it clean (scripts/operators/tool-version.ts). */
 const KNOWN_COMMIT = /^[0-9a-f]{40}$/;
 
 export async function planBreakGlass(db: PrismaClient, raw: unknown, options: BreakGlassOptions) {
