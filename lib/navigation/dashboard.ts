@@ -1,7 +1,8 @@
 import type { NavItem } from "@/components/app-shell/app-shell";
 import { REVIEW_READ_RIGHTS } from "@/lib/resources/access-review-visibility";
 
-// An item shows when the viewer holds its right, or any one of its rights (the same rule as the page behind it).
+// An item shows when the viewer holds its right, or any one of its rights. This only hides links: each page and API
+// enforces its own read gate (for access reviews, the review service read gate, read or read_all).
 export const DASHBOARD_NAVIGATION: ReadonlyArray<NavItem & { entitlement: string | readonly string[] | null }> = [
   { href: "/dashboard", label: "Vue d’ensemble", icon: "overview", group: "Pilotage", entitlement: null },
   { href: "/dashboard/users", label: "Identités", icon: "users", group: "Identités et accès", entitlement: "subjects.read" },

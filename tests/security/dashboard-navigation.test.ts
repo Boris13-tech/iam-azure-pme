@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { visibleNavigation } from "../../lib/navigation/dashboard";
 
-// The access reviews link follows the page's own rule: read or read_all (an auditor holding only read_all sees it).
+// The access reviews link shows on the review service read gate: read or read_all (an auditor holding only read_all
+// sees it). Hiding a link is not the access control; the service gate is.
 // Review follow-up of #178: the navigation the server builds is checked on its output for each set of rights, so an
 // ineffective filter cannot pass on its source text alone.
 const shown = (entitlements: string[]) => {
