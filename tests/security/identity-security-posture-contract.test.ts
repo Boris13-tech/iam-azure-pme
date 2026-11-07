@@ -5,7 +5,7 @@ import { WIDGETS, WIDGET_IDS, attentionCount, breakdownTotal, isPermitted, type 
 import { POSTURE_QUERIES } from "../../lib/dashboard/posture-queries";
 
 describe("Identity Security Posture v1 contract", () => {
-  it("uses only existing catalog entitlements (no catalog change in this slice)", () => {
+  it("uses only catalog entitlements", () => {
     for (const id of WIDGET_IDS) for (const key of [...WIDGETS[id].permissions, ...(WIDGETS[id] as { anyOf?: readonly string[] }).anyOf ?? []])
       expect(ENTITLEMENT_CATALOG_V1 as readonly string[]).toContain(key);
   });

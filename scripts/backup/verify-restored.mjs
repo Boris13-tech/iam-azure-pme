@@ -17,9 +17,10 @@ const quote = name => `"${name.replace(/"/g, '""')}"`;
 const [appUser, appBypass] = ro(app, "SELECT current_user, r.rolbypassrls FROM pg_roles r WHERE r.rolname = current_user;").split("|");
 check("runtime role", appUser === "app_user" && appBypass === "f", `${appUser}, bypassrls=${appBypass}`);
 
-// Every tenant table carries both scope columns and forced RLS.
+// Every tenant table carries both scope columns and forced RLS. Partitioned parents count too: reading through a
+// parent is what must be isolated, not only each partition.
 const tenantTables = ro(owner, `SELECT string_agg(c.relname, ',' ORDER BY c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relforcerowsecurity
+  WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relforcerowsecurity
   AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'organizationId' AND NOT a.attisdropped)
   AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'tenantId' AND NOT a.attisdropped)
   AND has_table_privilege('app_user', c.oid, 'SELECT');`).split(",").filter(Boolean);

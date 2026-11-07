@@ -31,9 +31,16 @@ describe("R1: no network identifier is stored with a session", () => {
     expect(recovery).not.toMatch(/ipHash|userAgentHash/);
     const admin = read("lib/admin/canonical-administration.ts");
     expect(admin).not.toMatch(/ipHash: true|userAgentHash: true/);
-    // Every session read in the administration library uses the explicit projection.
-    const reads = admin.match(/tx\.session\.find\w*\([^;]*/g) ?? [];
-    expect(reads.length).toBeGreaterThanOrEqual(3);
-    for (const call of reads) if (!/findFirst\(\{ where: \{ id: sessionId, revokedAt: null \} \}\)/.test(call)) expect(call).toContain("SESSION_ADMIN_FIELDS");
+    // Every session read in the administration library and the session store selects its columns explicitly, and
+    // none selects a network hash: no exemption, whatever the formatting.
+    for (const path of ["lib/admin/canonical-administration.ts", "lib/auth/session-store.ts"]) {
+      const source = read(path);
+      const reads = source.match(/tx\.session\.find\w*\([^;]*/g) ?? [];
+      expect(reads.length, path).toBeGreaterThanOrEqual(path.includes("admin") ? 3 : 1);
+      for (const call of reads) {
+        expect(call, `${path}: ${call.slice(0, 80)}`).toMatch(/\bselect\s*:/);
+        expect(call, `${path}: ${call.slice(0, 80)}`).not.toMatch(/\binclude\s*:|ipHash|userAgentHash/);
+      }
+    }
   });
 });

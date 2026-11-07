@@ -7,7 +7,7 @@ Migration, rollback and forward-fix: `docs/operations/CUSTOMER-SELF-ONBOARDING-V
 
 ## What a new customer does
 
-1. **Signup.** The LUXIA operator issues a beta code with `scripts/operators/signup-codes.ts issue`. The code is shown once and only its hash is stored.
+1. **Signup.** The LUXIA operator issues a beta code with `scripts/operators/signup-codes.ts`: `plan` writes nothing and prints a digest, then `issue` writes with that digest as the confirmation (standard, section 10), within 15 minutes, on the same database and tool commit, once per plan. The code is shown once and only its hash is stored.
 2. **Organization creation.** On `/signup`, the customer enters the code, the organization name and identifier, their own name and their identifier, then creates a passkey. One transaction creates:
    - the organization;
    - its tenant;

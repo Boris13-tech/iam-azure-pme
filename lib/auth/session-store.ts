@@ -159,16 +159,14 @@ export class SessionStore {
     const scope = { organizationId: sessionBootstrap.organizationId, tenantId: sessionBootstrap.tenantId };
     
     return await withTenantDb(scope, async (tx) => {
-      // We fetch it first to return it (useful for federated logout)
+      // We fetch it first to return it (useful for federated logout). Explicit projection: only what sign-out and
+      // federated logout use; network hashes of older sessions are never read.
       const session = await tx.session.findUnique({
         where: { id: hashedToken },
-        include: {
-          identityAccount: {
-            include: {
-              providerConnection: true
-            }
-          }
-        }
+        select: {
+          id: true, organizationId: true, tenantId: true, subjectId: true, identityAccountId: true, revokedAt: true, expiresAt: true,
+          identityAccount: { select: { providerConnection: true } },
+        },
       });
 
       // Conditional: two concurrent sign-outs revoke once and record one event; the second is a no-op.

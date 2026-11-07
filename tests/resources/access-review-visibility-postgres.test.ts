@@ -16,7 +16,7 @@ const context = { organizationId: randomUUID(), tenantId: randomUUID() };
 const foreign = { organizationId: randomUUID(), tenantId: randomUUID() };
 const as = (subjectId: string, scope = context) => ({ ...scope, subjectId });
 const manager = as(randomUUID()), creator = as(randomUUID()), reviewer1 = as(randomUUID()), reviewer2 = as(randomUUID());
-const reader = as(randomUUID()), auditor = as(randomUUID()), decider = as(randomUUID()), nobody = as(randomUUID());
+const reader = as(randomUUID()), auditor = as(randomUUID()), decider = as(randomUUID()), nobody = as(randomUUID()), manageOnly = as(randomUUID());
 const foreignAuditor = as(randomUUID(), foreign);
 const alice = randomUUID(), bob = randomUUID();
 const payroll = randomUUID(), crm = randomUUID(), payrollScope = randomUUID(), crmScope = randomUUID();
@@ -57,7 +57,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Access review campaig
       await tx.tenant.create({ data: { id: context.tenantId, organizationId: context.organizationId, name: "Review visibility fixture" } });
       for (const [id, name] of [[manager.subjectId, "Manager"], [creator.subjectId, "Creator"], [reviewer1.subjectId, "Reviewer one"],
         [reviewer2.subjectId, "Reviewer two"], [reader.subjectId, "Reader"], [auditor.subjectId, "Auditor"], [decider.subjectId, "Decider"],
-        [nobody.subjectId, "Nobody"], [alice, "Alice"], [bob, "Bob"]])
+        [nobody.subjectId, "Nobody"], [manageOnly.subjectId, "Manage only"], [alice, "Alice"], [bob, "Bob"]])
         await tx.subject.create({ data: { ...context, id, type: "HUMAN", name } });
       for (const [id, scopeId, name] of [[payroll, payrollScope, "Payroll"], [crm, crmScope, "CRM"]]) {
         await tx.resource.create({ data: { ...context, id, type: "API", name } });
@@ -70,7 +70,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Access review campaig
       const rights: Array<[string, string[]]> = [
         ["access_reviews.read", [manager, creator, reviewer1, reviewer2, reader].map(auth => auth.subjectId)],
         ["access_reviews.read_all", [auditor.subjectId]],
-        ["access_reviews.create", [manager.subjectId, creator.subjectId]], ["access_reviews.manage", [manager.subjectId]],
+        ["access_reviews.create", [manager.subjectId, creator.subjectId]], ["access_reviews.manage", [manager.subjectId, manageOnly.subjectId]],
         ["access_reviews.decide", [reviewer1.subjectId, reviewer2.subjectId, decider.subjectId]]];
       for (const [key, subjectIds] of rights) {
         const entitlement = await tx.entitlement.create({ data: { ...context, key, action: key.split(".")[1], resource: "access_reviews" } });
@@ -134,6 +134,12 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Access review campaig
     await expect(review.reviewConfiguration(auditor)).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect((await review.listReviewItems(manager, second))[0].decision).toBe("PENDING");
     expect((await review.getAccessReview(manager, second)).status).toBe("OPEN");
+  });
+
+  it("manage alone reads nothing: reading still needs read or read_all (403, not a campaign list)", async () => {
+    for (const read of [() => review.listAccessReviews(manageOnly), () => review.getAccessReview(manageOnly, first), () => review.listReviewItems(manageOnly, first),
+      () => review.reviewAudit(manageOnly, first)])
+      await expect(read()).rejects.toMatchObject({ code: "FORBIDDEN", httpStatus: 403 });
   });
 
   it("5. manage keeps its behaviour: sees every campaign and reaches completion rules on any of them", async () => {
