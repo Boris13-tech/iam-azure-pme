@@ -5,8 +5,6 @@
 
 export type ErrorComponent = "session" | "request";
 export const REPORT_TIMEOUT_MS = 1_500;
-const MAX_MESSAGE = 300;
-const MAX_FRAMES = 20;
 
 type Target = { url: string };
 
@@ -22,53 +20,28 @@ export function envelopeTarget(dsn = process.env.LUXIA_ERROR_DSN): Target | null
   return { url: `https://${parsed.host}/api/${project}/envelope/?sentry_key=${key}&sentry_version=7` };
 }
 
-/** Removes anything that could identify a person or carry a secret from free text. */
-export function scrub(text: string): string {
-  return text
-    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/gi, "<url>")
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "<email>")
-    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, "<ip>")
-    .replace(/\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}\b/gi, "<ip>")
-    .replace(/[A-Za-z0-9_\-+/=]{24,}/g, "<token>")
-    .slice(0, MAX_MESSAGE);
-}
-
-/** The deployment root (process.cwd()): only a file under it is named; nothing is guessed from folder names. */
-const deploymentRoot = () => (typeof process.cwd === "function" ? process.cwd().replace(/\\/g, "/").replace(/\/+$/, "") : "");
-
-/** The project-relative part of a stack path; any other path says nothing about the machine or a person. */
-function projectPath(raw: string) {
-  const path = raw.replace(/\\/g, "/").replace(/^file:\/\/\/([A-Za-z]:)/, "$1").replace(/^file:\/\//, "");
-  const root = deploymentRoot();
-  // Only files under the deployment root, and only its code folders: a machine folder named app or lib never leaves.
-  if (!root || !path.startsWith(`${root}/`)) return "<external>";
-  const relative = /^((?:app|lib|node_modules|\.next)\/.+)$/.exec(path.slice(root.length + 1))?.[1];
-  if (!relative) return "<external>";
-  const parts = relative.split("/"), file = parts.pop()!;
-  // Folders hold no dot except .next, and only a package scope may hold @: a name or an address fails here.
-  const safe = parts.every((part) => /^(\.next|@?[\w()[\]-]+)$/.test(part)) && /^[\w()[\]-]+(\.[\w-]+)*$/.test(file);
-  return safe ? scrub(relative) : "<external>";
-}
-
-/** A function name leaves only when it looks like code (identifiers, dots, "async", "new", "[as x]"); a path
- *  that a frame without a name put in its place (a folder with " (" in it) becomes "?". */
-const functionName = (raw: string | undefined) =>
-  raw && /^(?:async )?(?:new )?[\w$.<>]+(?: \[as [\w$]+\])?$/.test(raw) ? scrub(raw).slice(0, 80) : "?";
-
-/** Free text can hold anything, so only a plain error code leaves; the type and the stack frames locate the rest. */
-// An error code has the shape WORD_WORD (at least one underscore): a lone upper-case word may be a secret.
-const safeMessage = (message: string) => (message.length <= 80 && /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(message) ? message : "<withheld>");
-
-function frames(stack: string | undefined) {
-  if (!stack) return [];
-  return stack.split("\n").slice(1).map((line) => /at (?:(.+?) \()?(.+?):(\d+):\d+\)?$/.exec(line.trim())).filter(Boolean)
-    .slice(0, MAX_FRAMES).reverse().map((m) => ({
-      function: functionName(m![1]),
-      // Paths are reduced to the project-relative part; machine prefixes never leave.
-      filename: projectPath(m![2]).slice(0, 160),
-      lineno: Number(m![3]),
-    }));
-}
+/**
+ * What may leave, as closed lists defined in code (review follow-up of #108): a value is sent only when it is one of
+ * these constants, never because of its shape. Function names, file paths and free text never leave; the component,
+ * the route pattern and the release locate the error, and the full stack stays in the platform's own logs.
+ * A new error class or code thrown in lib/ or app/ must be added here (a test fails otherwise), so a reviewer sees it.
+ */
+export const KNOWN_ERROR_TYPES: ReadonlySet<string> = new Set([
+  "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError",
+  "PrismaClientKnownRequestError", "PrismaClientUnknownRequestError", "PrismaClientInitializationError", "PrismaClientValidationError",
+  "PrismaClientRustPanicError", "AuthorizationInfrastructureError", "AuthorizationModeInvalidError", "CanonicalAdminError",
+  "ContinuitySecurityError", "CryptoPolicyError", "InvitationError", "PortabilitySecurityError", "ProviderAdapterError",
+  "ProviderIdempotencyConflictError", "ProviderRegistryError", "RecoveryError", "SessionCreationDeniedError", "SignupError",
+  "SoDDeniedError", "UnsupportedProviderCapabilityError",
+]);
+export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
+  "AUTHZ_MODE_INVALID", "CROSS_ORGANIZATION_WRITE_DENIED", "CROSS_TENANT_WRITE_DENIED", "ENTITLEMENT_COLLISION",
+  "INVALID_AUTHENTICATION_EVIDENCE", "INVALID_AUTHENTICATION_EVIDENCE_VERSION", "INVALID_CURSOR", "INVALID_PROJECTION_EVIDENCE",
+  "INVALID_RETRY_POLICY", "LOCAL_IDENTITY_CREATION_FAILED", "ORGANIZATION_NOT_FOUND", "POSTURE_UNAVAILABLE", "PRODUCTION_SECRET_STORE_REQUIRED", "PUBLIC_KEY_UNAVAILABLE",
+  "REJECTED_EVIDENCE_REQUIRED", "RETRY_EXHAUSTED", "RUNTIME_DRAINING", "RUNTIME_NOT_DRAINING", "RUNTIME_NOT_READY",
+  "SIGN_IN_EVIDENCE_MISMATCH", "SUBJECT_READ_FAILED", "WEBAUTHN_UNAVAILABLE",
+]);
+const known = (set: ReadonlySet<string>, value: unknown, fallback: string) => (typeof value === "string" && set.has(value) ? value : fallback);
 
 /** The event LUXIA sends: an allow-list of fields, nothing about the request or the person. */
 export function buildEvent(error: unknown, component: ErrorComponent, routePath?: string) {
@@ -84,10 +57,8 @@ export function buildEvent(error: unknown, component: ErrorComponent, routePath?
     ...(release && /^[0-9a-f]{40}$/.test(release) ? { release } : {}),
     tags: { component, ...(route ? { route } : {}) },
     exception: { values: [{
-      // The type leaves only when it is shaped like an error class (SomethingError); any other name says "Error".
-      type: /^[A-Z][A-Za-z0-9]{0,58}Error$/.test(err.name) ? err.name : "Error",
-      value: safeMessage(err.message || ""),
-      stacktrace: { frames: frames(err.stack) },
+      type: known(KNOWN_ERROR_TYPES, err.name, "Error"),
+      value: known(KNOWN_ERROR_CODES, err.message, "<withheld>"),
     }] },
   };
 }
