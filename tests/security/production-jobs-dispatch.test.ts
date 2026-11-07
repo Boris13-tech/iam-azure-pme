@@ -76,10 +76,16 @@ describe("Production jobs by workflow_dispatch only", () => {
     };
     // Context names are case-insensitive in GitHub expressions.
     const namesSecrets = (value: unknown) => strings(value).flatMap(expressions).some((expression) => /(^|[^\w.])secrets\b/i.test(expression));
-    // The job token under its other names (Codex, third pass of #179): github.token, github['token'], or the whole github
-    // context (toJSON(github) carries the token). A job may use it itself; it may not hand it to a reusable workflow.
+    // The job token, however it is reached (Codex, third and fourth passes of #179). A job may use it itself; it may not
+    // hand it to a reusable workflow. In a reusable call the github context is allowed in one form only, a plain property
+    // github.<name> other than token: any other use (github['x'], github[format(...)], toJSON(github), a bare github)
+    // could reach the token and is refused, whatever it computes.
     const namesToken = (value: unknown) => strings(value).flatMap(expressions).some((expression) =>
-      /(^|[^\w.])github\b/i.test(expression) && (/\btoken\b/i.test(expression) || /(^|[^\w.])github\b(?!\s*[.[])/i.test(expression)));
+      [...expression.matchAll(/(^|[^\w.])github\b/gi)].some((match) => {
+        const after = expression.slice((match.index ?? 0) + match[0].length);
+        const property = /^\s*\.\s*([A-Za-z_][\w-]*)/.exec(after);
+        return !property || property[1].toLowerCase() === "token";
+      }));
     /** Every violation in a parsed workflow; `checked` counts the secret-touching jobs seen. */
     const inspect = (doc: Workflow, label: string, load: (path: string) => Workflow, out: { checked: number; bad: string[] }) => {
       const { jobs = {}, ...rest } = doc;
@@ -142,6 +148,11 @@ describe("Production jobs by workflow_dispatch only", () => {
       lines("jobs:", "  send:", "    uses: someone/repo/.github/workflows/w.yml@main", "    with:", "      token: ${{ secrets.GITHUB_TOKEN }}"),
       lines("jobs:", "  send:", "    uses: ./called.yml", "    with:", "      token: ${{ GitHub['token'] }}"),
       lines("jobs:", "  send:", "    uses: ./called.yml", "    with:", "      context: ${{ toJSON(github) }}"),
+      // Codex's fourth pass of #179: the property name computed at run time.
+      lines("jobs:", "  send:", "    uses: someone/repo/.github/workflows/w.yml@main", "    with:", "      credential: ${{ github[format('{0}{1}', 'to', 'ken')] }}"),
+      lines("jobs:", "  send:", "    uses: ./called.yml", "    with:", "      credential: ${{ github['tok' || 'en'] }}"),
+      lines("jobs:", "  send:", "    uses: ./called.yml", "    with:", "      credential: ${{ fromJSON(toJSON(github)).token }}"),
+      lines("jobs:", "  send:", "    uses: ./called.yml", "    with:", "      credential: ${{ github . TOKEN }}"),
     ];
     for (const text of forms) expect(flagged(text), text).not.toEqual([]);
     // And no false alarm: the word "secrets" outside an expression, and protected jobs, are fine.
