@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +15,24 @@ function fn(sql: string, name: string) {
 }
 
 describe("R2 session hash redaction: migration architecture", () => {
+  it("closed world: the migration and its rollback are exactly the reviewed files", () => {
+    // Review follow-up of #181 (third pass): static reading cannot rule out every way SQL can be written (a second
+    // definition, dynamic SQL, quoting tricks). The migration is already on main and is immutable once applied (Prisma
+    // checks its checksum); the rollback goes with it. Any byte change to either fails here and must come with a new
+    // AI cross review and a new fingerprint. The checks below explain what was reviewed; the effective privileges are
+    // proven on PostgreSQL by tests/resources/session-hash-redaction-postgres.test.ts.
+    const fingerprint = (text: string) => createHash("sha256").update(text.replace(/^\uFEFF/, "")).digest("hex");
+    expect(fingerprint(migration), "migration").toBe("5cd04ed8e32792201cecfdd7e80881a49990839e57cecc87a1218e90db358d36");
+    expect(fingerprint(rollback), "rollback").toBe("dfa5754c421cff37ebfa21122466c8ce1329978b890720c6b871c4594d0d8836");
+    // Each bypass the reviewers found changes the bytes, so the fingerprint refuses it.
+    for (const mutated of [
+      `${migration}\nCREATE OR REPLACE FUNCTION luxia_session_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;\n`,
+      `${migration}\nDO $$ BEGIN EXECUTE 'GR' || 'ANT EXECUTE ON FUNCTION luxia_session_guard() TO PUBLIC'; END $$;\n`,
+      migration.replace("REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC;", "DO $revoke1$ BEGIN IF FALSE THEN REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC; END IF; END $revoke1$;"),
+      `${migration}\nDO $$ BEGIN ROLLBACK; END $$;\n`, // Antigravity, third pass
+    ]) expect(fingerprint(mutated)).not.toBe(fingerprint(migration));
+  });
+
   it("is expand-only: no row changes, no dropped object, no new grant", () => {
     const body = migration.replace(/^--.*$/gm, "");
     expect(body).not.toMatch(/DROP (TABLE|COLUMN|TYPE|FUNCTION|TRIGGER)|GRANT |SECURITY DEFINER|ALTER TABLE/);
@@ -32,7 +51,8 @@ describe("R2 session hash redaction: migration architecture", () => {
   });
 
   it("only the table owner, in its own session, may clear a hash; the replaced guard stays closed to PUBLIC", () => {
-    // Review follow-ups of #126 and #181 (both reviewers). Static checks on the executable SQL, read as PostgreSQL does:
+    // Review follow-ups of #126 and #181 (both reviewers). What the reviewers verified, as static checks on the executable SQL
+    // (the closed-world fingerprint above is the control):
     // comments removed (block comments nest), string literals kept. Everything the guard runs before and including the
     // owner-only rule is pinned word for word, so no early return, enclosing block or added branch can make the rule
     // unreachable without failing here. The revoke is a top-level statement after the function (not inside a quoted
@@ -66,7 +86,7 @@ describe("R2 session hash redaction: migration architecture", () => {
       return body.startsWith(`${GUARD_UP_TO_OWNER_RULE} `);
     };
     // CREATE OR REPLACE keeps the old privileges in PostgreSQL; the migration and the rollback still state the revoke.
-    const statements = (sql: string) => blankLiterals(executable(sql).replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, " $$$$ "))
+    const statements = (sql: string) => blankLiterals(executable(sql).replace(/\$((?:[A-Za-z_\u0080-\uffff][A-Za-z0-9_\u0080-\uffff]*)?)\$[\s\S]*?\$\1\$/g, " $$$$ "))
       .split(";").map((statement) => statement.trim());
     const revokedAfterCreate = (sql: string) => {
       const list = statements(sql);

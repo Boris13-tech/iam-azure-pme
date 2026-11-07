@@ -40,6 +40,9 @@ describe.runIf(enabled)("R2: one-way redaction of session network hashes (Postgr
       const before = catalog();
       psqlOk(url, ["-1", "-f", `prisma/migrations/${NEW}/migration.sql`]);
       const applied = catalog();
+      // Effective privileges, whatever the SQL text says (review follow-up of #181): the guard is never executable by PUBLIC.
+      const guardPublic = () => psqlOk(url, ["-c", `SELECT count(*) FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a WHERE p.proname = 'luxia_session_guard' AND a.grantee = 0`]).trim();
+      expect(guardPublic(), "after the migration").toBe("0");
 
       db = new PrismaClient({ datasources: { db: { url } } });
       const org = randomUUID(), tenant = randomUUID(), subjectId = randomUUID(), accountId = randomUUID(), provider = randomUUID();
@@ -113,12 +116,14 @@ describe.runIf(enabled)("R2: one-way redaction of session network hashes (Postgr
       // Rollback restores the previous guard exactly; the migration applies again.
       psqlOk(url, ["-1", "-f", ROLLBACK]);
       expect(catalog()).toBe(before);
+      expect(guardPublic(), "after the rollback").toBe("0");
       // Lossless: every row stays, cleared hashes stay cleared, and the restored guard still lets an active session live.
       const list = ids.map((id) => `'${id}'`).join(",");
       expect(psqlOk(url, ["-c", `SELECT count(*) FROM "Session" WHERE "id" IN (${list}) AND "ipHash" IS NULL AND "userAgentHash" IS NULL`]).trim()).toBe("3");
       psqlOk(url, ["-c", `UPDATE "Session" SET "lastSeenAt" = now() WHERE "id" = '${other}'`]);
       psqlOk(url, ["-1", "-f", `prisma/migrations/${NEW}/migration.sql`]);
       expect(catalog()).toBe(applied);
+      expect(guardPublic(), "after re-application").toBe("0");
     } finally {
       await db?.$disconnect();
       psql(admin, ["-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`]);
