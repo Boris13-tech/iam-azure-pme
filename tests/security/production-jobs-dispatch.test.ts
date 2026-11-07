@@ -76,6 +76,10 @@ describe("Production jobs by workflow_dispatch only", () => {
     };
     // Context names are case-insensitive in GitHub expressions.
     const namesSecrets = (value: unknown) => strings(value).flatMap(expressions).some((expression) => /(^|[^\w.])secrets\b/i.test(expression));
+    // The job token under its other names (Codex, third pass of #179): github.token, github['token'], or the whole github
+    // context (toJSON(github) carries the token). A job may use it itself; it may not hand it to a reusable workflow.
+    const namesToken = (value: unknown) => strings(value).flatMap(expressions).some((expression) =>
+      /(^|[^\w.])github\b/i.test(expression) && (/\btoken\b/i.test(expression) || /(^|[^\w.])github\b(?!\s*[.[])/i.test(expression)));
     /** Every violation in a parsed workflow; `checked` counts the secret-touching jobs seen. */
     const inspect = (doc: Workflow, label: string, load: (path: string) => Workflow, out: { checked: number; bad: string[] }) => {
       const { jobs = {}, ...rest } = doc;
@@ -87,6 +91,7 @@ describe("Production jobs by workflow_dispatch only", () => {
           // secrets.X (and is checked below). Anywhere else (with: inputs, if:, name) the callee would see a plain value.
           const { secrets: _passed, ...others } = body;
           if (namesSecrets(others)) { out.checked += 1; out.bad.push(`${where}: a secret passed outside the secrets mapping`); continue; }
+          if (namesToken(body)) { out.checked += 1; out.bad.push(`${where}: the job token passed to a reusable workflow`); continue; }
           if (body.secrets === undefined && !workflowLevel) continue;
           // A job that calls a reusable workflow cannot carry an environment itself. Local: each of the called
           // workflow's secret-touching jobs must be protected. Remote: no secret may be passed at all.
@@ -101,7 +106,7 @@ describe("Production jobs by workflow_dispatch only", () => {
     };
     const fromRepo = (path: string) => yaml.load(read(path)) as Workflow;
     const result = { checked: 0, bad: [] as string[] };
-    for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name)))
+    for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/i.test(name)))
       inspect(fromRepo(`.github/workflows/${file}`), file, fromRepo, result);
     expect(result.bad).toEqual([]);
     expect(result.checked).toBeGreaterThanOrEqual(4);
@@ -132,12 +137,20 @@ describe("Production jobs by workflow_dispatch only", () => {
       // Antigravity's correction pass of #179: a secret passed as an input to a local reusable workflow.
       lines("jobs:", "  x:", "    uses: ./called.yml", "    with: { token: \"${{ secrets.T }}\" }"),
       lines("jobs:", "  x:", "    uses: ./called.yml", "    with:", "      token: ${{ toJSON(secrets) }}"),
+      // Codex's third pass of #179: the job token under its other names, to a remote or a local reusable workflow.
+      lines("jobs:", "  send:", "    uses: someone/repo/.github/workflows/w.yml@main", "    with:", "      token: ${{ github.token }}"),
+      lines("jobs:", "  send:", "    uses: someone/repo/.github/workflows/w.yml@main", "    with:", "      token: ${{ secrets.GITHUB_TOKEN }}"),
+      lines("jobs:", "  send:", "    uses: ./called.yml", "    with:", "      token: ${{ GitHub['token'] }}"),
+      lines("jobs:", "  send:", "    uses: ./called.yml", "    with:", "      context: ${{ toJSON(github) }}"),
     ];
     for (const text of forms) expect(flagged(text), text).not.toEqual([]);
     // And no false alarm: the word "secrets" outside an expression, and protected jobs, are fine.
     const fine = [
       lines("jobs:", "  scan:", "    name: Scan for secrets", "    steps:", "      - run: gitleaks detect # finds secrets"),
       lines("jobs:", "  x:", "    env:", "      MODE: ${{ inputs.secrets }} and }} secrets outside"),
+      // A job may use its own token; and a reusable workflow may receive other github values.
+      lines("jobs:", "  x:", "    env:", "      GH_TOKEN: ${{ github.token }}", "    steps:", '      - run: gh api "repos/$GITHUB_REPOSITORY"'),
+      lines("jobs:", "  x:", "    uses: ./called.yml", "    with:", "      sha: ${{ github.sha }}"),
       lines("jobs:", "  x:", "    environment: Production", "    steps:", '      - env: { ALL: "${{ toJSON(secrets) }}" }'),
       lines("env:", "  TOKEN: ${{ secrets.TOKEN }}", "jobs:", "  x:", "    environment: { name: staging }", "    steps:", '      - run: echo "$TOKEN"'),
     ];

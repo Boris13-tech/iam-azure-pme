@@ -101,7 +101,7 @@ describe("Production workflow inputs never reach a shell by expression interpola
   const disallowed = (script: string) => [...script.matchAll(/\$\{\{[\s\S]*?(\}\}|$)/g)].map((m) => m[0]);
 
   it("in every workflow, a run script holds no expression at all, step outputs included", () => {
-    for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name))) {
+    for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/i.test(name))) {
       for (const script of parsedRunScripts(`.github/workflows/${file}`)) expect(disallowed(script), file).toEqual([]);
     }
   });
