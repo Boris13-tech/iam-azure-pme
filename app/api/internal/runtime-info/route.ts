@@ -1,4 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
+import { resolveAuthorizationMode } from "@/lib/auth/authorization-gateway";
 
 export async function GET(req: NextRequest) {
   const expected = process.env.STAGING_PROVENANCE_TOKEN;
@@ -17,6 +18,7 @@ export async function GET(req: NextRequest) {
       process.env.VERCEL_GIT_COMMIT_SHA ??
       process.env.GIT_COMMIT_SHA ??
       "unknown",
-    authzMode: process.env.AUTHZ_MODE ?? "legacy"
+    // The mode the gateway actually applies ("refused" when Production has no valid mode).
+    authzMode: resolveAuthorizationMode() ?? "refused"
   });
 }
