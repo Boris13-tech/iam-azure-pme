@@ -32,17 +32,33 @@ describe("R2 session hash redaction: migration architecture", () => {
   });
 
   it("only the table owner, in its own session, may clear a hash; the replaced guard stays closed to PUBLIC", () => {
-    // Review follow-up of #126: these lines were only checked by the PostgreSQL suite; now the static suite fails too.
-    const guard = fn(migration, "luxia_session_guard");
-    expect(guard).toContain("RAISE EXCEPTION 'SESSION_REDACTION_OWNER_ONLY'");
-    expect(guard).toContain("current_user = session_user");
-    expect(guard).toMatch(/r\.oid = c\.relowner WHERE c\.oid = TG_RELID AND r\.rolname = current_user/);
+    // Review follow-ups of #126 and #181: checked on the executable SQL (comments removed, spacing normalised), as one
+    // whole statement, so neither a disabled condition nor a commented-out revoke can keep these checks green.
+    const executable = (sql: string) => sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ").replace(/\s+/g, " ");
+    const OWNER_ONLY = `IF ROW(NEW."ipHash", NEW."userAgentHash") IS DISTINCT FROM ROW(OLD."ipHash", OLD."userAgentHash") AND NOT (current_user = session_user AND EXISTS (SELECT 1 FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE c.oid = TG_RELID AND r.rolname = current_user)) THEN RAISE EXCEPTION 'SESSION_REDACTION_OWNER_ONLY' USING ERRCODE = '42501'; END IF;`;
+    const ownerOnly = (sql: string) => executable(fn(sql, "luxia_session_guard")).includes(OWNER_ONLY);
     // CREATE OR REPLACE keeps the old privileges in PostgreSQL; the migration and the rollback still state the revoke.
-    for (const [name, sql] of [["migration", migration], ["rollback", rollback]] as const) {
-      const created = sql.indexOf("CREATE OR REPLACE FUNCTION luxia_session_guard()");
-      const revoked = sql.indexOf("REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC;");
-      expect(created, name).toBeGreaterThanOrEqual(0);
-      expect(revoked, name).toBeGreaterThan(created);
+    const revokedAfterCreate = (sql: string) => {
+      const text = executable(sql);
+      const created = text.indexOf("CREATE OR REPLACE FUNCTION luxia_session_guard()");
+      return created >= 0 && text.indexOf("; REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC;", created) > created;
+    };
+    expect(ownerOnly(migration)).toBe(true);
+    for (const [name, sql] of [["migration", migration], ["rollback", rollback]] as const) expect(revokedAfterCreate(sql), name).toBe(true);
+
+    // The check itself: each mutation below disables the rule while keeping its words, and must be caught.
+    const disabled = [
+      migration.replace("AND NOT (current_user = session_user", "AND FALSE AND NOT (current_user = session_user"),
+      migration.replace("current_user = session_user AND EXISTS", "current_user = session_user OR EXISTS"),
+      migration.replace("r.rolname = current_user))", "r.rolname = current_user OR TRUE))"),
+      migration.replace("  IF ROW(NEW.\"ipHash\", NEW.\"userAgentHash\") IS DISTINCT FROM ROW(OLD.\"ipHash\", OLD.\"userAgentHash\")\n     AND NOT",
+        "  -- IF ROW(NEW.\"ipHash\", NEW.\"userAgentHash\") IS DISTINCT FROM ROW(OLD.\"ipHash\", OLD.\"userAgentHash\")\n  IF FALSE AND NOT"),
+    ];
+    for (const sql of disabled) { expect(sql).not.toBe(migration); expect(ownerOnly(sql)).toBe(false); }
+    for (const sql of [migration, rollback]) {
+      const commented = sql.replace("REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC;", "-- REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC;");
+      const blocked = sql.replace("REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC;", "/* REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC; */");
+      for (const mutated of [commented, blocked]) { expect(mutated).not.toBe(sql); expect(revokedAfterCreate(mutated)).toBe(false); }
     }
   });
 
