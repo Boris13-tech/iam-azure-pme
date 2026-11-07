@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -77,14 +77,31 @@ function runStep(script: string, env: Record<string, string>) {
 }
 
 describe("Production workflow inputs never reach a shell by expression interpolation", () => {
-  it("no run script of a Production workflow interpolates inputs or event data", () => {
+  it("no run script of a Production workflow holds any expression at all (any syntax: inputs['x'], format(), toJSON())", () => {
     for (const path of PRODUCTION_WORKFLOWS) {
       const scripts = runScripts(path);
       expect(scripts.length, path).toBeGreaterThan(0);
-      for (const { line, script } of scripts) {
-        expect(script, `${path}:${line}`).not.toMatch(/\$\{\{\s*(inputs|github\.event)\./);
-      }
+      for (const { line, script } of scripts) expect(script, `${path}:${line}`).not.toContain("${{");
     }
+  });
+
+  // Every workflow: a run script may only read a previous step's output; inputs, event data, refs and the like
+  // reach a shell through env only, whatever the expression syntax.
+  const ALLOWED_IN_SCRIPT = /^\$\{\{\s*steps\.[\w-]+\.outputs\.[\w-]+\s*\}\}$/;
+  const disallowed = (script: string) => [...script.matchAll(/\$\{\{[\s\S]*?\}\}/g)].map((m) => m[0]).filter((e) => !ALLOWED_IN_SCRIPT.test(e));
+
+  it("in every workflow, a run script holds no expression but a previous step's output", () => {
+    for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name))) {
+      for (const { line, script } of runScripts(`.github/workflows/${file}`)) expect(disallowed(script), `${file}:${line}`).toEqual([]);
+    }
+  });
+
+  it("the check itself catches every way of writing an interpolation", () => {
+    for (const script of ["echo ${{ inputs.mode }}", "echo ${{ inputs['confirmation'] }}", "echo ${{inputs.mode}}", "x='${{ format('{0}', inputs.mode) }}'",
+      "echo ${{ toJSON(github.event) }}", "echo ${{ github.event.pull_request.title }}", "git checkout ${{ github.head_ref }}", "echo ${{ env.X }}",
+      "echo ${{ secrets.TOKEN }}", "echo ${{\n  inputs.mode }}"])
+      expect(disallowed(script), script).not.toEqual([]);
+    expect(disallowed('if [ "${{ steps.decide.outputs.run }}" = "true" ]; then')).toEqual([]);
   });
 
   it("the bootstrap steps bind mode and confirmation through env", () => {

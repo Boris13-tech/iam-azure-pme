@@ -43,4 +43,13 @@ describe("Production jobs by workflow_dispatch only", () => {
     for (const name of ["database-activation", "canonical-identity-bootstrap"]) expect(job(gate, name), name).toMatch(/\n {4}needs: ci-verified\n/);
     expect(job(gate, "database-activation")).toMatch(/\n {4}environment: Production\n/);
   });
+
+  it("every job that receives Production secrets is bound to the protected Production environment", () => {
+    // The identity bootstrap job too (review follow-up of #86): removing its binding must fail here.
+    expect(job(identity, "canonical-identity-bootstrap")).toMatch(/\n {4}environment: Production\n/);
+    for (const [name, workflow] of [["gate", gate], ["identity", identity]] as const) {
+      const jobs = workflow.slice(workflow.indexOf("\njobs:\n")).split(/\n(?= {2}[\w-]+:\n)/).slice(1);
+      for (const body of jobs) if (/secrets\.(DATABASE_|ENTRA_|LUXIA_)/.test(body)) expect(body, `${name}: ${body.split("\n")[0]}`).toMatch(/\n {4}environment: Production\n/);
+    }
+  });
 });
