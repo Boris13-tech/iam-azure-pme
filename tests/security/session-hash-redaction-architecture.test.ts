@@ -31,6 +31,21 @@ describe("R2 session hash redaction: migration architecture", () => {
     expect(guard).not.toMatch(/now\(\)|clock_timestamp/);
   });
 
+  it("only the table owner, in its own session, may clear a hash; the replaced guard stays closed to PUBLIC", () => {
+    // Review follow-up of #126: these lines were only checked by the PostgreSQL suite; now the static suite fails too.
+    const guard = fn(migration, "luxia_session_guard");
+    expect(guard).toContain("RAISE EXCEPTION 'SESSION_REDACTION_OWNER_ONLY'");
+    expect(guard).toContain("current_user = session_user");
+    expect(guard).toMatch(/r\.oid = c\.relowner WHERE c\.oid = TG_RELID AND r\.rolname = current_user/);
+    // CREATE OR REPLACE keeps the old privileges in PostgreSQL; the migration and the rollback still state the revoke.
+    for (const [name, sql] of [["migration", migration], ["rollback", rollback]] as const) {
+      const created = sql.indexOf("CREATE OR REPLACE FUNCTION luxia_session_guard()");
+      const revoked = sql.indexOf("REVOKE ALL ON FUNCTION luxia_session_guard() FROM PUBLIC;");
+      expect(created, name).toBeGreaterThanOrEqual(0);
+      expect(revoked, name).toBeGreaterThan(created);
+    }
+  });
+
   it("both functions pin their search_path", () => {
     expect(migration).toMatch(/CREATE OR REPLACE FUNCTION luxia_session_guard\(\) RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS/);
     expect(migration).toMatch(/CREATE FUNCTION luxia_session_redact_network_hashes\(p_batch integer\) RETURNS integer\s+LANGUAGE plpgsql SET search_path = public, pg_temp AS/);
