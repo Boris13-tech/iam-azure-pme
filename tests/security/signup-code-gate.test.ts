@@ -54,4 +54,13 @@ describe("signup-code issuance gate", () => {
     expect(forged({ days: 365 })).toBe("DAYS_OUT_OF_RANGE");
     expect(forged({ note: "another note" })).toBe("ACCEPTED"); // a legitimate change, confirmed, stays possible
   });
+
+  it("issuance refuses an unknown tool version, even when the plan carries the same 'unknown' (a modified checkout)", () => {
+    const { plan } = made();
+    const unknown = { ...plan, toolVersion: "unknown" }, digest = planDigest(unknown);
+    expect(refusal(() => checkSignupPlan({ plan: unknown, digest }, digest, { target, toolVersion: "unknown" }, at))).toBe("TOOL_VERSION_UNKNOWN");
+    expect(refusal(() => checkSignupPlan({ plan: unknown, digest }, digest, { target, toolVersion: commit }, at))).toBe("TOOL_VERSION_UNKNOWN");
+    const { digest: good } = made();
+    expect(refusal(() => checkSignupPlan({ plan, digest: good }, good, { target, toolVersion: "unknown" }, at))).toBe("TOOL_VERSION_UNKNOWN");
+  });
 });

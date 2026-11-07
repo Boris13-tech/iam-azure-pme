@@ -66,6 +66,8 @@ export function checkSignupPlan(saved: unknown, confirm: string | undefined, cur
   if (!Number.isInteger(plan.days) || plan.days < 1 || plan.days > 30) refuse("DAYS_OUT_OF_RANGE");
   if (!(now.getTime() <= Date.parse(plan.notAfter))) refuse("PLAN_EXPIRED");
   if (canonicalJson(plan.target) !== canonicalJson(current.target)) refuse("TARGET_MISMATCH");
+  // Both versions must be a known commit, not only equal: "unknown" (a modified checkout) equal to "unknown" proves nothing.
+  if (!/^[0-9a-f]{40}$/.test(current.toolVersion) || !/^[0-9a-f]{40}$/.test(plan.toolVersion)) refuse("TOOL_VERSION_UNKNOWN");
   if (plan.toolVersion !== current.toolVersion) refuse("TOOL_VERSION_MISMATCH");
   return plan;
 }
