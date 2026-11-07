@@ -1,13 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import {
   applyBreakGlass, AUTHORITY, BREAK_GLASS_ACTIONS, canonicalJson, planBreakGlass, planDigest, validateInput, type BreakGlassAction,
 } from "../../lib/operators/break-glass";
-import { toolVersion } from "../../scripts/operators/tool-version";
+import { loadedSources, toolVersion } from "../../scripts/operators/tool-version";
 
 // First Admin / Break-glass v1, B4: input validation, authority matrix (D7 + Q1) and plan digest.
 const UUID = "0b9d0b8e-5555-4c2a-9a55-000000000001";
@@ -104,67 +104,97 @@ describe("B4 break-glass: authority matrix and inputs", () => {
     }
     // The command takes its version from its own checkout, never from the caller (behaviour tested below).
     const cli = readFileSync("scripts/operators/break-glass.ts", "utf8");
-    expect(cli.match(/toolVersion: [^,}]+/g)?.map((call) => call.trim())).toEqual(Array(2).fill("toolVersion: toolVersion(dirname(resolve(process.argv[1])))"));
+    expect(cli.match(/toolVersion: [^,}]+/g)?.map((call) => call.trim())).toEqual(Array(2).fill("toolVersion: toolVersion(loadedSources())"));
   });
 
-  it("the command's version is the commit of a clean checkout, and \"unknown\" otherwise (real Git repository)", () => {
-    // Review follow-up of #183: run Git for real, in a disposable repository, from a foreign working directory.
-    const repo = mkdtempSync(join(tmpdir(), "luxia-tool-version-"));
-    const elsewhere = mkdtempSync(join(tmpdir(), "luxia-elsewhere-"));
+  it("the command's version is the commit its loaded sources come from, and \"unknown\" otherwise (real Git repositories)", () => {
+    // Review follow-ups of #183 (both AI reviewers): real Git, disposable repositories, a foreign working directory.
+    // Each case below is caught by one control: the clean-checkout check, the tracked-file check, the byte comparison
+    // with HEAD, or the removal of inherited GIT_* variables.
+    const base = mkdtempSync(join(tmpdir(), "luxia-tool-version-"));
     const previous = process.cwd();
-    try {
-      const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=test", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" }).toString().trim();
-      expect(toolVersion(repo), "not a checkout").toBe("unknown");
+    const names = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "git_dir"];
+    const gitIn = (cwd: string) => (...args: string[]) => execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=test",
+      "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", ...args], { cwd, stdio: "pipe" }).toString().trim();
+    const repository = (name: string) => {
+      const root = join(base, name);
+      mkdirSync(join(root, "scripts", "operators"), { recursive: true });
+      const git = gitIn(root);
       git("init", "-q");
-      expect(toolVersion(repo), "no commit yet").toBe("unknown");
-      writeFileSync(join(repo, "tool.ts"), "export const a = 1;\n");
-      // The command passes its own folder (scripts/operators), a subdirectory of the checkout.
-      const cliFolder = join(repo, "scripts", "operators");
-      mkdirSync(cliFolder, { recursive: true });
-      writeFileSync(join(cliFolder, "cli.ts"), "export {};\n");
-      git("add", "tool.ts", "scripts/operators/cli.ts");
-      git("commit", "-q", "-m", "one");
-      const head = git("rev-parse", "HEAD");
-      process.chdir(elsewhere); // the caller's working directory plays no part
-      expect(toolVersion(repo), "clean").toBe(head);
-      expect(toolVersion(cliFolder), "clean, from the command's folder").toBe(head);
-      writeFileSync(join(repo, "notes.txt"), "untracked\n");
-      expect(toolVersion(repo), "untracked file only").toBe(head);
-      writeFileSync(join(repo, "tool.ts"), "export const a = 2;\n");
-      expect(toolVersion(repo), "modified, unstaged").toBe("unknown");
-      expect(toolVersion(cliFolder), "a change outside the command's folder, seen from it").toBe("unknown");
-      git("add", "tool.ts");
-      expect(toolVersion(repo), "modified, staged").toBe("unknown");
-      git("commit", "-q", "-m", "two");
-      expect(toolVersion(repo), "committed again").toBe(git("rev-parse", "HEAD"));
-      rmSync(join(repo, "tool.ts"));
-      expect(toolVersion(repo), "tracked file deleted").toBe("unknown");
-      expect(toolVersion(join(elsewhere, "missing")), "missing directory").toBe("unknown");
-      // Inherited Git variables cannot point the lookup at another, clean checkout (review follow-up of #183).
-      const clean = join(elsewhere, "clean");
-      execFileSync("git", ["init", "-q", clean], { stdio: "pipe" });
-      writeFileSync(join(clean, "a.txt"), "a");
-      execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=test", "-c", "commit.gpgsign=false", "add", "a.txt"], { cwd: clean, stdio: "pipe" });
-      execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=test", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "c"], { cwd: clean, stdio: "pipe" });
-      expect(toolVersion(clean), "the other checkout is clean").toMatch(/^[0-9a-f]{40}$/);
-      writeFileSync(join(repo, "tool.ts"), "export const a = 3;\n"); // the tool's own checkout is dirty again
-      const names = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "git_dir"];
-      try {
-        for (const variables of [{ GIT_DIR: join(clean, ".git"), GIT_WORK_TREE: clean }, { GIT_DIR: join(clean, ".git") }, { GIT_WORK_TREE: clean },
-          { GIT_INDEX_FILE: join(clean, ".git", "index") }, { git_dir: join(clean, ".git"), GIT_WORK_TREE: clean }]) {
-          Object.assign(process.env, variables);
-          expect(toolVersion(repo), JSON.stringify(Object.keys(variables))).toBe("unknown");
-          for (const name of names) delete process.env[name];
-        }
-      } finally {
+      git("config", "core.autocrlf", "false");
+      writeFileSync(join(root, "lib.ts"), "export const a = 1;\n");
+      writeFileSync(join(root, "scripts", "operators", "cli.ts"), "import './../../lib';\n");
+      return { root, git, cli: join(root, "scripts", "operators", "cli.ts"), lib: join(root, "lib.ts") };
+    };
+    try {
+      const tool = repository("tool");
+      expect(toolVersion([tool.cli, tool.lib]), "no commit yet").toBe("unknown");
+      tool.git("add", ".");
+      tool.git("commit", "-q", "-m", "one");
+      const head = tool.git("rev-parse", "HEAD");
+      process.chdir(base); // the caller's working directory plays no part
+      expect(toolVersion([tool.cli, tool.lib]), "clean, from the command's folder").toBe(head);
+      expect(toolVersion([]), "no file given").toBe("unknown");
+      expect(toolVersion([join(base, "nowhere.ts")]), "not a checkout").toBe("unknown");
+      writeFileSync(join(tool.root, "notes.txt"), "untracked\n");
+      expect(toolVersion([tool.cli, tool.lib]), "an untracked file the command does not load").toBe(head);
+
+      // Clean-checkout check: a modified tracked file, even one the command does not load.
+      writeFileSync(join(tool.root, "other.ts"), "1\n"); tool.git("add", "other.ts"); tool.git("commit", "-q", "-m", "two");
+      const two = tool.git("rev-parse", "HEAD");
+      writeFileSync(join(tool.root, "other.ts"), "2\n");
+      expect(toolVersion([tool.cli, tool.lib]), "modified, unstaged, not loaded").toBe("unknown");
+      tool.git("add", "other.ts");
+      expect(toolVersion([tool.cli, tool.lib]), "modified, staged").toBe("unknown");
+      tool.git("checkout", "-q", "HEAD", "--", "other.ts");
+      expect(toolVersion([tool.cli, tool.lib]), "restored").toBe(two);
+
+      // Tracked-file check: an untracked module the command loads, and an untracked copy of the command placed in an
+      // unrelated clean repository (Codex, third pass).
+      const extra = join(tool.root, "scripts", "operators", "extra.ts");
+      writeFileSync(extra, "export {};\n");
+      expect(toolVersion([tool.cli, tool.lib, extra]), "an untracked module is loaded").toBe("unknown");
+      const unrelated = repository("unrelated");
+      unrelated.git("add", "lib.ts"); unrelated.git("commit", "-q", "-m", "unrelated");
+      writeFileSync(unrelated.cli, readFileSync(tool.cli));
+      expect(unrelated.git("status", "--porcelain", "--untracked-files=no"), "the unrelated checkout is clean").toBe("");
+      expect(toolVersion([unrelated.cli, unrelated.lib]), "untracked command copy in an unrelated clean repository").toBe("unknown");
+      expect(toolVersion([tool.cli, join(base, "nowhere.ts")]), "a loaded file outside the checkout").toBe("unknown");
+
+      // Byte comparison: a file hidden from status (assume-unchanged) but different from HEAD.
+      tool.git("update-index", "--assume-unchanged", "lib.ts");
+      writeFileSync(tool.lib, "export const a = 666;\n");
+      expect(tool.git("status", "--porcelain", "--untracked-files=no"), "status cannot see it").toBe("");
+      expect(toolVersion([tool.cli, tool.lib]), "loaded file differs from HEAD, hidden from status").toBe("unknown");
+      tool.git("update-index", "--no-assume-unchanged", "lib.ts");
+      tool.git("checkout", "-q", "HEAD", "--", "lib.ts");
+      expect(toolVersion([tool.cli, tool.lib]), "restored").toBe(two);
+
+      // Inherited Git variables: they cannot point the lookup at another, clean checkout.
+      const clean = repository("clean");
+      clean.git("add", "."); clean.git("commit", "-q", "-m", "c");
+      expect(toolVersion([clean.cli, clean.lib]), "the other checkout is clean").toMatch(/^[0-9a-f]{40}$/);
+      writeFileSync(join(tool.root, "other.ts"), "3\n"); // the tool's own checkout is dirty
+      // The case only the removal of GIT_* variables catches: the clean repository's index and history (same loaded
+      // files) laid over the tool's own dirty work tree.
+      for (const variables of [{ GIT_DIR: join(clean.root, ".git"), GIT_WORK_TREE: tool.root }, { GIT_DIR: join(clean.root, ".git"), GIT_WORK_TREE: clean.root }, { GIT_DIR: join(clean.root, ".git") },
+        { GIT_WORK_TREE: clean.root }, { GIT_INDEX_FILE: join(clean.root, ".git", "index") }, { git_dir: join(clean.root, ".git"), GIT_WORK_TREE: clean.root }]) {
+        Object.assign(process.env, variables);
+        expect(toolVersion([tool.cli, tool.lib]), JSON.stringify(Object.keys(variables))).toBe("unknown");
         for (const name of names) delete process.env[name];
       }
     } finally {
+      for (const name of names) delete process.env[name];
       process.chdir(previous);
-      rmSync(repo, { recursive: true, force: true });
-      rmSync(elsewhere, { recursive: true, force: true });
+      rmSync(base, { recursive: true, force: true });
     }
-  }, 30_000); // a dozen real Git processes: slow on a loaded Windows runner
+  }, 60_000); // dozens of real Git processes: slow on a loaded Windows runner
+
+  it("the command passes the sources it has loaded, outside node_modules", () => {
+    const sources = loadedSources(join(process.cwd(), "scripts", "operators", "break-glass.ts"));
+    expect(sources[0]).toBe(resolve("scripts/operators/break-glass.ts"));
+    expect(sources.some((path) => /[\\/]node_modules[\\/]/.test(path))).toBe(false);
+  });
 
   it("apply refuses before touching the database: expired plan, missing confirmation, missing typed identifier", async () => {
     const untouchable = new Proxy({}, { get: () => { throw new Error("DATABASE_TOUCHED"); } }) as unknown as PrismaClient;

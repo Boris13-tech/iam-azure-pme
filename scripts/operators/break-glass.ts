@@ -10,10 +10,10 @@
 // LUXIA_OWNER_DATABASE_URL (direct endpoint, BYPASSRLS role) and never printed. Evidence files hold the
 // plan, digest and result, never a token, link, code or secret.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { applyBreakGlass, BreakGlassRefusal, planBreakGlass } from "../../lib/operators/break-glass";
-import { toolVersion } from "./tool-version";
+import { loadedSources, toolVersion } from "./tool-version";
 
 function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(`--${name}`);
@@ -41,7 +41,7 @@ async function main() {
       if (!file) throw new Error("Usage: plan --request <request.json>");
       const input = JSON.parse(readFileSync(file, "utf8"));
       const issuedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
-      const { plan, digest } = await planBreakGlass(db, input, { issuedAt, toolVersion: toolVersion(dirname(resolve(process.argv[1]))) });
+      const { plan, digest } = await planBreakGlass(db, input, { issuedAt, toolVersion: toolVersion(loadedSources()) });
       const path = writeEvidence(evidence, `${plan.issuedAt.replace(/[:.]/g, "-")}-${plan.input.action}-${digest.slice(0, 12)}.plan.json`,
         { kind: "LUXIA_BREAK_GLASS_PLAN", input, issuedAt: plan.issuedAt, digest, plan });
       console.log(JSON.stringify(plan, null, 1));
@@ -57,7 +57,7 @@ async function main() {
       const saved = JSON.parse(readFileSync(file, "utf8"));
       if (saved.kind !== "LUXIA_BREAK_GLASS_PLAN") throw new Error("Not a break-glass plan file.");
       if (saved.digest !== confirm) throw new Error("The confirmation is not this plan's digest.");
-      const result = await applyBreakGlass(db, saved.input, { issuedAt: new Date(saved.issuedAt), toolVersion: toolVersion(dirname(resolve(process.argv[1]))), confirm,
+      const result = await applyBreakGlass(db, saved.input, { issuedAt: new Date(saved.issuedAt), toolVersion: toolVersion(loadedSources()), confirm,
         irreversible: option(args, "irreversible") });
       const { invitationToken, ...recorded } = result;
       const path = writeEvidence(evidence, file.replace(/^.*[\\/]/, "").replace(/\.plan\.json$/, ".apply.json"), { kind: "LUXIA_BREAK_GLASS_APPLY", ...recorded });
