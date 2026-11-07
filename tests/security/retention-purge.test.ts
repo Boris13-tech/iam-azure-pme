@@ -64,10 +64,15 @@ describe("R3 retention job: authorization", () => {
   it("a day with more than one batch is drained: calls repeat while full, counts add up, and a remainder is a backlog", async () => {
     const counts = (n: number, enforced = true) => [{ counts: { localAuthChallenges: n, authTransactions: Math.min(n, 5), retentionRuns: 0, enforced } }];
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    queryRaw.mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(7));
+    queryRaw.mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(RETENTION_BATCH)).mockResolvedValueOnce(counts(7))
+      .mockResolvedValueOnce(counts(0, false)); // the final dry check: nothing left
     expect(await purgeExpiredTransactions(true)).toEqual({ localAuthChallenges: 3 * RETENTION_BATCH + 7, authTransactions: 20, retentionRuns: 0, enforced: true, rounds: 4, backlog: false });
-    expect(queryRaw).toHaveBeenCalledTimes(4);
+    expect(queryRaw).toHaveBeenCalledTimes(5);
+    expect(queryRaw.mock.calls[4].slice(1)).toEqual([RETENTION_BATCH, false]);
     expect(error).not.toHaveBeenCalled();
+    // A short count while eligible rows remain (rows locked by another transaction are skipped): the dry check sees them.
+    queryRaw.mockReset(); queryRaw.mockResolvedValueOnce(counts(0)).mockResolvedValueOnce(counts(3, false));
+    expect(await purgeExpiredTransactions(true)).toMatchObject({ rounds: 1, backlog: true });
     // Always full: it stops at the round limit and reports a backlog (counts only).
     queryRaw.mockReset(); queryRaw.mockResolvedValue(counts(RETENTION_BATCH));
     expect(await purgeExpiredTransactions(true)).toMatchObject({ rounds: RETENTION_MAX_ROUNDS, backlog: true });

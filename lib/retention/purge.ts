@@ -42,6 +42,13 @@ export async function purgeExpiredTransactions(enforce = retentionEnforced(), db
     if (!full) break;
     if (!enforce || total.rounds >= limits.rounds || Date.now() - started >= limits.budgetMs) { total.backlog = true; break; }
   }
+  // A short count does not prove that nothing is left: the deletes skip rows another transaction holds locked. One dry
+  // call (a plain count, which locks do not hide) checks what is still eligible; anything left is a backlog.
+  if (enforce && !total.backlog) {
+    const [left] = await db.$queryRaw<Array<{ counts: CallCounts }>>`
+      SELECT luxia_retention_purge_transactions(${RETENTION_BATCH}::integer, ${false}::boolean) AS counts`;
+    total.backlog = [left.counts.localAuthChallenges, left.counts.authTransactions, left.counts.retentionRuns].some((count) => count > 0);
+  }
   // Counts only: an alert for the operator that expired rows outpace the daily run.
   if (total.backlog) console.error("retention: backlog remains", JSON.stringify({ rounds: total.rounds, enforced: enforce }));
   return total;

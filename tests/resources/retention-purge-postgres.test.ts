@@ -84,6 +84,19 @@ describe.runIf(enabled)("R3: purge of expired challenges and transactions (Postg
     expect(await owner.authTransaction.count({ where: { id: { in: ids } } })).toBe(0);
   }, 120_000);
 
+  it("rows another transaction holds locked are skipped, and reported as a backlog, never as done", async () => {
+    const locked = await transaction(10);
+    await owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "AuthTransaction" WHERE "id" = ${locked} FOR UPDATE`;
+      const run = await purgeExpiredTransactions(true, rawPrisma);
+      expect(run.backlog).toBe(true);
+      expect(await owner.authTransaction.count({ where: { id: locked } })).toBe(1);
+    }, { timeout: 60_000 });
+    const after = await purgeExpiredTransactions(true, rawPrisma);
+    expect(after.backlog).toBe(false);
+    expect(await owner.authTransaction.count({ where: { id: locked } })).toBe(0);
+  }, 120_000);
+
   it("the history of past runs is bounded by the batch too, in the dry run and when enforcing", async () => {
     const call = (batch: number, enforce: boolean) =>
       rawPrisma.$queryRawUnsafe<Array<{ counts: Record<string, number> }>>(`SELECT luxia_retention_purge_transactions(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
