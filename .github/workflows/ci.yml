@@ -43,7 +43,7 @@ jobs:
         # that counts is a trusted one: on a pull request, the base branch's (already reviewed and merged), so an entry a
         # pull request adds never applies to its own scan; on main, the repository's own. A throwaway repository tries all
         # three ways (inline comment, config, ignore file), with a random token, on every run. A change to this job itself
-        # is not stopped here: it shows in the diff, and the reviewer must catch it.
+        # is not stopped here: the trusted copy in secret-scan-trusted.yml runs the base branch definition instead.
         printf '[extend]\nuseDefault = true\n' > "$RUNNER_TEMP/gitleaks.toml"
         trusted="$RUNNER_TEMP/trusted.gitleaksignore"
         if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
