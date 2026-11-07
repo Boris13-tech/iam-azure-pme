@@ -64,10 +64,21 @@ export function checkSignupPlan(saved: unknown, confirm: string | undefined, cur
   if (!Number.isFinite(issued) || !Number.isFinite(deadline) || deadline - issued !== SIGNUP_PLAN_VALIDITY_MS || issued > now.getTime() + 60_000)
     refuse("PLAN_WINDOW_INVALID");
   if (!Number.isInteger(plan.days) || plan.days < 1 || plan.days > 30) refuse("DAYS_OUT_OF_RANGE");
+  if (typeof plan.by !== "string" || plan.by.length < 1 || plan.by.length > 200) refuse("BY_REQUIRED");
+  if (plan.note !== null && (typeof plan.note !== "string" || plan.note.length > 150)) refuse("NOTE_INVALID");
   if (!(now.getTime() <= Date.parse(plan.notAfter))) refuse("PLAN_EXPIRED");
   if (canonicalJson(plan.target) !== canonicalJson(current.target)) refuse("TARGET_MISMATCH");
+  // Both versions must be a known commit, not only equal: "unknown" (a modified checkout) equal to "unknown" proves nothing.
+  if (!/^[0-9a-f]{40}$/.test(current.toolVersion) || !/^[0-9a-f]{40}$/.test(plan.toolVersion)) refuse("TOOL_VERSION_UNKNOWN");
   if (plan.toolVersion !== current.toolVersion) refuse("TOOL_VERSION_MISMATCH");
   return plan;
+}
+
+/** The only path from a saved plan to a write: every check of the plan first, then the write with the checked plan. */
+export async function issueConfirmed(db: PrismaClient, saved: unknown, confirm: string | undefined,
+  current: { target: SignupTarget; toolVersion: string }, now = new Date()) {
+  const plan = checkSignupPlan(saved, confirm, current, now);
+  return issueFromPlan(db, plan, planDigest(plan), now);
 }
 
 /** The plan marker stored in the code's note: it makes each plan usable once. */
@@ -135,14 +146,14 @@ async function main() {
       const file = option(args, "plan");
       if (!file) throw new Error("issue needs --plan <plan.json> --confirm <digest>. Run plan first: it writes nothing.");
       const saved = JSON.parse(readFileSync(file, "utf8")) as { plan: SignupPlan; digest: string };
-      const plan = checkSignupPlan(saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() });
-      const { code, row } = await issueFromPlan(db, plan, saved.digest);
+      const { code, row } = await issueConfirmed(db, saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() });
       // The code is committed: it is shown before anything else can fail, since it cannot be recovered from its hash.
       console.log(`Code id   : ${row.id}`);
       console.log(`Expires   : ${row.expiresAt.toISOString()}`);
       console.log(`Code      : ${code}`);
       console.log("The code is shown once and is not stored. Send it to the customer through a private channel.");
-      const path = writeEvidence(evidence, file.replace(/^.*[\\/]/, "").replace(/\.plan\.json$/, ".issue.json"),
+      // The evidence always gets its own ".issue.json" name, never the plan file's (whatever the plan file is called).
+      const path = writeEvidence(evidence, `${file.replace(/^.*[\\/]/, "").replace(/(\.plan)?\.json$/, "")}.issue.json`,
         { digest: saved.digest, codeId: row.id, expiresAt: row.expiresAt.toISOString(), issuedAt: row.createdAt.toISOString() });
       console.log(`Evidence  : ${path} (the code is not in it)`);
     } else if (command === "revoke") {

@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { checkSignupPlan, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
+import { checkSignupPlan, issueConfirmed, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
 import { planDigest } from "../../lib/operators/break-glass";
 
 // Standard, section 10: issuing a signup code (a Production write) needs a plan, its digest as the
@@ -53,5 +55,55 @@ describe("signup-code issuance gate", () => {
     expect(forged({ issuedAt: "not a date" })).toBe("PLAN_WINDOW_INVALID");
     expect(forged({ days: 365 })).toBe("DAYS_OUT_OF_RANGE");
     expect(forged({ note: "another note" })).toBe("ACCEPTED"); // a legitimate change, confirmed, stays possible
+  });
+
+  it("issuance refuses an unknown tool version, even when the plan carries the same 'unknown' (a modified checkout)", () => {
+    const { plan } = made();
+    const unknown = { ...plan, toolVersion: "unknown" }, digest = planDigest(unknown);
+    expect(refusal(() => checkSignupPlan({ plan: unknown, digest }, digest, { target, toolVersion: "unknown" }, at))).toBe("TOOL_VERSION_UNKNOWN");
+    expect(refusal(() => checkSignupPlan({ plan: unknown, digest }, digest, { target, toolVersion: commit }, at))).toBe("TOOL_VERSION_UNKNOWN");
+    const { digest: good } = made();
+    expect(refusal(() => checkSignupPlan({ plan, digest: good }, good, { target, toolVersion: "unknown" }, at))).toBe("TOOL_VERSION_UNKNOWN");
+  });
+
+  it("the command writes only through issueConfirmed, which refuses before touching the database", async () => {
+    // Review follow-up of #121: tested on issueConfirmed, the helper the command calls to write; before it, the command
+    // only reads its own target (current database and role).
+    const untouchable = new Proxy({}, { get: () => { throw new Error("DATABASE_TOUCHED"); } }) as unknown as PrismaClient;
+    const { plan, digest } = made();
+    const current = { target, toolVersion: commit };
+    const outcome = (saved: unknown, confirm: string | undefined, now = current) =>
+      issueConfirmed(untouchable, saved, confirm, now, at).then(() => "WRITTEN", (error) => (error instanceof SignupPlanRefusal ? error.message : `OTHER ${String(error)}`));
+    expect(await outcome({ plan, digest }, undefined)).toBe("CONFIRMATION_MISMATCH");
+    expect(await outcome({ plan, digest }, "0".repeat(64))).toBe("CONFIRMATION_MISMATCH");
+    expect(await outcome({ plan, digest }, digest, { target: { ...target, database: "other" }, toolVersion: commit })).toBe("TARGET_MISMATCH");
+    expect(await outcome({ plan, digest }, digest, { target, toolVersion: "unknown" })).toBe("TOOL_VERSION_UNKNOWN");
+    const unknownPlan = { ...plan, toolVersion: "unknown" };
+    expect(await outcome({ plan: unknownPlan, digest: planDigest(unknownPlan) }, planDigest(unknownPlan), { target, toolVersion: "unknown" })).toBe("TOOL_VERSION_UNKNOWN");
+    // A valid plan reaches the database (and this fake one refuses to be touched): the checks were the only gate.
+    expect(await outcome({ plan, digest }, digest)).toBe("OTHER Error: DATABASE_TOUCHED");
+    const cli = readFileSync("scripts/operators/signup-codes.ts", "utf8").replace(/\r\n/g, "\n");
+    expect(cli.match(/issueFromPlan\(/g)).toHaveLength(2); // its definition and its single call, inside issueConfirmed
+    expect(cli).toMatch(/const plan = checkSignupPlan\(saved, confirm, current, now\);\n\s+return issueFromPlan\(db, plan, planDigest\(plan\), now\);/);
+    expect(cli).toContain('await issueConfirmed(db, saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() })');
+  });
+
+  it("a plan rebuilt by hand with an invalid author or note is refused, even with its digest recomputed and confirmed", () => {
+    // Correction pass of #121 (Antigravity): the write path checks every field the plan step checks.
+    const { plan } = made();
+    const current = { target, toolVersion: commit };
+    for (const [change, reason] of [[{ by: "" }, "BY_REQUIRED"], [{ by: "x".repeat(201) }, "BY_REQUIRED"], [{ by: 42 }, "BY_REQUIRED"],
+      [{ note: "n".repeat(151) }, "NOTE_INVALID"], [{ note: 7 }, "NOTE_INVALID"]] as const) {
+      const forged = { ...plan, ...change } as unknown as typeof plan;
+      const digest = planDigest(forged);
+      expect(refusal(() => checkSignupPlan({ plan: forged, digest }, digest, current, at)), JSON.stringify(change)).toBe(reason);
+    }
+    expect(refusal(() => checkSignupPlan({ plan: { ...plan, note: null }, digest: planDigest({ ...plan, note: null }) }, planDigest({ ...plan, note: null }), current, at))).toBe("ACCEPTED");
+  });
+
+  it("the evidence of an issuance never takes the plan file's own name", () => {
+    const cli = readFileSync("scripts/operators/signup-codes.ts", "utf8");
+    expect(cli).toContain(String.raw`.replace(/(\.plan)?\.json$/, "")}.issue.json` + "`");
+    expect(cli).not.toContain(String.raw`.replace(/\.plan\.json$/, ".issue.json")`);
   });
 });
