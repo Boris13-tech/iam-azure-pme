@@ -1544,3 +1544,14 @@ model ProviderSecretReference {
 
   @@index([organizationId, providerConnectionId], map: "ProviderSecretReference_connection_idx")
 }
+
+/// R3 (retention design): one row per retention run, with counts only. Owner-only table (no app_user
+/// access); written by the database function luxia_retention_purge_transactions.
+model RetentionRun {
+  id       BigInt   @id @default(autoincrement())
+  ranAt    DateTime @default(now()) @db.Timestamptz(6)
+  enforced Boolean
+  counts   Json
+
+  @@index([ranAt])
+}
