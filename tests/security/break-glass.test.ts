@@ -2,12 +2,13 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import {
   applyBreakGlass, AUTHORITY, BREAK_GLASS_ACTIONS, canonicalJson, planBreakGlass, planDigest, validateInput, type BreakGlassAction,
 } from "../../lib/operators/break-glass";
-import { loadedSources, toolVersion } from "../../scripts/operators/tool-version";
+import { loadedSources, outsidePreloads, toolVersion } from "../../scripts/operators/tool-version";
 
 // First Admin / Break-glass v1, B4: input validation, authority matrix (D7 + Q1) and plan digest.
 const UUID = "0b9d0b8e-5555-4c2a-9a55-000000000001";
@@ -170,6 +171,44 @@ describe("B4 break-glass: authority matrix and inputs", () => {
       tool.git("checkout", "-q", "HEAD", "--", "lib.ts");
       expect(toolVersion([tool.cli, tool.lib]), "restored").toBe(two);
 
+      // Raw bytes, no Git filter (Codex, fourth pass): a local clean filter that hands Git the committed text while the
+      // file Node runs is different.
+      mkdirSync(join(tool.root, ".git", "info"), { recursive: true });
+      writeFileSync(join(tool.root, ".git", "info", "attributes"), "lib.ts filter=hide\n");
+      tool.git("config", "filter.hide.clean", `git cat-file blob ${tool.git("rev-parse", "HEAD:lib.ts")}`);
+      writeFileSync(tool.lib, "export const a = 777;\n");
+      tool.git("add", "lib.ts"); // the index takes the filtered text: the same blob as HEAD
+      expect(tool.git("status", "--porcelain", "--untracked-files=no"), "status sees the filtered text only").toBe("");
+      expect(toolVersion([tool.cli, tool.lib]), "a clean filter hides the running code").toBe("unknown");
+      rmSync(join(tool.root, ".git", "info", "attributes"));
+      tool.git("checkout", "-q", "HEAD", "--", "lib.ts");
+      // The one difference accepted: CRLF line endings in the file for LF in the blob (a Windows checkout).
+      tool.git("config", "core.autocrlf", "true");
+      rmSync(tool.lib);
+      execFileSync("git", ["checkout", "-q", "HEAD", "--", "lib.ts"], { cwd: tool.root, stdio: "pipe" }); // Git writes CRLF, as on Windows
+      expect(readFileSync(tool.lib, "utf8")).toBe("export const a = 1;\r\n");
+      expect(toolVersion([tool.cli, tool.lib]), "CRLF checkout of the same text").toBe(two);
+      writeFileSync(tool.lib, "export const a = 2;\r\n");
+      expect(toolVersion([tool.cli, tool.lib]), "CRLF checkout of another text").toBe("unknown");
+      tool.git("config", "core.autocrlf", "false");
+      tool.git("checkout", "-q", "HEAD", "--", "lib.ts");
+      expect(toolVersion([tool.cli, tool.lib]), "restored").toBe(two);
+
+      // No replacement objects (Codex, fourth pass): HEAD replaced locally by a commit with other code, checked out.
+      writeFileSync(tool.lib, "export const a = 999;\n");
+      tool.git("add", "lib.ts");
+      const replacementTree = tool.git("write-tree");
+      const replacement = tool.git("commit-tree", replacementTree, "-p", two, "-m", "replacement");
+      tool.git("reset", "-q", "--hard", two);
+      tool.git("replace", two, replacement);
+      tool.git("reset", "-q", "--hard", "HEAD"); // with the replacement active, this checks out the replacement's code
+      expect(readFileSync(tool.lib, "utf8"), "the replacement's code is checked out").toBe("export const a = 999;\n");
+      expect(tool.git("rev-parse", "HEAD"), "HEAD still names the original commit").toBe(two);
+      expect(toolVersion([tool.cli, tool.lib]), "a replaced commit").toBe("unknown");
+      tool.git("replace", "-d", two);
+      tool.git("reset", "-q", "--hard", two);
+      expect(toolVersion([tool.cli, tool.lib]), "restored").toBe(two);
+
       // Inherited Git variables: they cannot point the lookup at another, clean checkout.
       const clean = repository("clean");
       clean.git("add", "."); clean.git("commit", "-q", "-m", "c");
@@ -190,11 +229,44 @@ describe("B4 break-glass: authority matrix and inputs", () => {
     }
   }, 60_000); // dozens of real Git processes: slow on a loaded Windows runner
 
-  it("the command passes the sources it has loaded, outside node_modules", () => {
-    const sources = loadedSources(join(process.cwd(), "scripts", "operators", "break-glass.ts"));
-    expect(sources[0]).toBe(resolve("scripts/operators/break-glass.ts"));
-    expect(sources.some((path) => /[\\/]node_modules[\\/]/.test(path))).toBe(false);
-  });
+  it("the command lists every source it has loaded, imports included; a loader it cannot list gives no answer", () => {
+    // Codex, fourth pass of #183: run the real loader (tsx, as the command does) in a child process.
+    const dir = mkdtempSync(join(tmpdir(), "luxia-loaded-"));
+    const tsx = resolve("node_modules/tsx/dist/cli.mjs");
+    const helper = resolve("scripts/operators/tool-version.ts").replace(/\\/g, "/");
+    const library = resolve("lib/operators/break-glass.ts").replace(/\\/g, "/");
+    try {
+      // CommonJS, as the command runs today: the entry, the helper, the library and its own imports are listed.
+      const cjs = join(dir, "probe.ts");
+      writeFileSync(cjs, `import { loadedSources } from "${helper}";\nimport "${library}";\nconsole.log(JSON.stringify(loadedSources()));\n`);
+      const listed = JSON.parse(execFileSync(process.execPath, [tsx, cjs], { cwd: process.cwd(), encoding: "utf8" }).trim().split("\n").pop()!) as string[];
+      const has = (path: string) => listed.includes(resolve(path));
+      expect(listed[0]).toBe(resolve(cjs));
+      for (const path of ["scripts/operators/tool-version.ts", "lib/operators/break-glass.ts", "lib/admin/last-administrator.ts", "lib/organizations/lifecycle.ts"])
+        expect(has(path), path).toBe(true);
+      expect(listed.some((path) => /[\\/]node_modules[\\/]/.test(path))).toBe(false);
+      // ES modules: the modules cannot be listed, so nothing is, and the version is "unknown" rather than partial.
+      const esm = join(dir, "probe.mts");
+      writeFileSync(esm, `import { loadedSources, toolVersion } from "${pathToFileURL(helper).href}";\nimport "${pathToFileURL(library).href}";\nconst listed = loadedSources();\nconsole.log(JSON.stringify([listed, toolVersion(listed)]));\n`);
+      const [esmListed, esmVersion] = JSON.parse(execFileSync(process.execPath, [tsx, esm], { cwd: process.cwd(), encoding: "utf8" }).trim().split("\n").pop()!) as [string[], string];
+      expect(esmListed).toEqual([]);
+      expect(esmVersion).toBe("unknown");
+      expect(loadedSources("", {})).toEqual([]);
+      // Code preloaded from outside node_modules runs unlisted, so nothing is listed (Antigravity, fourth pass).
+      const preload = join(dir, "preload.cjs");
+      writeFileSync(preload, "globalThis.preloaded = true;\n");
+      const preloaded = JSON.parse(execFileSync(process.execPath, [tsx, cjs], { cwd: process.cwd(), encoding: "utf8",
+        env: { ...process.env, NODE_OPTIONS: `--require "${preload.replace(/\\/g, "/")}"` } }).trim().split("\n").pop()!) as string[];
+      expect(preloaded).toEqual([]);
+      for (const [execArgv, options, outside] of [
+        [["--require", "C:\\x\\node_modules\\tsx\\dist\\preflight.cjs", "--import", "file:///C:/x/node_modules/tsx/dist/loader.mjs"], "", 0],
+        [[], "--import /tmp/evil.mjs", 1], [[], "--require=./evil.js", 1], [[], "-r evil-package", 0], [[], `--import "C:\\Users\\a b\\evil.mjs"`, 1],
+        [["--loader", "file:///tmp/evil.mjs"], "", 1], [[], "--max-old-space-size=4096", 0], [[], "--import @scope/package", 0], [[], "--import ../x/evil.mjs", 1],
+      ] as const) expect(outsidePreloads(execArgv, options), JSON.stringify([execArgv, options])).toHaveLength(outside);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("apply refuses before touching the database: expired plan, missing confirmation, missing typed identifier", async () => {
     const untouchable = new Proxy({}, { get: () => { throw new Error("DATABASE_TOUCHED"); } }) as unknown as PrismaClient;
