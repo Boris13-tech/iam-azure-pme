@@ -264,7 +264,9 @@ describe("B4 break-glass: authority matrix and inputs", () => {
         env: { ...process.env, NODE_OPTIONS: `--require "${traversal}"` } }).trim().split("\n").pop()!) as string[];
       expect(traversed).toEqual([]);
       for (const [execArgv, options, outside] of [
-        [["--require", "C:\\x\\node_modules\\tsx\\dist\\preflight.cjs", "--import", "file:///C:/x/node_modules/tsx/dist/loader.mjs"], "", 0],
+        [["--require", resolve("node_modules/tsx/dist/preflight.cjs"), "--import", pathToFileURL(resolve("node_modules/tsx/dist/loader.mjs")).href], "", 0],
+        // A Windows-style name: a traversal on Windows, a single odd file name on Linux; outside dependencies on both.
+        [["--require", "C:\\x\\node_modules\\..\\evil.cjs"], "", 1],
         [[], "--import /tmp/evil.mjs", 1], [[], "--require=./evil.js", 1], [[], "-r evil-package", 0], [[], `--import "C:\\Users\\a b\\evil.mjs"`, 1],
         [["--loader", "file:///tmp/evil.mjs"], "", 1], [[], "--max-old-space-size=4096", 0], [[], "--import @scope/package", 0], [[], "--import ../x/evil.mjs", 1],
         [[], "--import ./node_modules/../evil.mjs", 1], [[], "--import=file:///C:/x/node_modules/../evil.mjs", 1], [[], "-r=./node_modules/../evil.js", 1],

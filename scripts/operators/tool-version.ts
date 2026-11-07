@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -62,7 +62,8 @@ export function loadedSources(entry: string = process.argv[1] ?? "", cache: Reco
 function inDependencies(path: string): boolean {
   let real = resolve(path);
   try { real = realpathSync.native(real); } catch { /* a missing file is judged by its resolved path */ }
-  return /[\\/]node_modules[\\/]/.test(real);
+  // Folder segments by this platform's own separator: on Linux a backslash is part of a file name, not a folder break.
+  return real.split(sep).slice(0, -1).includes("node_modules");
 }
 
 /** Preloaded modules (--require/-r, --import, --loader, --experimental-loader) that are not dependencies in node_modules. */
