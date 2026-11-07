@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { SessionStore } from "./session-store";
 import { resolveAuthorizationMode } from "./authorization-mode";
+import { reportError } from "../monitoring/error-reporter";
 
 export type AuthContext = {
   sessionId: string;
@@ -28,7 +29,15 @@ export async function getAuthContext(): Promise<AuthContext | null> {
     return null;
   }
 
-  const session = await SessionStore.getSession(sessionCookie.value);
+  let session;
+  try {
+    session = await SessionStore.getSession(sessionCookie.value);
+  } catch (error) {
+    // SLI-03 (session resolution availability): a failure to resolve a session is reported as such, then the
+    // request fails exactly as before.
+    await reportError(error, "session");
+    throw error;
+  }
 
   if (!session) {
     return null;
