@@ -46,31 +46,66 @@ describe("Production jobs by workflow_dispatch only", () => {
   });
 
   it("in every workflow, a job that touches any secret is bound to a protected environment (parsed, any syntax)", () => {
-    // Review follow-ups of #86 and #179: read with a YAML parser (quoted job ids, bracket syntax, inherit), all workflows.
+    // Review follow-ups of #86 and #179: read with a YAML parser, all workflows. A job touches secrets when any expression
+    // in it names the secrets context (secrets.X, secrets['X'], toJSON(secrets)), when it passes secrets to a reusable
+    // workflow, or when its workflow sets a secret at workflow level (env above jobs).
     expect(job(identity, "canonical-identity-bootstrap")).toMatch(/\n {4}environment: Production\n/);
     const yaml = createRequire(import.meta.url)("js-yaml") as { load(text: string): unknown };
     type Job = { environment?: string | { name?: string }; uses?: string; secrets?: unknown };
+    type Workflow = { jobs?: Record<string, Job> } & Record<string, unknown>;
     const PROTECTED = ["Production", "production-backup", "staging"];
-    const parsed = (path: string) => (yaml.load(read(path)) as { jobs?: Record<string, Job> }).jobs ?? {};
     const environment = (job: Job) => (typeof job.environment === "string" ? job.environment : job.environment?.name);
-    const touchesSecrets = (job: Job) => /secrets\s*(\.|\[)/.test(JSON.stringify(job));
-    let checked = 0;
-    for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name))) {
-      for (const [id, body] of Object.entries(parsed(`.github/workflows/${file}`))) {
-        if (body.uses?.startsWith("./") && body.secrets !== undefined) {
-          // A local reusable workflow that receives secrets: each of its jobs that uses them must be protected itself.
-          for (const [calledId, called] of Object.entries(parsed(body.uses.slice(2))))
-            if (touchesSecrets(called)) { checked += 1; expect(PROTECTED, `${file} ${id} -> ${calledId}`).toContain(environment(called)); }
-        } else if (touchesSecrets(body)) { checked += 1; expect(PROTECTED, `${file} ${id}`).toContain(environment(body)); }
+    const namesSecrets = (value: unknown) =>
+      [...JSON.stringify(value ?? null).matchAll(/\$\{\{[\s\S]*?\}\}/g)].some(([expression]) => /\bsecrets\b/.test(expression));
+    /** Every violation in a parsed workflow; `checked` counts the secret-touching jobs seen. */
+    const inspect = (doc: Workflow, label: string, load: (path: string) => Workflow, out: { checked: number; bad: string[] }) => {
+      const { jobs = {}, ...rest } = doc;
+      const workflowLevel = namesSecrets(rest);
+      for (const [id, body] of Object.entries(jobs)) {
+        const where = `${label} ${id}`;
+        if (typeof body.uses === "string") {
+          if (body.secrets === undefined && !namesSecrets(body) && !workflowLevel) continue;
+          // A job that calls a reusable workflow cannot carry an environment itself. Local: each of the called
+          // workflow's secret-touching jobs must be protected. Remote: no secret may be passed at all.
+          if (body.uses.startsWith("./")) inspect(load(body.uses.slice(2)), `${where} ->`, load, out);
+          else { out.checked += 1; out.bad.push(`${where}: secrets passed to a remote reusable workflow`); }
+        } else if (workflowLevel || namesSecrets(body)) {
+          out.checked += 1;
+          if (!PROTECTED.includes(environment(body) ?? "")) out.bad.push(`${where}: not bound to a protected environment`);
+        }
       }
-    }
-    expect(checked).toBeGreaterThanOrEqual(4);
-    // The check itself: bracket syntax and a quoted job id both count, and neither job is protected.
-    const forms = ["jobs:\n  x:\n    steps:\n      - env: { A: \"${{ secrets['DATABASE_URL'] }}\" }\n", "jobs:\n  \"x\":\n    env:\n      A: ${{ secrets.DATABASE_URL }}\n"];
-    for (const text of forms) {
-      const [only] = Object.values((yaml.load(text) as { jobs: Record<string, Job> }).jobs);
-      expect(touchesSecrets(only), text).toBe(true);
-      expect(PROTECTED).not.toContain(environment(only));
-    }
+      return out;
+    };
+    const fromRepo = (path: string) => yaml.load(read(path)) as Workflow;
+    const result = { checked: 0, bad: [] as string[] };
+    for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name)))
+      inspect(fromRepo(`.github/workflows/${file}`), file, fromRepo, result);
+    expect(result.bad).toEqual([]);
+    expect(result.checked).toBeGreaterThanOrEqual(4);
+
+    // The check itself: each form below is an unprotected job that touches secrets, and must be reported.
+    const lines = (...text: string[]) => `${text.join("\n")}\n`;
+    const called = lines("on: workflow_call", "jobs:", "  inner:", "    steps:", '      - run: echo "$T"', '        env: { T: "${{ secrets.T }}" }');
+    const fake = (path: string) => { expect(path).toBe("called.yml"); return yaml.load(called) as Workflow; };
+    const flagged = (text: string) => inspect(yaml.load(text) as Workflow, "form", fake, { checked: 0, bad: [] }).bad;
+    const forms = [
+      lines("jobs:", "  x:", "    steps:", `      - env: { A: "\${{ secrets['DATABASE_URL'] }}" }`),
+      lines("jobs:", '  "x":', "    env:", "      A: ${{ secrets.DATABASE_URL }}"),
+      lines("jobs:", "  x:", "    steps:", '      - env: { ALL: "${{ toJSON(secrets) }}" }'),
+      lines("jobs:", "  x:", "    steps:", '      - env: { ALL: "${{toJSON( secrets )}}" }'),
+      lines("env:", "  TOKEN: ${{ secrets.TOKEN }}", "jobs:", "  x:", "    steps:", '      - run: echo "$TOKEN"'),
+      lines("jobs:", "  x:", "    uses: someone/repo/.github/workflows/w.yml@0123456789abcdef0123456789abcdef01234567", "    secrets: inherit"),
+      lines("jobs:", "  x:", "    uses: someone/repo/.github/workflows/w.yml@main", '    secrets: { T: "${{ secrets.T }}" }'),
+      lines("jobs:", "  x:", "    uses: ./called.yml", "    secrets: inherit"),
+      lines("env:", "  TOKEN: ${{ secrets.TOKEN }}", "jobs:", "  x:", "    uses: someone/repo/.github/workflows/w.yml@main"),
+    ];
+    for (const text of forms) expect(flagged(text), text).not.toEqual([]);
+    // And no false alarm: the word "secrets" outside an expression, and protected jobs, are fine.
+    const fine = [
+      lines("jobs:", "  scan:", "    name: Scan for secrets", "    steps:", "      - run: gitleaks detect # finds secrets"),
+      lines("jobs:", "  x:", "    environment: Production", "    steps:", '      - env: { ALL: "${{ toJSON(secrets) }}" }'),
+      lines("env:", "  TOKEN: ${{ secrets.TOKEN }}", "jobs:", "  x:", "    environment: { name: staging }", "    steps:", '      - run: echo "$TOKEN"'),
+    ];
+    for (const text of fine) expect(flagged(text), text).toEqual([]);
   });
 });

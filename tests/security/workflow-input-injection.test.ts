@@ -95,12 +95,11 @@ describe("Production workflow inputs never reach a shell by expression interpola
     }
   });
 
-  // Every workflow: a run script may only read a previous step's output; inputs, event data, refs and the like
-  // reach a shell through env only, whatever the expression syntax.
-  const ALLOWED_IN_SCRIPT = /^\$\{\{\s*steps\.[\w-]+\.outputs\.[\w-]+\s*\}\}$/;
-  const disallowed = (script: string) => [...script.matchAll(/\$\{\{[\s\S]*?\}\}/g)].map((m) => m[0]).filter((e) => !ALLOWED_IN_SCRIPT.test(e));
+  // Every workflow: no expression at all in a run script. Inputs, event data, refs and step outputs (which can carry
+  // any of those) reach a shell through env only, whatever the expression syntax (review follow-up of #179).
+  const disallowed = (script: string) => [...script.matchAll(/\$\{\{[\s\S]*?\}\}/g)].map((m) => m[0]);
 
-  it("in every workflow, a run script holds no expression but a previous step's output", () => {
+  it("in every workflow, a run script holds no expression at all, step outputs included", () => {
     for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name))) {
       for (const script of parsedRunScripts(`.github/workflows/${file}`)) expect(disallowed(script), file).toEqual([]);
     }
@@ -111,7 +110,10 @@ describe("Production workflow inputs never reach a shell by expression interpola
       "echo ${{ toJSON(github.event) }}", "echo ${{ github.event.pull_request.title }}", "git checkout ${{ github.head_ref }}", "echo ${{ env.X }}",
       "echo ${{ secrets.TOKEN }}", "echo ${{\n  inputs.mode }}"])
       expect(disallowed(script), script).not.toEqual([]);
-    expect(disallowed('if [ "${{ steps.decide.outputs.run }}" = "true" ]; then')).toEqual([]);
+    // A step output is refused too: an earlier step can copy an untrusted value (a pull request title) into it.
+    expect(disallowed('if [ "${{ steps.decide.outputs.run }}" = "true" ]; then')).not.toEqual([]);
+    expect(disallowed('echo "${{ steps.untrusted.outputs.title }}"')).not.toEqual([]);
+    expect(disallowed('if [ "$DECIDE_RUN" = "true" ]; then')).toEqual([]);
   });
 
   it("the parser sees every way of writing a run step, including those a line-based reader misses", () => {
