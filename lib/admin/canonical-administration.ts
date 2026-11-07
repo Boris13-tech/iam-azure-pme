@@ -517,7 +517,7 @@ export async function listSessions(auth: AuthContext, changeId: string) {
 export async function revokeSession(auth: AuthContext, sessionId: string, changeId: string) {
   return withTenantDb(auth, async (tx) => {
     await assertUnusedChangeId(tx, auth, changeId);
-    const existing = await tx.session.findFirst({ where: { id: sessionId, revokedAt: null } });
+    const existing = await tx.session.findFirst({ where: { id: sessionId, revokedAt: null }, select: { id: true } });
     if (!existing) throw new CanonicalAdminError("ACTIVE_SESSION_NOT_FOUND", 404);
     // Conditional (B3): a session revoked concurrently is frozen; this is then a clean 404, not a failure.
     const revoked = await tx.session.updateMany({ where: { id: sessionId, revokedAt: null }, data: { revokedAt: new Date() } });
