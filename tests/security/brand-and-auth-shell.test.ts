@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 // Design v1: the official LUXIA-IT logo (luxia-it.com) is used as published, and every page before sign-in
@@ -41,9 +41,11 @@ describe("Brand and the pages before sign-in", () => {
     expect(shell).toContain("bêta privée, sur invitation");
   });
 
-  it("fonts are self-hosted at build time (no request to a font provider from the browser)", () => {
-    const layout = read("app/layout.tsx");
-    expect(layout).toContain('from "next/font/google"');
-    expect(read("app/globals.css")).not.toMatch(/@import url\(|fonts\.googleapis/);
+  it("no font is downloaded: neither the build nor the browser depends on a font provider", () => {
+    const sources = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? sources(`${dir}/${entry.name}`)
+      : /\.(tsx?|css)$/.test(entry.name) ? [`${dir}/${entry.name}`] : []);
+    for (const file of [...sources("app"), ...sources("components")]) expect(read(file), file).not.toMatch(/next\/font/);
+    const css = sources("app").filter((file) => file.endsWith(".css")).map(read).join(String.fromCharCode(10));
+    expect(css).not.toMatch(/@font-face|@import\s+url\(|fonts\.googleapis/i);
   });
 });

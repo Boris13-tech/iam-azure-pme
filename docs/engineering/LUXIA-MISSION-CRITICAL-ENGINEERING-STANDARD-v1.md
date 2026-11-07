@@ -179,6 +179,19 @@ The review is recorded with the [template](templates/INDEPENDENT-REVIEW-TEMPLATE
 
 **A class A change is not merged while a blocking finding is open.**
 
+**Private Beta exception: AI cross review (amendment 4, exception EX-004).** Decided by the operator on 2026-11-06, because no competent human reviewer is available within the Beta's deadline. It is an exception to the rule above, not a new rule, and it does not make an AI review a human one.
+- **Scope:** class A changes written by an AI agent, needed for the Private Beta.
+- **Ends:** at general availability, or on 2027-05-06, whichever comes first.
+- **What replaces the human review:** a cross review by two AI reviewers that did not write the change and are not the builder's model: Codex and Antigravity. Each runs on the exact SHA and records its model, its commands and its logs. Each finding of one is checked by the other. The builder reproduces each finding and may not dismiss one because it contradicts its own work. A disagreement that stays open goes to the operator.
+- **Conditions:**
+  - no merge while a blocking finding is open;
+  - the operator, not an agent, merges;
+  - every record says "AI cross review under EX-004", never "human review" or "approved";
+  - the pilots are told in writing, before signing, that no independent human reviewed these changes;
+  - each such change gets a competent human review before general availability. That debt is listed in the gap analysis.
+- **G2** is then recorded as **"met under EX-004 (AI cross review)"**, never as met by human review.
+- The operator's decision is a governance decision, not a technical certification.
+
 ## 9. Staging verification
 
 STAGING VERIFIED requires one or both of the following, as the change needs:
@@ -378,4 +391,5 @@ Operator decision, 2026-10-18.
 |---|---|---|---|
 | 1 | 2026-10-17 | Operator | OPERATIONALLY PROVEN also requires the required SLIs measured continuously, without a significant gap: no uncovered interval over 15 minutes and no more than 0.1% uncovered in total; independent equivalent telemetry may cover an interval; planned maintenance without replacement telemetry is a gap (section 17, point 6). Evidence store: mandatory age encryption to two independent recipients (detailed manifest and payload encrypted, only a minimal outer integrity manifest in clear); 7-year retention of gate evidence; WORM, with an unlocked trial and then a lock by separate decision; workload identity or Entra preferred; no long-lived SAS, a short user-delegation SAS only if indispensable; Shared Key disabled if the architecture allows it (section 12). No resource is created by this amendment |
 | 2 | 2026-10-18 | Operator | Ended exceptions (expired, closed or revoked) stay in the exception register with their state, the date and time they ended, and the reason; none is deleted (this section, and the gap analysis section 3b) |
+| 4 | 2026-11-06 | Operator | Private Beta exception EX-004: AI cross review (Codex and Antigravity, not the builder) in place of the competent human review of section 8, for AI-written class A changes needed for the Beta, until general availability or 2027-05-06; conditions in section 8; pilots told in writing; G2 recorded as met under EX-004; a human review of each change is owed before general availability |
 | 3 | 2026-10-18 | Operator | Private Beta entry gate: eight criteria (G1 to G8) before the first limited pilot; historical class A review debts may be discharged by one consolidated independent review at an exact SHA with a traceability matrix, every later class A change reviewed PR by PR (G2); OPERATIONALLY PROVEN not required for the Private Beta, required before GA; generic OIDC (F4) not a blocker for first pilots that use only supported Entra or passkey flows, a gate before broader provider-neutral expansion (section 17b) |

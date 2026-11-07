@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     try {
       // VERIFIED evidence is written in the session transaction: no evidence means no session.
       created = await SessionStore.createSession({ organizationId: provider.organizationId, tenantId, subjectId: account.subjectId, identityAccountId: account.id },
-        request.headers.get("x-forwarded-for") ?? undefined, request.headers.get("user-agent") ?? undefined, { evidence: evidence("VERIFIED", e.reasonCode) });
+        { evidence: evidence("VERIFIED", e.reasonCode) });
     } catch (error) {
       if (error instanceof SessionCreationDeniedError) { await recordRejectedSignIn(evidence("REJECTED", error.reason)); return failure(); }
       throw error;

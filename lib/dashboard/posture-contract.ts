@@ -1,6 +1,7 @@
 // Enterprise Identity Security Dashboard v1: response contract.
 // Scope: docs/product/ENTERPRISE-IDENTITY-SECURITY-DASHBOARD-V1-SCOPE.md (D1–D5 validated).
 // Four distinct states; a missing value is never coerced to 0 and there is no score.
+import { REVIEW_READ_RIGHTS } from "../resources/access-review-visibility";
 
 export type WidgetState = "ok" | "unavailable" | "not_implemented" | "restricted";
 
@@ -35,10 +36,11 @@ export type PostureResponse = Readonly<{
 
 // "overlapping": categories are not mutually exclusive (a subset, or one holder per key), so they
 // must never be summed into a total.
-type Definition = Readonly<{ section: SectionId; permissions: readonly string[]; attention?: true; breakdown?: "overlapping";
+// anyOf: at least one of these is required as well (access reviews are readable with read OR read_all).
+type Definition = Readonly<{ section: SectionId; permissions: readonly string[]; anyOf?: readonly string[]; attention?: true; breakdown?: "overlapping";
   kind: "query" | "unavailable" | "not_implemented"; reason?: string }>;
 
-/** Single source of truth: section, required native entitlements (ALL required), attention flag. */
+/** Single source of truth: section, required native entitlements (ALL of permissions, ONE of anyOf), attention flag. */
 export const WIDGETS = {
   "identity.subjectsByLifecycle": { section: "identity", permissions: ["subjects.read"], kind: "query" },
   "identity.subjectsByType": { section: "identity", permissions: ["subjects.read"], kind: "query" },
@@ -83,11 +85,12 @@ export const WIDGETS = {
   "governance.sodEnabledRules": { section: "governance", permissions: ["sod.read"], kind: "query" },
   "governance.sodDeniedAttempts30d": { section: "governance", permissions: ["sod.read"], kind: "query" },
   "governance.sodExistingViolations": { section: "governance", permissions: ["sod.read"], kind: "not_implemented", reason: "SOD_ENGINE_IS_PREVENTIVE_ONLY" },
-  "governance.reviewCampaignsByStatus": { section: "governance", permissions: ["access_reviews.read"], kind: "query" },
-  "governance.overdueReviewCampaigns": { section: "governance", permissions: ["access_reviews.read"], attention: true, kind: "query" },
-  "governance.pendingReviewItems": { section: "governance", permissions: ["access_reviews.read"], attention: true, kind: "query" },
-  "governance.reviewItemsRequiringRemediation": { section: "governance", permissions: ["access_reviews.read"], attention: true, kind: "query" },
-  "governance.myPendingReviewDecisions": { section: "governance", permissions: ["access_reviews.decide"], attention: true, kind: "query" },
+  // Review counters cover exactly the campaigns the viewer can open (access-review-visibility.ts).
+  "governance.reviewCampaignsByStatus": { section: "governance", permissions: [], anyOf: REVIEW_READ_RIGHTS, kind: "query" },
+  "governance.overdueReviewCampaigns": { section: "governance", permissions: [], anyOf: REVIEW_READ_RIGHTS, attention: true, kind: "query" },
+  "governance.pendingReviewItems": { section: "governance", permissions: [], anyOf: REVIEW_READ_RIGHTS, attention: true, kind: "query" },
+  "governance.reviewItemsRequiringRemediation": { section: "governance", permissions: [], anyOf: REVIEW_READ_RIGHTS, attention: true, kind: "query" },
+  "governance.myPendingReviewDecisions": { section: "governance", permissions: ["access_reviews.decide"], anyOf: REVIEW_READ_RIGHTS, attention: true, kind: "query" },
 
   "activity.recentChangesAndDenials": { section: "activity", permissions: ["audit.read"], kind: "query" },
   "activity.deniedOrFailed24h": { section: "activity", permissions: ["audit.read"], kind: "query" },
@@ -99,8 +102,10 @@ export type WidgetId = keyof typeof WIDGETS;
 export const SECTION_ORDER: readonly SectionId[] = ["identity", "sessions", "access", "resources", "governance", "activity"];
 export const WIDGET_IDS = Object.keys(WIDGETS) as WidgetId[];
 
-export const isPermitted = (id: WidgetId, held: ReadonlySet<string>) =>
-  (WIDGETS[id].permissions as readonly string[]).every(key => held.has(key));
+export const isPermitted = (id: WidgetId, held: ReadonlySet<string>) => {
+  const definition = WIDGETS[id] as Definition;
+  return definition.permissions.every(key => held.has(key)) && (!definition.anyOf || definition.anyOf.some(key => held.has(key)));
+};
 
 /** Numeric value of an attention widget; breakdowns are not attention rules. */
 export function attentionCount(widget: Widget): number | null {
