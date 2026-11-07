@@ -2,7 +2,15 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { afterEach, describe, expect, it } from "vitest";
+
+// The workflows are read with a YAML parser, so no valid YAML form (a comment after "run: |", a quoted "run" key, a
+// flow mapping) can hide a step from the checks (review follow-up of #179).
+const yaml = createRequire(import.meta.url)("js-yaml") as { load(text: string): unknown };
+type Step = { run?: unknown }; type Job = { steps?: Step[] };
+const parsedRunScripts = (path: string): string[] => Object.values(((yaml.load(read(path)) as { jobs?: Record<string, Job> }).jobs) ?? {})
+  .flatMap((job) => job.steps ?? []).flatMap((step) => (step.run === undefined ? [] : [String(step.run)]));
 
 // Finding confirmed on 2026-10-18: workflow inputs were interpolated with expressions directly into the shell scripts of
 // a Production workflow, so a crafted value could run commands in a job that holds Production secrets. Inputs now reach
@@ -79,9 +87,11 @@ function runStep(script: string, env: Record<string, string>) {
 describe("Production workflow inputs never reach a shell by expression interpolation", () => {
   it("no run script of a Production workflow holds any expression at all (any syntax: inputs['x'], format(), toJSON())", () => {
     for (const path of PRODUCTION_WORKFLOWS) {
-      const scripts = runScripts(path);
+      const scripts = parsedRunScripts(path);
       expect(scripts.length, path).toBeGreaterThan(0);
-      for (const { line, script } of scripts) expect(script, `${path}:${line}`).not.toContain("${{");
+      // The text extractor used by the behavioural tests below must not miss a step the parser sees.
+      expect(runScripts(path).length, path).toBe(scripts.length);
+      for (const script of scripts) expect(script, path).not.toContain("${{");
     }
   });
 
@@ -92,7 +102,7 @@ describe("Production workflow inputs never reach a shell by expression interpola
 
   it("in every workflow, a run script holds no expression but a previous step's output", () => {
     for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name))) {
-      for (const { line, script } of runScripts(`.github/workflows/${file}`)) expect(disallowed(script), `${file}:${line}`).toEqual([]);
+      for (const script of parsedRunScripts(`.github/workflows/${file}`)) expect(disallowed(script), file).toEqual([]);
     }
   });
 
@@ -102,6 +112,21 @@ describe("Production workflow inputs never reach a shell by expression interpola
       "echo ${{ secrets.TOKEN }}", "echo ${{\n  inputs.mode }}"])
       expect(disallowed(script), script).not.toEqual([]);
     expect(disallowed('if [ "${{ steps.decide.outputs.run }}" = "true" ]; then')).toEqual([]);
+  });
+
+  it("the parser sees every way of writing a run step, including those a line-based reader misses", () => {
+    const forms = [
+      ["jobs:", "  a:", "    steps:", "      - run: | # a comment", '          echo "${{ inputs.confirmation }}"'],
+      ["jobs:", "  a:", "    steps:", '      - "run": echo "${{ inputs.confirmation }}"'],
+      ["jobs:", "  a:", "    steps:", '      - {name: x, run: "echo ${{ inputs.confirmation }}"}'],
+      ["jobs:", "  a:", "    steps:", "      - 'run': >-", "          echo ${{ inputs['confirmation'] }}"],
+    ].map((lines) => `${lines.join("\n")}\n`);
+    for (const form of forms) {
+      const steps = Object.values(((yaml.load(form) as { jobs: Record<string, Job> }).jobs)).flatMap((job) => job.steps ?? []);
+      const scripts = steps.flatMap((step) => (step.run === undefined ? [] : [String(step.run)]));
+      expect(scripts, form).toHaveLength(1);
+      expect(disallowed(scripts[0]), form).not.toEqual([]);
+    }
   });
 
   it("the bootstrap steps bind mode and confirmation through env", () => {

@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 // P1 step 1: Production operations start only by hand, through one gate that first checks the commit and its CI run.
@@ -44,12 +45,32 @@ describe("Production jobs by workflow_dispatch only", () => {
     expect(job(gate, "database-activation")).toMatch(/\n {4}environment: Production\n/);
   });
 
-  it("every job that receives Production secrets is bound to the protected Production environment", () => {
-    // The identity bootstrap job too (review follow-up of #86): removing its binding must fail here.
+  it("in every workflow, a job that touches any secret is bound to a protected environment (parsed, any syntax)", () => {
+    // Review follow-ups of #86 and #179: read with a YAML parser (quoted job ids, bracket syntax, inherit), all workflows.
     expect(job(identity, "canonical-identity-bootstrap")).toMatch(/\n {4}environment: Production\n/);
-    for (const [name, workflow] of [["gate", gate], ["identity", identity]] as const) {
-      const jobs = workflow.slice(workflow.indexOf("\njobs:\n")).split(/\n(?= {2}[\w-]+:\n)/).slice(1);
-      for (const body of jobs) if (/secrets\.(DATABASE_|ENTRA_|LUXIA_)/.test(body)) expect(body, `${name}: ${body.split("\n")[0]}`).toMatch(/\n {4}environment: Production\n/);
+    const yaml = createRequire(import.meta.url)("js-yaml") as { load(text: string): unknown };
+    type Job = { environment?: string | { name?: string }; uses?: string; secrets?: unknown };
+    const PROTECTED = ["Production", "production-backup", "staging"];
+    const parsed = (path: string) => (yaml.load(read(path)) as { jobs?: Record<string, Job> }).jobs ?? {};
+    const environment = (job: Job) => (typeof job.environment === "string" ? job.environment : job.environment?.name);
+    const touchesSecrets = (job: Job) => /secrets\s*(\.|\[)/.test(JSON.stringify(job));
+    let checked = 0;
+    for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name))) {
+      for (const [id, body] of Object.entries(parsed(`.github/workflows/${file}`))) {
+        if (body.uses?.startsWith("./") && body.secrets !== undefined) {
+          // A local reusable workflow that receives secrets: each of its jobs that uses them must be protected itself.
+          for (const [calledId, called] of Object.entries(parsed(body.uses.slice(2))))
+            if (touchesSecrets(called)) { checked += 1; expect(PROTECTED, `${file} ${id} -> ${calledId}`).toContain(environment(called)); }
+        } else if (touchesSecrets(body)) { checked += 1; expect(PROTECTED, `${file} ${id}`).toContain(environment(body)); }
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(4);
+    // The check itself: bracket syntax and a quoted job id both count, and neither job is protected.
+    const forms = ["jobs:\n  x:\n    steps:\n      - env: { A: \"${{ secrets['DATABASE_URL'] }}\" }\n", "jobs:\n  \"x\":\n    env:\n      A: ${{ secrets.DATABASE_URL }}\n"];
+    for (const text of forms) {
+      const [only] = Object.values((yaml.load(text) as { jobs: Record<string, Job> }).jobs);
+      expect(touchesSecrets(only), text).toBe(true);
+      expect(PROTECTED).not.toContain(environment(only));
     }
   });
 });
