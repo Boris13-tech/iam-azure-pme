@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { OPERATION_LABELS, operationLabel } from "../../lib/ui/activity-labels";
+import { DASHBOARD_NAVIGATION } from "../../lib/navigation/dashboard";
 
 describe("audit journal and navigation (legacy role model out of user journeys)", () => {
   it("navigation no longer links the legacy role model; its page redirects to the overview", () => {
-    const layout = readFileSync("app/dashboard/layout.tsx", "utf8");
-    expect(layout).not.toContain("/dashboard/roles");
+    for (const path of ["app/dashboard/layout.tsx", "lib/navigation/dashboard.ts"]) expect(readFileSync(path, "utf8"), path).not.toContain("/dashboard/roles");
+    expect(DASHBOARD_NAVIGATION.map((item) => item.href)).not.toContain("/dashboard/roles");
     const roles = readFileSync("app/dashboard/roles/page.tsx", "utf8");
     expect(roles).toContain('redirect("/dashboard")');
     expect(roles).not.toMatch(/RoleForm|RoleManager|\/api\/roles/);
