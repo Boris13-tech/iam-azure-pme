@@ -184,12 +184,28 @@ describe.runIf(enabled)("Beta-code signup: atomic organization and first adminis
     expect(begin.status).toBe(200);
   });
 
-  it("two concurrent issuances of one plan write one code at most", async () => {
+  it("two concurrent issuances of one plan write one code at most, even when both pass the replay check first", async () => {
+    // Correction pass of #121: a barrier holds each transaction after its replay check until all have made it, so the
+    // checks really overlap; only Serializable isolation then keeps a second code out.
     const target = { host: "localhost", database: "ci", schema: "public", role: "ci" };
     const current = { target, toolVersion: "c".repeat(40) };
     const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `race ${suffix}` }, target, "c".repeat(40));
-    const results = await Promise.allSettled(Array.from({ length: 4 }, () => issueConfirmed(owner, { plan, digest }, digest, current)));
+    let waiting = 0, reached = 0;
+    let release!: () => void;
+    const all = new Promise<void>((done) => { release = done; });
+    const barrier = async () => {
+      reached += 1; waiting += 1;
+      if (waiting === 2) release();
+      await Promise.race([all, new Promise((done) => setTimeout(done, 10_000))]);
+    };
+    const results = await Promise.allSettled([0, 1].map(() => issueFromPlan(owner, plan, digest, new Date(), { beforeWrite: barrier })));
+    expect(reached, "both transactions passed the replay check before either wrote").toBe(2);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(1);
-  });
+    // And without the barrier, through the command's path.
+    const again = planSignupCode({ by: "ci", days: "2", note: `race2 ${suffix}` }, target, "c".repeat(40));
+    const loose = await Promise.allSettled(Array.from({ length: 4 }, () => issueConfirmed(owner, again, again.digest, current)));
+    expect(loose.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(again.digest) } } })).toBe(1);
+  }, 30_000);
 });

@@ -67,7 +67,8 @@ describe("signup-code issuance gate", () => {
   });
 
   it("the command writes only through issueConfirmed, which refuses before touching the database", async () => {
-    // Review follow-up of #121: the checks are proven at the boundary between the command and the write.
+    // Review follow-up of #121: tested on issueConfirmed, the helper the command calls to write; before it, the command
+    // only reads its own target (current database and role).
     const untouchable = new Proxy({}, { get: () => { throw new Error("DATABASE_TOUCHED"); } }) as unknown as PrismaClient;
     const { plan, digest } = made();
     const current = { target, toolVersion: commit };
@@ -85,5 +86,24 @@ describe("signup-code issuance gate", () => {
     expect(cli.match(/issueFromPlan\(/g)).toHaveLength(2); // its definition and its single call, inside issueConfirmed
     expect(cli).toMatch(/const plan = checkSignupPlan\(saved, confirm, current, now\);\n\s+return issueFromPlan\(db, plan, planDigest\(plan\), now\);/);
     expect(cli).toContain('await issueConfirmed(db, saved, option(args, "confirm"), { target: await currentTarget(db, url), toolVersion: toolVersion() })');
+  });
+
+  it("a plan rebuilt by hand with an invalid author or note is refused, even with its digest recomputed and confirmed", () => {
+    // Correction pass of #121 (Antigravity): the write path checks every field the plan step checks.
+    const { plan } = made();
+    const current = { target, toolVersion: commit };
+    for (const [change, reason] of [[{ by: "" }, "BY_REQUIRED"], [{ by: "x".repeat(201) }, "BY_REQUIRED"], [{ by: 42 }, "BY_REQUIRED"],
+      [{ note: "n".repeat(151) }, "NOTE_INVALID"], [{ note: 7 }, "NOTE_INVALID"]] as const) {
+      const forged = { ...plan, ...change } as unknown as typeof plan;
+      const digest = planDigest(forged);
+      expect(refusal(() => checkSignupPlan({ plan: forged, digest }, digest, current, at)), JSON.stringify(change)).toBe(reason);
+    }
+    expect(refusal(() => checkSignupPlan({ plan: { ...plan, note: null }, digest: planDigest({ ...plan, note: null }) }, planDigest({ ...plan, note: null }), current, at))).toBe("ACCEPTED");
+  });
+
+  it("the evidence of an issuance never takes the plan file's own name", () => {
+    const cli = readFileSync("scripts/operators/signup-codes.ts", "utf8");
+    expect(cli).toContain(String.raw`.replace(/(\.plan)?\.json$/, "")}.issue.json` + "`");
+    expect(cli).not.toContain(String.raw`.replace(/\.plan\.json$/, ".issue.json")`);
   });
 });

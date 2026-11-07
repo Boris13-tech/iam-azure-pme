@@ -64,6 +64,8 @@ export function checkSignupPlan(saved: unknown, confirm: string | undefined, cur
   if (!Number.isFinite(issued) || !Number.isFinite(deadline) || deadline - issued !== SIGNUP_PLAN_VALIDITY_MS || issued > now.getTime() + 60_000)
     refuse("PLAN_WINDOW_INVALID");
   if (!Number.isInteger(plan.days) || plan.days < 1 || plan.days > 30) refuse("DAYS_OUT_OF_RANGE");
+  if (typeof plan.by !== "string" || plan.by.length < 1 || plan.by.length > 200) refuse("BY_REQUIRED");
+  if (plan.note !== null && (typeof plan.note !== "string" || plan.note.length > 150)) refuse("NOTE_INVALID");
   if (!(now.getTime() <= Date.parse(plan.notAfter))) refuse("PLAN_EXPIRED");
   if (canonicalJson(plan.target) !== canonicalJson(current.target)) refuse("TARGET_MISMATCH");
   // Both versions must be a known commit, not only equal: "unknown" (a modified checkout) equal to "unknown" proves nothing.
@@ -150,7 +152,8 @@ async function main() {
       console.log(`Expires   : ${row.expiresAt.toISOString()}`);
       console.log(`Code      : ${code}`);
       console.log("The code is shown once and is not stored. Send it to the customer through a private channel.");
-      const path = writeEvidence(evidence, file.replace(/^.*[\\/]/, "").replace(/\.plan\.json$/, ".issue.json"),
+      // The evidence always gets its own ".issue.json" name, never the plan file's (whatever the plan file is called).
+      const path = writeEvidence(evidence, `${file.replace(/^.*[\\/]/, "").replace(/(\.plan)?\.json$/, "")}.issue.json`,
         { digest: saved.digest, codeId: row.id, expiresAt: row.expiresAt.toISOString(), issuedAt: row.createdAt.toISOString() });
       console.log(`Evidence  : ${path} (the code is not in it)`);
     } else if (command === "revoke") {
