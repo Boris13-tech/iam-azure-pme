@@ -12,9 +12,12 @@ describe.runIf(inCheckout || process.env.CI)("SQL line endings", () => {
     expect(listed.length).toBeGreaterThan(40);
     for (const line of listed) {
       // Format: "i/<index eol> w/<worktree eol> attr/<attributes>\t<path>"; the attributes may hold spaces.
-      const [index, , ...attribute] = line.split("\t")[0].trim().split(/\s+/);
+      const [index, worktree, ...attribute] = line.split("\t")[0].trim().split(/\s+/);
       const attributes = attribute.join(" ");
       expect(index, line).toBe("i/lf");
+      // The bytes Prisma reads too (Codex, review of #184): the file on disk is LF. A checkout made before this rule
+      // existed keeps its CRLF files until they are checked out again (git checkout -- '*.sql').
+      expect(worktree, line).toBe("w/lf");
       expect(attributes, line).toBe("attr/text eol=lf");
     }
   });
