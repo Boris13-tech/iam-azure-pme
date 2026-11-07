@@ -55,8 +55,27 @@ describe("Production jobs by workflow_dispatch only", () => {
     type Workflow = { jobs?: Record<string, Job> } & Record<string, unknown>;
     const PROTECTED = ["Production", "production-backup", "staging"];
     const environment = (job: Job) => (typeof job.environment === "string" ? job.environment : job.environment?.name);
-    const namesSecrets = (value: unknown) =>
-      [...JSON.stringify(value ?? null).matchAll(/\$\{\{[\s\S]*?\}\}/g)].some(([expression]) => /\bsecrets\b/.test(expression));
+    // Every string of the parsed value (keys too), as parsed: no JSON escaping between the text and the check.
+    const strings = (value: unknown): string[] => typeof value === "string" ? [value]
+      : Array.isArray(value) ? value.flatMap(strings)
+      : value && typeof value === "object" ? Object.entries(value).flatMap(([key, inner]) => [key, ...strings(inner)]) : [];
+    // The expressions of a string, read as GitHub does: a "}}" inside a quoted literal ('...', '' escapes a quote)
+    // does not close the expression. An expression left open runs to the end of the string (fail closed).
+    const expressions = (text: string): string[] => {
+      const found: string[] = [];
+      for (let start = text.indexOf("${{"); start >= 0; start = text.indexOf("${{", start + 3)) {
+        let at = start + 3, quoted = false;
+        for (; at < text.length; at++) {
+          if (text[at] === "'") { if (quoted && text[at + 1] === "'") at++; else quoted = !quoted; }
+          else if (!quoted && text.startsWith("}}", at)) break;
+        }
+        found.push(text.slice(start + 3, at));
+        start = at - 1;
+      }
+      return found;
+    };
+    // Context names are case-insensitive in GitHub expressions.
+    const namesSecrets = (value: unknown) => strings(value).flatMap(expressions).some((expression) => /(^|[^\w.])secrets\b/i.test(expression));
     /** Every violation in a parsed workflow; `checked` counts the secret-touching jobs seen. */
     const inspect = (doc: Workflow, label: string, load: (path: string) => Workflow, out: { checked: number; bad: string[] }) => {
       const { jobs = {}, ...rest } = doc;
@@ -64,7 +83,11 @@ describe("Production jobs by workflow_dispatch only", () => {
       for (const [id, body] of Object.entries(jobs)) {
         const where = `${label} ${id}`;
         if (typeof body.uses === "string") {
-          if (body.secrets === undefined && !namesSecrets(body) && !workflowLevel) continue;
+          // A secret reaches a reusable workflow only through its secrets mapping, where the callee still reads it as
+          // secrets.X (and is checked below). Anywhere else (with: inputs, if:, name) the callee would see a plain value.
+          const { secrets: _passed, ...others } = body;
+          if (namesSecrets(others)) { out.checked += 1; out.bad.push(`${where}: a secret passed outside the secrets mapping`); continue; }
+          if (body.secrets === undefined && !workflowLevel) continue;
           // A job that calls a reusable workflow cannot carry an environment itself. Local: each of the called
           // workflow's secret-touching jobs must be protected. Remote: no secret may be passed at all.
           if (body.uses.startsWith("./")) inspect(load(body.uses.slice(2)), `${where} ->`, load, out);
@@ -98,11 +121,23 @@ describe("Production jobs by workflow_dispatch only", () => {
       lines("jobs:", "  x:", "    uses: someone/repo/.github/workflows/w.yml@main", '    secrets: { T: "${{ secrets.T }}" }'),
       lines("jobs:", "  x:", "    uses: ./called.yml", "    secrets: inherit"),
       lines("env:", "  TOKEN: ${{ secrets.TOKEN }}", "jobs:", "  x:", "    uses: someone/repo/.github/workflows/w.yml@main"),
+      // Correction pass of #179: a "}}" inside a quoted literal, a line break before the context, another case.
+      lines("jobs:", "  x:", "    env:", "      TOKEN: ${{ format('}}{0}', secrets.TOKEN) }}", "    steps:", '      - run: echo "$TOKEN"'),
+      lines("jobs:", "  x:", "    env:", "      TOKEN: ${{ format('it''s }}{0}', secrets.TOKEN) }}"),
+      lines("jobs:", "  x:", "    env:", '      TOKEN: "${{\\nsecrets.TOKEN }}"'),
+      lines("env:", '  TOKEN: "${{\\nsecrets.TOKEN }}"', "jobs:", "  x:", "    steps:", '      - run: echo "$TOKEN"'),
+      lines("jobs:", "  x:", "    env:", "      TOKEN: ${{ Secrets.TOKEN }}"),
+      lines("jobs:", "  x:", "    env:", "      TOKEN: ${{ SECRETS['TOKEN'] }}"),
+      lines("jobs:", "  x:", "    env:", "      TOKEN: ${{ format('{0}', secrets.TOKEN"),
+      // Antigravity's correction pass of #179: a secret passed as an input to a local reusable workflow.
+      lines("jobs:", "  x:", "    uses: ./called.yml", "    with: { token: \"${{ secrets.T }}\" }"),
+      lines("jobs:", "  x:", "    uses: ./called.yml", "    with:", "      token: ${{ toJSON(secrets) }}"),
     ];
     for (const text of forms) expect(flagged(text), text).not.toEqual([]);
     // And no false alarm: the word "secrets" outside an expression, and protected jobs, are fine.
     const fine = [
       lines("jobs:", "  scan:", "    name: Scan for secrets", "    steps:", "      - run: gitleaks detect # finds secrets"),
+      lines("jobs:", "  x:", "    env:", "      MODE: ${{ inputs.secrets }} and }} secrets outside"),
       lines("jobs:", "  x:", "    environment: Production", "    steps:", '      - env: { ALL: "${{ toJSON(secrets) }}" }'),
       lines("env:", "  TOKEN: ${{ secrets.TOKEN }}", "jobs:", "  x:", "    environment: { name: staging }", "    steps:", '      - run: echo "$TOKEN"'),
     ];

@@ -97,7 +97,8 @@ describe("Production workflow inputs never reach a shell by expression interpola
 
   // Every workflow: no expression at all in a run script. Inputs, event data, refs and step outputs (which can carry
   // any of those) reach a shell through env only, whatever the expression syntax (review follow-up of #179).
-  const disallowed = (script: string) => [...script.matchAll(/\$\{\{[\s\S]*?\}\}/g)].map((m) => m[0]);
+  // Any "${{" counts, closed or not: no expression at all may reach a shell script.
+  const disallowed = (script: string) => [...script.matchAll(/\$\{\{[\s\S]*?(\}\}|$)/g)].map((m) => m[0]);
 
   it("in every workflow, a run script holds no expression at all, step outputs included", () => {
     for (const file of readdirSync(".github/workflows").filter((name) => /\.ya?ml$/.test(name))) {
@@ -113,6 +114,8 @@ describe("Production workflow inputs never reach a shell by expression interpola
     // A step output is refused too: an earlier step can copy an untrusted value (a pull request title) into it.
     expect(disallowed('if [ "${{ steps.decide.outputs.run }}" = "true" ]; then')).not.toEqual([]);
     expect(disallowed('echo "${{ steps.untrusted.outputs.title }}"')).not.toEqual([]);
+    expect(disallowed("echo ${{ format('}}', inputs.mode) }}")).not.toEqual([]);
+    expect(disallowed("echo ${{ inputs.mode")).not.toEqual([]);
     expect(disallowed('if [ "$DECIDE_RUN" = "true" ]; then')).toEqual([]);
   });
 
