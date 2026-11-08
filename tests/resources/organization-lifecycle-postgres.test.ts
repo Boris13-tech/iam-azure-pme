@@ -147,6 +147,14 @@ describe.runIf(enabled)("B3 organization lifecycle enforcement (app_user, Postgr
     const outcomes = await Promise.all([revokeSession(auth, second.session.id, change()), revokeSession(auth, second.session.id, change())]
       .map((promise) => promise.then(() => "ok", (error: { code?: string }) => error.code)));
     expect(outcomes.sort()).toEqual(["ACTIVE_SESSION_NOT_FOUND", "ok"]);
+    // R1: a session created before R1 still holds network hashes; revoking it never returns them.
+    const legacyId = sha(randomUUID());
+    await owner.session.create({ data: { id: legacyId, ...scope(org), subjectId: org.subjectId, identityAccountId: org.accountId,
+      expiresAt: new Date(Date.now() + 60 * 60_000), ipHash: sha("203.0.113.7"), userAgentHash: sha("legacy agent") } });
+    const returned = await revokeSession(auth, legacyId, change());
+    expect(returned).toMatchObject({ id: legacyId, subjectId: org.subjectId });
+    expect(returned).not.toHaveProperty("ipHash");
+    expect(returned).not.toHaveProperty("userAgentHash");
   });
 
   it("suspension revokes every active session in the same transaction; reactivation never brings one back", async () => {

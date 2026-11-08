@@ -1,0 +1,42 @@
+name: Production canary
+
+# Free stopgap until external monitoring is active (docs/incidents/2026-10-24-PRODUCTION-DOMAIN-OVERWRITTEN.md):
+# checks from outside that the Production domain serves LUXIA. A failure fails the run; an e-mail reaches someone only
+# if GitHub's notification settings send it, which the alert drill must prove (incident report, action 4).
+# No secret, no checkout, no token permission; it only reads public pages.
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: production-canary
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: The Production domain serves LUXIA
+        env:
+          BASE: https://iam-azure-pme.vercel.app
+        run: |
+          set -u
+          check() {
+            login_code=$(curl -s -o login.html -w '%{http_code}' --max-time 20 "$BASE/login") || login_code=000
+            root=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "$BASE/") || root="000 -"
+            api=$(curl -s -o api.json -w '%{http_code}' --max-time 20 "$BASE/api/canonical/sessions") || api=000
+            [ "$login_code" = "200" ] && grep -q '<title>LUXIA' login.html \
+              && [ "$root" = "307 $BASE/login" ] \
+              && [ "$api" = "401" ] && grep -q '"error":"Unauthorized"' api.json
+          }
+          for attempt in 1 2 3; do
+            if check; then echo "canary: Production serves LUXIA (attempt $attempt)"; exit 0; fi
+            echo "canary: attempt $attempt failed: login=$login_code root=$root api=$api"
+            sleep 20
+          done
+          echo "::error::Production does not serve LUXIA. Runbook: docs/operations/MONITORING-ALERT-RUNBOOKS.md (M-A)"
+          exit 1
