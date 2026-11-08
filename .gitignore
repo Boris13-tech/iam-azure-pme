@@ -148,6 +148,8 @@ docs/certification/operator-*-results.json
 
 # B4 operator break-glass evidence (local, never committed)
 .break-glass-evidence/
+# R7 organization erasure plans and results (local, never committed; identifiers and counts only)
+.organization-erasure-evidence/
 # Signup-code plans and issue records (local, never committed; the code itself is never written)
 .signup-code-evidence/
 
