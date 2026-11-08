@@ -30,7 +30,7 @@ Earlier Production changes (F1, F2, F3, B1 to B5) were approved by the operator 
 | Message | Meaning | What to do |
 |---|---|---|
 | `no approval is recorded` / `approvals of this run cannot be read` | Nothing was deployed | Check the environment's required reviewer, then start a new run |
-| `ROLLBACK UNRESOLVED` | A deployment of this run may still exist or be running; Production may change later | In Vercel, list the deployments of the project created by this run (metadata `luxiaRun` = run number); cancel any that is not finished; promote the previous deployment named in the record; confirm `/login` serves LUXIA |
+| `ROLLBACK UNRESOLVED` | A deployment of this run may still exist or be running; Production may change later | In Vercel, list the deployments of the project created by this run (metadata `luxiaRun` = `<run number>.<attempt>`, as in the run's URL and attempt; check every attempt of the run); cancel any that is not finished; promote the previous deployment named in the record; confirm `/login` serves LUXIA |
 | `ROLLBACK NOT CONFIRMED` | The previous deployment was requested back but Production does not serve it | Promote it in the Vercel dashboard, then confirm `/login` serves LUXIA |
 | `MANUAL CHECK REQUIRED` (job `confirm`) | The deploy job did not succeed, or Production failed the public check after the run (also when the deploy job was cancelled or cut off) | Find which deployment serves Production in Vercel and compare it with the record; act as for `ROLLBACK UNRESOLVED` |
 | Rule once active | Agents never deploy or promote from a command line again. A promotion for an emergency rollback is also run from a reviewed workflow, or by the operator in the Vercel dashboard |

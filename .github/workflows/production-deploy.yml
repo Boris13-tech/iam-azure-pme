@@ -58,6 +58,7 @@ jobs:
       actions: read
     outputs:
       approved: ${{ steps.approval.outputs.approved_by }}
+      refused: ${{ steps.approval.outputs.refused }}
       not_attempted: ${{ steps.deploy.outputs.not_attempted }}
       attempted: ${{ steps.deploy.outputs.attempted }}
       deployment: ${{ steps.deploy.outputs.deployment }}
@@ -81,9 +82,12 @@ jobs:
           set -euo pipefail
           # Fail closed: if the approval cannot be read, or none is recorded for the Production environment on this run
           # (for example the environment lost its required reviewer), nothing is deployed.
-          raw="$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/approvals")" || { echo "::error::the approvals of this run cannot be read: nothing is deployed"; exit 1; }
-          approved="$(jq -r '[.[] | select(.state == "approved") | select(any(.environments[]?; .name == "Production")) | .user.login] | unique | join(",")' <<< "$raw")"
-          [[ -n "$approved" ]] || { echo "::error::no approval is recorded for the Production environment on this run: nothing is deployed"; exit 1; }
+          # A refusal writes "refused=true" first: the confirm job's explicit evidence that the deploy step never ran.
+          refuse() { echo "refused=true" >> "$GITHUB_OUTPUT"; echo "::error::$1: nothing is deployed"; exit 1; }
+          raw="$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/approvals")" || refuse "the approvals of this run cannot be read"
+          approved="$(jq -r '[.[] | select(.state == "approved") | select(any(.environments[]?; .name == "Production")) | .user.login] | unique | join(",")' <<< "$raw")" \
+            || refuse "the approvals of this run cannot be read"
+          [[ -n "$approved" ]] || refuse "no approval is recorded for the Production environment on this run"
           echo "approved_by=$approved" >> "$GITHUB_OUTPUT"
           echo "approved for Production by: $approved"
 
@@ -161,12 +165,15 @@ jobs:
           # written. A lost answer is never taken as success: only what Vercel reports about Production decides.
           budget="${ROLLBACK_BUDGET_SECONDS:-540}"; [[ "$budget" =~ ^[0-9]+$ ]] && (( budget <= 540 )) || budget=540  # shorter in tests, never longer
           deadline=$((SECONDS + budget))
+          # 'stop' is the end of the current phase (never later than the deadline): requests and pauses are cut to it.
+          stop=$deadline
+          remaining() { local end=$(( stop < deadline ? stop : deadline )); echo $(( end - SECONDS )); }
           api() {
-            local left=$((deadline - SECONDS)); (( left > 3 )) || return 124
+            local left; left=$(remaining); (( left > 3 )) || return 124
             local limit=$(( left - 2 < 30 ? left - 2 : 30 ))
             curl -sS --fail-with-body --connect-timeout "$(( limit < 10 ? limit : 10 ))" --max-time "$limit" -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"
           }
-          pause() { local left=$((deadline - SECONDS)); (( left > 3 )) || return 1; sleep "$(( left - 3 < 10 ? left - 3 : 10 ))"; }
+          pause() { local left; left=$(remaining); (( left > 3 )) || return 1; sleep "$(( left - 3 < 10 ? left - 3 : 10 ))"; }
           production() { api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty'; }
           unresolved=""
           # 1. Every deployment of this attempt: the one whose answer arrived, and any found by this attempt's metadata.
@@ -195,17 +202,20 @@ jobs:
           # 3. Promote the previous deployment; a refused or lost answer is retried once, Production state decides.
           current=""; confirmed=""
           for attempt in 1 2; do
+            stop=$deadline
             (( deadline - SECONDS > 3 )) || { echo "::warning::no time left for promotion request $attempt"; break; }
+            # The first request and its checks use at most half the time left (and 2 minutes): every request and pause
+            # of that phase is cut to its window, so the retry always has its turn.
+            half=$(( (deadline - SECONDS) / 2 )); (( attempt == 1 )) && stop=$((SECONDS + (half < 120 ? half : 120)))
             api -X POST "https://api.vercel.com/v10/projects/$PROJECT/promote/$PREVIOUS?teamId=$TEAM" > /dev/null \
               || echo "::warning::promotion request $attempt failed or its answer was lost; Production state decides"
-            # The first request waits at most half the time left (and 2 minutes), so the retry always has its turn.
-            half=$(( (deadline - SECONDS) / 2 )); window=$((SECONDS + (half < 120 ? half : 120))); (( attempt == 2 )) && window=$deadline
-            while (( SECONDS < window && deadline - SECONDS > 3 )); do
+            while (( $(remaining) > 3 )); do
               current="$(production)" || current=""
               if [[ "$current" == "$PREVIOUS" ]]; then confirmed=1; break 2; fi
               pause || break
             done
           done
+          stop=$deadline
           if [[ -n "$unresolved" ]]; then
             echo "::error::ROLLBACK UNRESOLVED: $unresolved. Production serves ${current:-unknown}. Runbook: docs/operations/PRODUCTION-CHANGE-RECORD.md"
             exit 1
@@ -270,7 +280,7 @@ jobs:
         env:
           BASE: https://iam-azure-pme.vercel.app
           DEPLOY_RESULT: ${{ needs.deploy.result }}
-          APPROVED: ${{ needs.deploy.outputs.approved }}
+          REFUSED: ${{ needs.deploy.outputs.refused }}
           NOT_ATTEMPTED: ${{ needs.deploy.outputs.not_attempted }}
           ATTEMPTED: ${{ needs.deploy.outputs.attempted }}
         run: |
@@ -282,10 +292,11 @@ jobs:
             if [ "$login" = "200" ] && grep -q '<title>LUXIA' login.html && [ "$api" = "401" ]; then ok=1; break; fi
             sleep 20
           done
-          # "Nothing was deployed" only on explicit evidence: the approval step refused (the deploy step never ran), or
-          # the deploy step finished before sending its request. Missing outputs (a runner cut off) prove nothing.
+          # "Nothing was deployed" only on explicit evidence, never contradicted by attempted=true: the approval step
+          # wrote refused=true (the deploy step never ran), or the deploy step finished before sending its request.
+          # Missing outputs (a runner cut off) prove nothing.
           nothing=""
-          [ -z "$APPROVED" ] && [ "$DEPLOY_RESULT" = "failure" ] && nothing="the approval was refused"
+          [ "$REFUSED" = "true" ] && [ "$ATTEMPTED" != "true" ] && nothing="the approval was refused"
           [ "$NOT_ATTEMPTED" = "true" ] && [ "$ATTEMPTED" != "true" ] && nothing="the deploy step stopped before its request"
           if [ "$DEPLOY_RESULT" = "success" ] && [ -n "$ok" ]; then echo "Production serves LUXIA after the deployment"; exit 0; fi
           if [ -n "$nothing" ] && [ -n "$ok" ]; then echo "nothing was deployed ($nothing; deploy job: $DEPLOY_RESULT); Production serves LUXIA"; exit 0; fi

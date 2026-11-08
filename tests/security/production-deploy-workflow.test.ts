@@ -109,6 +109,7 @@ describe("Production deploy workflow (GOV-001)", () => {
       expect(status, gh).not.toBe(0);
       expect(output, gh).toContain(message);
       expect(out, gh).not.toContain("approved_by");
+      expect(out, gh).toContain("refused=true"); // the confirm job's explicit evidence that nothing was deployed
     }
     const ok = run("approval", "exit 1", {}, `echo '[{"state":"approved","user":{"login":"op"},"environments":[{"name":"Production"}]}]'`);
     expect(ok.status).toBe(0);
@@ -168,6 +169,19 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(output).toContain("ROLLBACK UNRESOLVED: a deployment was requested but none of this run can be found");
     expect(output).not.toContain("rolled back:");
   }, 30_000);
+
+  it.runIf(hasShell)("rollback: a slow Production query in the first promotion window cannot take the retry's turn (Codex F2, third pass)", () => {
+    // Listing, states and promotion answer at once; every Production query hangs for the whole --max-time it is given.
+    const api = `case "$url" in
+      *"/v9/projects/"*) t=30; prev=""; for a in "$@"; do [[ "$prev" == "--max-time" ]] && t="$a"; prev="$a"; done; /bin/sleep "$t"; exit 28 ;;
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo '{}' ;;
+      *) echo '{"readyState":"ERROR"}' ;; esac`;
+    const { status, output, calls } = run("rollback", api, { DEPLOYMENT: "dpl_new", ROLLBACK_BUDGET_SECONDS: "16" });
+    expect(status).not.toBe(0);
+    expect(calls.match(/\/promote\/dpl_old/g)).toHaveLength(2);
+    expect(output).toContain("ROLLBACK NOT CONFIRMED");
+  }, 40_000);
 
   it.runIf(hasShell)("rollback: slow answers near the deadline: no request outlasts it, and the diagnostic is written (Codex F2, second pass)", () => {
     // A stand-in that hangs for the whole --max-time it is given, then fails: the worst case for every request.
@@ -247,19 +261,23 @@ describe("Production deploy workflow (GOV-001)", () => {
   it.runIf(hasShell)("confirm: Production is checked after every run, and an unproven state makes the run red", () => {
     const healthy = `case "$url" in *"/login"*) echo '<title>LUXIA</title>' > login.html; printf 200 ;; *) printf 401 ;; esac`;
     const down = "printf 000";
-    const approved = { APPROVED: "op", NOT_ATTEMPTED: "true" };
+    const started = { REFUSED: "", NOT_ATTEMPTED: "true" };
     const cases: Array<[string, Record<string, string>, number]> = [
-      [healthy, { ...approved, DEPLOY_RESULT: "success", ATTEMPTED: "true" }, 0],
-      [down, { ...approved, DEPLOY_RESULT: "success", ATTEMPTED: "true" }, 1],
-      [healthy, { ...approved, DEPLOY_RESULT: "failure", ATTEMPTED: "true" }, 1],
-      [healthy, { ...approved, DEPLOY_RESULT: "cancelled", ATTEMPTED: "true" }, 1],
-      // Explicit evidence that nothing was sent: the approval refused, or the deploy step stopped before its request.
-      [healthy, { APPROVED: "", NOT_ATTEMPTED: "", ATTEMPTED: "", DEPLOY_RESULT: "failure" }, 0],
-      [healthy, { ...approved, DEPLOY_RESULT: "failure", ATTEMPTED: "" }, 0],
-      [down, { ...approved, DEPLOY_RESULT: "failure", ATTEMPTED: "" }, 1],
-      // Missing evidence proves nothing (Codex F3, second pass): a runner cut off after the approval, a cancelled job.
-      [healthy, { APPROVED: "op", NOT_ATTEMPTED: "", ATTEMPTED: "", DEPLOY_RESULT: "failure" }, 1],
-      [healthy, { APPROVED: "", NOT_ATTEMPTED: "", ATTEMPTED: "", DEPLOY_RESULT: "cancelled" }, 1],
+      [healthy, { ...started, DEPLOY_RESULT: "success", ATTEMPTED: "true" }, 0],
+      [down, { ...started, DEPLOY_RESULT: "success", ATTEMPTED: "true" }, 1],
+      [healthy, { ...started, DEPLOY_RESULT: "failure", ATTEMPTED: "true" }, 1],
+      [healthy, { ...started, DEPLOY_RESULT: "cancelled", ATTEMPTED: "true" }, 1],
+      // Explicit evidence that nothing was sent: the approval step wrote refused=true, or the deploy step stopped
+      // before its request (not_attempted without attempted).
+      [healthy, { REFUSED: "true", NOT_ATTEMPTED: "", ATTEMPTED: "", DEPLOY_RESULT: "failure" }, 0],
+      [healthy, { ...started, DEPLOY_RESULT: "failure", ATTEMPTED: "" }, 0],
+      [down, { ...started, DEPLOY_RESULT: "failure", ATTEMPTED: "" }, 1],
+      // Missing evidence proves nothing (Codex F3 second pass, F1 third pass): every output missing, a cancelled job,
+      // and a refusal contradicted by attempted=true.
+      [healthy, { REFUSED: "", NOT_ATTEMPTED: "", ATTEMPTED: "", DEPLOY_RESULT: "failure" }, 1],
+      [healthy, { REFUSED: "", NOT_ATTEMPTED: "", ATTEMPTED: "", DEPLOY_RESULT: "cancelled" }, 1],
+      [healthy, { REFUSED: "", NOT_ATTEMPTED: "", ATTEMPTED: "true", DEPLOY_RESULT: "failure" }, 1],
+      [healthy, { REFUSED: "true", NOT_ATTEMPTED: "", ATTEMPTED: "true", DEPLOY_RESULT: "failure" }, 1],
     ];
     for (const [api, env, expected] of cases) {
       const { status, output } = run("confirm", api, env);
