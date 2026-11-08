@@ -196,17 +196,22 @@ describe.runIf(enabled)("Domains, invitations and checklist (app_user, PostgreSQ
     await checkDomain(as(fresh), change(), added.id, dns([added.recordValue]));
     const second = await createInvitation(as(fresh), change(), { name: "Second Admin", role: "ADMIN" });
     expect((await accept(second.token, "second")).complete?.status).toBe(200);
-    // B5: the second administrator signs in with a passkey and has no recovery code yet.
-    expect(await getOnboardingChecklist(as(fresh), change())).toMatchObject({ domainVerified: true, secondAdministrator: true, recoveryCodes: false });
+    // B5: the item is about the viewer's own account only. The first administrator sees nothing of the second's state.
+    expect(await getOnboardingChecklist(as(fresh), change())).toMatchObject({ domainVerified: true, secondAdministrator: true, recoveryCodes: null });
     const { identityAccountId } = await owner.localIdentity.findFirstOrThrow({ where: { organizationId: fresh.organizationId, principalName: "second" } });
+    const { subjectId: secondSubject } = await owner.identityAccount.findUniqueOrThrow({ where: { id: identityAccountId }, select: { subjectId: true } });
+    // The second administrator signs in with a passkey and has no recovery code yet: its own checklist says so.
+    const own = { ...as(fresh, secondSubject), identityAccountId };
+    expect(await getOnboardingChecklist(own, change())).toMatchObject({ recoveryCodes: false });
     const code = { organizationId: fresh.organizationId, tenantId: fresh.tenantId, identityAccountId, batchId: randomUUID() };
     const [spent] = await Promise.all([1, 2].map(() => owner.localRecoveryCode.create({ data: { ...code, codeHash: sha(randomUUID()) } })));
-    expect(await getOnboardingChecklist(as(fresh), change())).toMatchObject({ recoveryCodes: true });
+    expect(await getOnboardingChecklist(own, change())).toMatchObject({ recoveryCodes: true });
+    expect(await getOnboardingChecklist(as(fresh), change())).toMatchObject({ recoveryCodes: null });
     // A used code does not count; one usable code is enough.
     await owner.localRecoveryCode.update({ where: { id: spent.id }, data: { usedAt: new Date() } });
-    expect(await getOnboardingChecklist(as(fresh), change())).toMatchObject({ recoveryCodes: true });
+    expect(await getOnboardingChecklist(own, change())).toMatchObject({ recoveryCodes: true });
     await owner.localRecoveryCode.updateMany({ where: { ...code, batchId: code.batchId, usedAt: null }, data: { revokedAt: new Date() } });
-    expect(await getOnboardingChecklist(as(fresh), change())).toMatchObject({ recoveryCodes: false });
+    expect(await getOnboardingChecklist(own, change())).toMatchObject({ recoveryCodes: false });
     await expect(getOnboardingChecklist(as(fresh, randomUUID()), change())).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
