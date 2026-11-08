@@ -15,6 +15,75 @@ permissions:
   contents: read
 
 jobs:
+  # Secret scan of the whole history (P6 compensating control: GitHub's non-provider patterns are not
+  # available on this plan). Official release only, version and SHA-256 pinned, checked before execution.
+  # The public log shows counts, rules, files and commits only, never the matched content.
+  secret-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Gitleaks (official release, pinned version and digest)
+      env:
+        # Provenance: https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1, digest from its
+        # gitleaks_8.30.1_checksums.txt (that file's SHA-256: 061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae).
+        GITLEAKS_VERSION: 8.30.1
+        GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      run: |
+        set -euo pipefail
+        archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        curl -fsSL --proto '=https' -o "$RUNNER_TEMP/$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+        echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+        # The configuration stays outside the checkout and inline allow comments count for nothing. The ignore file
+        # that counts is a trusted one: on a pull request, the base branch's (already reviewed and merged), so an entry a
+        # pull request adds never applies to its own scan; on main, the repository's own. A throwaway repository tries all
+        # three ways (inline comment, config, ignore file), with a random token, on every run. A change to this job itself
+        # is not stopped here: the trusted copy in secret-scan-trusted.yml runs the base branch definition instead.
+        printf '[extend]\nuseDefault = true\n' > "$RUNNER_TEMP/gitleaks.toml"
+        trusted="$RUNNER_TEMP/trusted.gitleaksignore"
+        if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          if git cat-file -e "origin/$GITHUB_BASE_REF:.gitleaksignore" 2>/dev/null; then
+            git show "origin/$GITHUB_BASE_REF:.gitleaksignore" > "$trusted"
+          else
+            : > "$trusted"
+          fi
+          if [ -f .gitleaksignore ] && ! cmp -s .gitleaksignore "$trusted"; then
+            echo "This pull request changes .gitleaksignore: its entries apply only after merge, once reviewed."
+          fi
+        elif [ -f .gitleaksignore ]; then
+          cp .gitleaksignore "$trusted"
+        else
+          : > "$trusted"
+        fi
+        # The scanned directory's own ignore file is replaced by the trusted one before every scan.
+        scan() { cp "$3" "$1/.gitleaksignore"; "$RUNNER_TEMP/gitleaks" git --config "$RUNNER_TEMP/gitleaks.toml" --gitleaks-ignore-path "$3" --ignore-gitleaks-allow --redact --no-banner --exit-code 0 --report-format json --report-path "$2" "$1"; }
+        canary="$RUNNER_TEMP/canary"
+        git init -q "$canary"
+        printf 'token=ghp_%s # gitleaks:allow\n' "$(openssl rand -hex 18)" > "$canary/a.txt"
+        printf '[allowlist]\npaths = ["a"]\n' > "$canary/.gitleaks.toml"
+        git -C "$canary" add -A
+        git -C "$canary" -c user.name=canary -c user.email=canary@example.test commit -q -m canary
+        # The canary also plants an ignore entry for its own token, as a pull request could.
+        printf '%s:a.txt:github-pat:1\n' "$(git -C "$canary" rev-parse HEAD)" > "$canary/.gitleaksignore"
+        : > "$RUNNER_TEMP/empty.gitleaksignore"
+        scan "$canary" "$RUNNER_TEMP/canary.json" "$RUNNER_TEMP/empty.gitleaksignore"
+        if [ "$(jq 'length' "$RUNNER_TEMP/canary.json")" = "0" ]; then
+          echo "The scan missed its canary"
+          exit 1
+        fi
+        scan . "$RUNNER_TEMP/gitleaks.json" "$trusted"
+        count=$(jq 'length' "$RUNNER_TEMP/gitleaks.json")
+        echo "Findings: $count"
+        if [ "$count" != "0" ]; then
+          jq -r '.[] | "\(.RuleID) \(.File) \(.Commit[0:7])"' "$RUNNER_TEMP/gitleaks.json"
+          exit 1
+        fi
+
   test-and-build:
     runs-on: ubuntu-latest
 
@@ -37,6 +106,8 @@ jobs:
       DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public
       DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
+      # CI exercises the authorization mode Production runs (P5); tests of the other modes set it themselves.
+      AUTHZ_MODE: native
 
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -136,6 +207,8 @@ jobs:
       DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       LUXIA_RESOURCE_RLS: 'true'
+      # CI exercises the authorization mode Production runs (P5); tests of the other modes set it themselves.
+      AUTHZ_MODE: native
 
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

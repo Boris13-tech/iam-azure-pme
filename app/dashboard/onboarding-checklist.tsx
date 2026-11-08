@@ -10,7 +10,7 @@ import { RECOVERY_SECTION_ID } from "./settings/recovery-codes";
 const ITEMS = [
   { key: "domainVerified", label: "Vérifier un domaine de l’organisation", href: "/dashboard/organization" },
   { key: "secondAdministrator", label: "Avoir un second administrateur permanent, qui peut se connecter", href: "/dashboard/organization" },
-  { key: "recoveryCodes", label: "Chaque administrateur qui se connecte par clé d’accès a créé ses codes de récupération", href: `/dashboard/settings#${RECOVERY_SECTION_ID}` },
+  { key: "recoveryCodes", label: "Vous avez créé vos codes de récupération (connexion par clé d’accès)", href: `/dashboard/settings#${RECOVERY_SECTION_ID}` },
   { key: "teamInvited", label: "Inviter votre équipe", href: "/dashboard/organization" },
   { key: "firstResource", label: "Enregistrer une première ressource", href: "/dashboard/resources" },
   { key: "firstAccessReview", label: "Lancer une première revue d’accès", href: "/dashboard/governance/access-reviews" },

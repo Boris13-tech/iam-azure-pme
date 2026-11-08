@@ -5,11 +5,14 @@ import { preserveLastAdministrator } from "../admin/last-administrator";
 import { withTenantDb } from "../db/scoped-client";
 import { evaluateResourceAccess } from "./authorization";
 import { enforceSoD, SoDDeniedError } from "./sod";
+import { authorizationModeValid } from "../auth/authorization-mode";
 
 const context = (auth: AuthContext) => ({ organizationId: auth.organizationId, tenantId: auth.tenantId });
 const notFound = () => { throw new CanonicalAdminError("NOT_FOUND", 404); };
 
 export async function requireNative(tx: Prisma.TransactionClient, auth: AuthContext, key: string) {
+  // P5: the paths without a session (invitation acceptance) decide here too; no valid mode, no decision.
+  if (!authorizationModeValid()) throw new CanonicalAdminError("FORBIDDEN", 403);
   const subject = await tx.subject.findFirst({ where: { ...context(auth), id: auth.subjectId, lifecycleState: "ACTIVE" } });
   if (!subject) throw new CanonicalAdminError("FORBIDDEN", 403);
   const now = new Date();

@@ -9,6 +9,7 @@ import { CanonicalAdminError } from "../admin/canonical-admin-error";
 import { withTenantDb } from "../db/scoped-client";
 import { CURRENT_WEBAUTHN_CRYPTO } from "../identity";
 import { lockOrganizationActive } from "../organizations/lifecycle";
+import { authorizationModeValid } from "./authorization-mode";
 import { registrationChallenge, verifyPasskeyRegistration, type PasskeyRegistration } from "../provider-adapters/implementations/luxia-local/webauthn-registration";
 
 // First Admin / Break-glass v1, B2: personal recovery codes and the recovery-only session.
@@ -185,6 +186,9 @@ function recoveryEvidence(scope: Scope, person: Person, providerConnectionId: st
 export type RecoverySignIn = Readonly<{ rawToken: string; expiresAt: Date }>;
 
 export async function recoverySignIn(input: { organization: unknown; principalName: unknown; code: unknown }, now = new Date()): Promise<RecoverySignIn | null> {
+  // P5: with no valid mode in Production the recovery session would be refused anyway; refuse first, so that no
+  // single-use recovery code is consumed for nothing. The answer is the same generic refusal as a wrong code.
+  if (!authorizationModeValid()) return null;
   const slug = normalizeOrganizationSlug(input.organization);
   const principalName = normalizePrincipalName(input.principalName);
   const code = normalizeRecoveryCode(input.code);
