@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { LoadingState } from "@/components/ui/states";
 import { Copy, Globe, UserPlus } from "lucide-react";
 
 // Customer Self-Onboarding v1: domains (DNS TXT) and team invitations (link to copy, no email).
@@ -82,6 +83,7 @@ function Domains() {
         </div>}
         {message && <p className="mt-3 text-sm text-slate-700" role="status">{message}</p>}
         {list.state === "unavailable" && <p className="mt-4 text-sm text-red-700">La liste des domaines est indisponible.</p>}
+        {list.state === "loading" && <LoadingState label="Chargement des domaines..." />}
         {list.state === "ok" && (list.data.length === 0 ? <p className="mt-4 text-sm text-slate-600">Aucun domaine.</p> :
           <ul className="mt-4 divide-y divide-slate-100">
             {list.data.map(item => <li key={item.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -154,6 +156,7 @@ function Invitations() {
         </div>}
         {message && <p className="mt-3 text-sm text-slate-700" role="status">{message}</p>}
         {list.state === "unavailable" && <p className="mt-4 text-sm text-red-700">La liste des invitations est indisponible.</p>}
+        {list.state === "loading" && <LoadingState label="Chargement des invitations..." />}
         {list.state === "ok" && (list.data.length === 0 ? <p className="mt-4 text-sm text-slate-600">Aucune invitation.</p> :
           <ul className="mt-4 divide-y divide-slate-100">
             {list.data.map(item => <li key={item.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">

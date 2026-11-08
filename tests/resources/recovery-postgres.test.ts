@@ -231,6 +231,7 @@ describe.runIf(enabled)("B2 recovery codes and recovery-only session (app_user, 
     expect(result.cookie).toMatch(/^[0-9a-f]{64}$/);
     const session = await owner.session.findUniqueOrThrow({ where: { id: sha(result.cookie!) } });
     expect(session).toMatchObject({ scope: "RECOVERY", subjectId: org.subjectId, identityAccountId: org.accountId, revokedAt: null });
+    expect(session).toMatchObject({ ipHash: null, userAgentHash: null }); // R1: recovery sessions store no network identifier either
     expect(session.expiresAt.getTime() - session.createdAt.getTime()).toBe(15 * 60_000);
     expect(await codeRow(org, codes[3])).toMatchObject({ usedAt: session.createdAt, revokedAt: null });
     expect(await owner.localRecoveryCode.count({ where: { ...scope(org), usedAt: null, revokedAt: null } })).toBe(9);

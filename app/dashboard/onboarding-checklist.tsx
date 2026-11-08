@@ -10,7 +10,7 @@ import { RECOVERY_SECTION_ID } from "./settings/recovery-codes";
 const ITEMS = [
   { key: "domainVerified", label: "Vérifier un domaine de l’organisation", href: "/dashboard/organization" },
   { key: "secondAdministrator", label: "Avoir un second administrateur permanent, qui peut se connecter", href: "/dashboard/organization" },
-  { key: "recoveryCodes", label: "Chaque administrateur qui se connecte par clé d’accès a créé ses codes de récupération", href: `/dashboard/settings#${RECOVERY_SECTION_ID}` },
+  { key: "recoveryCodes", label: "Vous avez créé vos codes de récupération (connexion par clé d’accès)", href: `/dashboard/settings#${RECOVERY_SECTION_ID}` },
   { key: "teamInvited", label: "Inviter votre équipe", href: "/dashboard/organization" },
   { key: "firstResource", label: "Enregistrer une première ressource", href: "/dashboard/resources" },
   { key: "firstAccessReview", label: "Lancer une première revue d’accès", href: "/dashboard/governance/access-reviews" },
@@ -27,15 +27,23 @@ export function OnboardingChecklist() {
   }, []);
   const applicable = items ? ITEMS.filter(item => items[item.key] !== null && items[item.key] !== undefined) : [];
   if (!items || applicable.every(item => items[item.key])) return null;
+  const done = applicable.filter(item => items[item.key]).length;
   return <section className="luxia-panel posture-section" aria-label="Mise en route">
     <header><h2><ListChecks size={18} aria-hidden /> Mise en route</h2></header>
-    <ul className="space-y-2">
-      {applicable.map(item => <li key={item.key} className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-2">
-          {items[item.key] ? <CheckCircle2 size={16} className="text-green-700" aria-label="Fait" /> : <Circle size={16} className="text-slate-400" aria-label="À faire" />}
-          <span className={items[item.key] ? "text-slate-500" : "text-slate-900"}>{item.label}</span>
+    {/* One segment per step, done or not: facts only. */}
+    <div className="luxia-progress">
+      <span className="luxia-steps" role="img" aria-label={`${done} étape${done > 1 ? "s" : ""} terminée${done > 1 ? "s" : ""} sur ${applicable.length}`}>
+        {applicable.map(item => <span key={item.key} className={items[item.key] ? "is-done" : undefined} />)}
+      </span>
+      <span>{done} sur {applicable.length} terminée{done > 1 ? "s" : ""}</span>
+    </div>
+    <ul className="luxia-checklist">
+      {applicable.map(item => <li key={item.key} className={items[item.key] ? "is-done" : undefined}>
+        <span>
+          {items[item.key] ? <CheckCircle2 size={18} aria-label="Fait" /> : <Circle size={18} aria-label="À faire" />}
+          {item.label}
         </span>
-        {!items[item.key] && <Link href={item.href} className="font-medium text-[#1f5fbf] hover:underline">Ouvrir</Link>}
+        {!items[item.key] && <Link href={item.href}>Ouvrir</Link>}
       </li>)}
     </ul>
   </section>;

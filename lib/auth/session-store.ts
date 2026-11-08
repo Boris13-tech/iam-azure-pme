@@ -36,7 +36,7 @@ export class SessionStore {
    * Creates a new session.
    * Returns the unhashed token for the browser and the persisted session object.
    */
-  static async createSession(ctx: SessionContext, ip?: string, userAgent?: string,
+  static async createSession(ctx: SessionContext,
     options: { evidence?: Prisma.AuthenticationEvidenceUncheckedCreateInput } = {}) {
     const rawToken = crypto.randomBytes(32).toString("hex");
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
@@ -81,8 +81,10 @@ export class SessionStore {
           subjectId: ctx.subjectId,
           identityAccountId: ctx.identityAccountId,
           expiresAt,
-          ipHash: ip ? crypto.createHash('sha256').update(ip).digest('hex') : null,
-          userAgentHash: userAgent ? crypto.createHash('sha256').update(userAgent).digest('hex') : null,
+          // E15 / R1 (RETENTION-AND-MINIMIZATION-DESIGN.md): no network identifier is stored with a session.
+          // Nothing ever read them, and an unsalted hash of an IPv4 address can be reversed by trial.
+          ipHash: null,
+          userAgentHash: null,
           lastSeenAt: new Date()
         }
         });
@@ -157,16 +159,14 @@ export class SessionStore {
     const scope = { organizationId: sessionBootstrap.organizationId, tenantId: sessionBootstrap.tenantId };
     
     return await withTenantDb(scope, async (tx) => {
-      // We fetch it first to return it (useful for federated logout)
+      // We fetch it first to return it (useful for federated logout). Explicit projection: only what sign-out and
+      // federated logout use; network hashes of older sessions are never read.
       const session = await tx.session.findUnique({
         where: { id: hashedToken },
-        include: {
-          identityAccount: {
-            include: {
-              providerConnection: true
-            }
-          }
-        }
+        select: {
+          id: true, organizationId: true, tenantId: true, subjectId: true, identityAccountId: true, revokedAt: true, expiresAt: true,
+          identityAccount: { select: { providerConnection: true } },
+        },
       });
 
       // Conditional: two concurrent sign-outs revoke once and record one event; the second is a no-op.

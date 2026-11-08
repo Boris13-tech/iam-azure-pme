@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { ENTITLEMENT_CATALOG_V1 } from "../auth/entitlements-catalog";
 import { signInMethodKey } from "../auth/recovery-evidence";
+import { campaignVisibility } from "../resources/access-review-visibility";
 import type { Breakdown, UnavailableReason, WidgetId, WidgetValue } from "./posture-contract";
 import { WIDGETS } from "./posture-contract";
 
@@ -13,6 +14,8 @@ export type QueryContext = Readonly<{
   tx: Prisma.TransactionClient;
   scope: Readonly<{ organizationId: string; tenantId: string }>;
   viewerSubjectId: string;
+  /** The viewer's effective global entitlement keys (scopes the access review counters). */
+  held: ReadonlySet<string>;
   now: Date;
 }>;
 type QueryWidgetId = { [K in WidgetId]: (typeof WIDGETS)[K]["kind"] extends "query" ? K : never }[WidgetId];
@@ -54,6 +57,8 @@ export const PRIVILEGED_OPERATIONS = Object.freeze([
   "SOD.RULE.DISABLE", "RESOURCE.ONBOARDING.BOOTSTRAP", "RESOURCE.ONBOARDING.BOOTSTRAP.REVOKE",
 ]);
 
+/** Review counters count only the campaigns the viewer can open, so a limited reader cannot infer the tenant's volume. */
+const visibleCampaigns = (q: QueryContext) => campaignVisibility({ ...q.scope, subjectId: q.viewerSubjectId }, q.held);
 const activeSession = (q: QueryContext): Prisma.SessionWhereInput => ({ ...q.scope, revokedAt: null, expiresAt: { gt: q.now } });
 
 export const POSTURE_QUERIES: PostureQueries = {
@@ -194,13 +199,13 @@ export const POSTURE_QUERIES: PostureQueries = {
   "governance.sodDeniedAttempts30d": q => q.tx.canonicalAdminAuditEvent.count({ where: { ...q.scope,
     operation: "ASSIGNMENT.DENIED.SOD", occurredAt: { gte: since(q.now, 30) } } }),
   "governance.reviewCampaignsByStatus": async q => buckets(values(AccessReviewCampaignStatus),
-    (await q.tx.accessReviewCampaign.groupBy({ by: ["status"], where: q.scope, _count: { _all: true } }))
+    (await q.tx.accessReviewCampaign.groupBy({ by: ["status"], where: visibleCampaigns(q), _count: { _all: true } }))
       .map(r => ({ key: r.status, count: r._count._all }))),
-  "governance.overdueReviewCampaigns": q => q.tx.accessReviewCampaign.count({ where: { ...q.scope, status: "OPEN", dueAt: { lt: q.now } } }),
-  "governance.pendingReviewItems": q => q.tx.accessReviewItem.count({ where: { ...q.scope, reviewState: "PENDING", campaign: { status: "OPEN" } } }),
-  "governance.reviewItemsRequiringRemediation": q => q.tx.accessReviewItem.count({ where: { ...q.scope, reviewState: "REQUIRES_REMEDIATION" } }),
+  "governance.overdueReviewCampaigns": q => q.tx.accessReviewCampaign.count({ where: { ...visibleCampaigns(q), status: "OPEN", dueAt: { lt: q.now } } }),
+  "governance.pendingReviewItems": q => q.tx.accessReviewItem.count({ where: { ...q.scope, reviewState: "PENDING", campaign: { ...visibleCampaigns(q), status: "OPEN" } } }),
+  "governance.reviewItemsRequiringRemediation": q => q.tx.accessReviewItem.count({ where: { ...q.scope, reviewState: "REQUIRES_REMEDIATION", campaign: visibleCampaigns(q) } }),
   "governance.myPendingReviewDecisions": q => q.tx.accessReviewItem.count({ where: { ...q.scope, reviewerSubjectId: q.viewerSubjectId,
-    decision: "PENDING", campaign: { status: "OPEN" } } }),
+    decision: "PENDING", campaign: { ...visibleCampaigns(q), status: "OPEN" } } }),
 
   // ── Recent Security Activity ──────────────────────────────────────────────
   "activity.recentChangesAndDenials": async q => Object.freeze((await q.tx.canonicalAdminAuditEvent.findMany({

@@ -347,7 +347,13 @@ export async function computePlan(tx: Tx, input: BreakGlassInput, options: Break
 }
 
 /** Dry run: READ ONLY, nothing is written. */
+/** A plan and its application carry a commit-shaped tool version; "unknown" (a modified or unknown checkout) is refused.
+ * This checks the shape only: the provenance comes from the command, which asks Git about its own checkout, with no
+ * inherited GIT_* variable, and requires it clean (scripts/operators/tool-version.ts). */
+const KNOWN_COMMIT = /^[0-9a-f]{40}$/;
+
 export async function planBreakGlass(db: PrismaClient, raw: unknown, options: BreakGlassOptions) {
+  if (!KNOWN_COMMIT.test(options.toolVersion)) refuse("TOOL_VERSION_UNKNOWN", "run the tool from a clean checkout of a known commit");
   const input = validateInput(raw, options.certificationOrganizations);
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SET TRANSACTION READ ONLY`;
@@ -474,6 +480,7 @@ async function readCommitted(db: PrismaClient, plan: BreakGlassPlan): Promise<{ 
 
 export async function applyBreakGlass(db: PrismaClient, raw: unknown, options: ApplyOptions): Promise<ApplyResult> {
   const now = options.now ?? new Date();
+  if (!KNOWN_COMMIT.test(options.toolVersion)) refuse("TOOL_VERSION_UNKNOWN", "run the tool from a clean checkout of a known commit");
   if (now.getTime() > options.issuedAt.getTime() + PLAN_VALIDITY_MS) refuse("PLAN_EXPIRED", "plan again (D5)");
   if (!/^[0-9a-f]{64}$/.test(options.confirm)) refuse("CONFIRMATION_REQUIRED");
   const input = validateInput(raw, options.certificationOrganizations);
