@@ -495,18 +495,18 @@ export async function revokeAssignment(auth: AuthContext, assignmentId: string, 
   }).then(settle);
 }
 
+// Explicit projection for every session an administrator gets back: ipHash / userAgentHash are unsalted
+// SHA-256 values (an IPv4 address is recoverable by brute force) and are never returned, including the ones
+// sessions created before R1 still hold. `id` stays: it is the revocation handle.
+const SESSION_ADMIN_FIELDS = {
+  id: true, organizationId: true, tenantId: true, subjectId: true, identityAccountId: true,
+  recoveryEpoch: true, expiresAt: true, revokedAt: true, createdAt: true, lastSeenAt: true,
+} as const;
+
 export async function listSessions(auth: AuthContext, changeId: string) {
   return withTenantDb(auth, async (tx) => {
     await writeAudit(tx, auth, { operation: "SESSION.READ", changeId });
-    // Explicit projection: ipHash / userAgentHash are unsalted SHA-256 values (an IPv4 address is
-    // recoverable by brute force) and are never returned. `id` stays: it is the revocation handle.
-    const sessions = await tx.session.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true, organizationId: true, tenantId: true, subjectId: true, identityAccountId: true,
-        recoveryEpoch: true, expiresAt: true, revokedAt: true, createdAt: true, lastSeenAt: true,
-      },
-    });
+    const sessions = await tx.session.findMany({ orderBy: { createdAt: "desc" }, select: SESSION_ADMIN_FIELDS });
     return sessions.map((session) => ({
       ...session,
       recoveryEpoch: session.recoveryEpoch.toString(),
@@ -522,7 +522,7 @@ export async function revokeSession(auth: AuthContext, sessionId: string, change
     // Conditional (B3): a session revoked concurrently is frozen; this is then a clean 404, not a failure.
     const revoked = await tx.session.updateMany({ where: { id: sessionId, revokedAt: null }, data: { revokedAt: new Date() } });
     if (revoked.count !== 1) throw new CanonicalAdminError("ACTIVE_SESSION_NOT_FOUND", 404);
-    const session = await tx.session.findFirstOrThrow({ where: { id: sessionId } });
+    const session = await tx.session.findFirstOrThrow({ where: { id: sessionId }, select: SESSION_ADMIN_FIELDS });
     await writeAudit(tx, auth, {
       operation: "SESSION.REVOKE",
       changeId,

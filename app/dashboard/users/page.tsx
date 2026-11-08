@@ -15,6 +15,8 @@ export default function IdentitiesPage() {
   const [currentSubjectId, setCurrentSubjectId] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  // "loading" until the first answer, "failed" if it never came: neither may look like an empty organization.
+  const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
   const load = useCallback(async () => {
     const [response, contextResponse] = await Promise.all([
       fetch("/api/canonical/subjects", { cache: "no-store" }),
@@ -22,9 +24,9 @@ export default function IdentitiesPage() {
     ]);
     if (!response.ok || !contextResponse.ok) throw new Error("SUBJECT_READ_FAILED");
     const [rows, context] = await Promise.all([response.json(), contextResponse.json()]);
-    setSubjects(rows); setCurrentSubjectId(context.subject.id);
+    setSubjects(rows); setCurrentSubjectId(context.subject.id); setStatus("ready");
   }, []);
-  useEffect(() => { load().catch(() => setMessage("Impossible de charger les identités.")); }, [load]);
+  useEffect(() => { load().catch(() => { setStatus(current => current === "ready" ? current : "failed"); setMessage("Impossible de charger les identités."); }); }, [load]);
 
   async function createJoiner(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setMessage("");
@@ -71,7 +73,8 @@ export default function IdentitiesPage() {
           </div></td>
         </tr>)}</tbody>
       </table>
-      {subjects.length === 0 && <div className="p-10 text-center text-slate-500"><ShieldCheck className="mx-auto mb-3 h-8 w-8" />Aucune identité.</div>}
+      {status === "loading" && <div className="p-10 text-center text-slate-500" role="status">Chargement des identités...</div>}
+      {status === "ready" && subjects.length === 0 && <div className="p-10 text-center text-slate-500"><ShieldCheck className="mx-auto mb-3 h-8 w-8" />Aucune identité.</div>}
     </div>
   </div>;
 }

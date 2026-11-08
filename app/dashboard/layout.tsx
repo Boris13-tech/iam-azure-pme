@@ -1,20 +1,18 @@
 import React from "react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Boxes, Building2, ClipboardCheck, Fingerprint, Gauge, Scale, ShieldCheck, Users } from "lucide-react";
 import { getAuthContext } from "@/lib/auth/auth-context";
 import { loadPlatformContext } from "@/lib/platform/context";
-import { LuxiaLogo } from "@/components/brand/luxia-logo";
+import { AppShell, type NavItem } from "@/components/app-shell/app-shell";
 
-const navigation = [
-  { href: "/dashboard", label: "Vue d’ensemble", icon: Gauge, entitlement: null },
-  { href: "/dashboard/users", label: "Identités", icon: Users, entitlement: "subjects.read" },
-  { href: "/dashboard/organization", label: "Organisation", icon: Building2, entitlement: "subjects.read" },
-  { href: "/dashboard/settings", label: "Authentification", icon: ShieldCheck, entitlement: "providers.read" },
-  { href: "/dashboard/resources", label: "Ressources", icon: Boxes, entitlement: "resources.read" },
-  { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: Scale, entitlement: "sod.read" },
-  { href: "/dashboard/governance/access-reviews", label: "Revues d’accès", icon: ClipboardCheck, entitlement: "access_reviews.read" },
-  { href: "/dashboard/audit", label: "Journal d’audit", icon: Fingerprint, entitlement: "audit.read" },
+const navigation: Array<NavItem & { entitlement: string | null }> = [
+  { href: "/dashboard", label: "Vue d’ensemble", icon: "overview", group: "Pilotage", entitlement: null },
+  { href: "/dashboard/users", label: "Identités", icon: "users", group: "Identités et accès", entitlement: "subjects.read" },
+  { href: "/dashboard/organization", label: "Organisation", icon: "organization", group: "Identités et accès", entitlement: "subjects.read" },
+  { href: "/dashboard/settings", label: "Authentification", icon: "authentication", group: "Identités et accès", entitlement: "providers.read" },
+  { href: "/dashboard/resources", label: "Ressources", icon: "resources", group: "Gouvernance", entitlement: "resources.read" },
+  { href: "/dashboard/governance/sod", label: "Séparation des tâches", icon: "sod", group: "Gouvernance", entitlement: "sod.read" },
+  { href: "/dashboard/governance/access-reviews", label: "Revues d’accès", icon: "reviews", group: "Gouvernance", entitlement: "access_reviews.read" },
+  { href: "/dashboard/audit", label: "Journal d’audit", icon: "audit", group: "Sécurité", entitlement: "audit.read" },
 ];
 
 const PROVIDER_LABELS: Record<string, string> = { MICROSOFT_ENTRA: "Microsoft Entra ID", LUXIA_LOCAL: "Compte local LUXIA" };
@@ -24,33 +22,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!auth) redirect("/login");
   const platform = await loadPlatformContext(auth);
   const allowedNavigation = navigation.filter(item => !item.entitlement || platform.entitlements.includes(item.entitlement));
+  const initials = platform.subject.name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase();
   return (
-    <div className="luxia-shell">
-      <aside className="luxia-sidebar">
-        <Link href="/dashboard" className="luxia-logo" aria-label="LUXIA Identity, vue d’ensemble"><LuxiaLogo product="LUXIA Identity" /></Link>
-        <nav className="luxia-nav" aria-label="Navigation principale">
-          {allowedNavigation.map(({ href, label, icon: Icon }) => (
-            <Link key={label} href={href} className="luxia-nav-link">
-              <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
-            </Link>
-          ))}
-        </nav>
-        <div className="luxia-sidebar-footer">
-          <form method="POST" action="/auth/logout"><button type="submit">Se déconnecter</button></form>
-        </div>
-      </aside>
-      <section className="luxia-workspace">
-        <header className="luxia-topbar">
-          <div className="luxia-contexts">
-            <div><Building2 size={16} aria-hidden /><span>Organisation</span><b>{platform.organization.name}</b></div>
-            <div><span className="luxia-live-dot" aria-hidden /><span>Environnement</span><b>{platform.tenant.name}</b></div>
-          </div>
-          <div className="luxia-top-actions">
-            <div className="luxia-profile"><span>{platform.subject.name.split(" ").map(part => part[0]).join("").slice(0,2).toUpperCase()}</span><div><b>{platform.subject.name}</b><small>{PROVIDER_LABELS[platform.identity.providerType] ?? platform.identity.providerType}</small></div></div>
-          </div>
-        </header>
-        <main className="luxia-main">{children}</main>
-      </section>
-    </div>
+    <AppShell items={allowedNavigation.map(({ entitlement: _entitlement, ...item }) => item)}
+      organization={platform.organization.name} environment={platform.tenant.name}
+      person={{ name: platform.subject.name, initials, method: PROVIDER_LABELS[platform.identity.providerType] ?? platform.identity.providerType }}>
+      {children}
+    </AppShell>
   );
 }

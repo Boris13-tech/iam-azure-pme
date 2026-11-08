@@ -2,8 +2,9 @@ import { AuthContext } from "./authorization-engine";
 import { authorize, AuthorizationRequest, AuthorizationDecision, AuthorizationInfrastructureError } from "./authorization-engine";
 import { hasLegacyPermission } from "./legacy-auth-adapter";
 import { withTenantDb } from "../db/scoped-client";
+import { resolveAuthorizationMode, type AuthorizationMode } from "./authorization-mode";
 
-export type AuthorizationMode = "legacy" | "shadow" | "native-shadow-legacy" | "native";
+export type { AuthorizationMode } from "./authorization-mode";
 
 export type LegacyAuthorizationDecision = {
   allowed: boolean;
@@ -16,18 +17,17 @@ type ShadowComparisonStatus =
   | "NATIVE_ERROR"
   | "LEGACY_ERROR";
 
+export { resolveAuthorizationMode } from "./authorization-mode";
+
 export async function checkPermission(
   auth: AuthContext,
   request: AuthorizationRequest
 ): Promise<boolean> {
-  const rawMode = process.env.AUTHZ_MODE || "legacy";
-  const validModes: AuthorizationMode[] = ["legacy", "shadow", "native-shadow-legacy", "native"];
-  const mode: AuthorizationMode = validModes.includes(rawMode as AuthorizationMode) 
-    ? (rawMode as AuthorizationMode) 
-    : "legacy";
-
-  if (rawMode !== mode) {
-    console.warn(`[AUTHZ] Unknown AUTHZ_MODE '${rawMode}', falling back to 'legacy' fail-safe`);
+  const mode = resolveAuthorizationMode();
+  if (mode === null) {
+    // Safe error code only: the configured value is not logged.
+    console.error("[AUTHZ] AUTHZ_MODE_INVALID: missing or unknown in Production, authorization refused");
+    return false;
   }
 
   // 1. Evaluate Legacy and Native in parallel (if not strictly legacy)
