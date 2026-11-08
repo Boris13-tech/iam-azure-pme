@@ -1,5 +1,7 @@
 # Private Beta gate register (G1 to G8)
 
+> **Superseded on 2026-10-23 by the single checklist [PRIVATE_BETA_READINESS.md](../../PRIVATE_BETA_READINESS.md).** Kept for history; it is no longer updated.
+
 | Item | State |
 |---|---|
 | Rule | [Standard, section 17b](LUXIA-MISSION-CRITICAL-ENGINEERING-STANDARD-v1.md): the first limited pilot starts only when all eight criteria hold |

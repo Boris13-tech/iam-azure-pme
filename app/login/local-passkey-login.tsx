@@ -47,13 +47,15 @@ export function LocalPasskeyLogin({ organization, onBeforeSignIn }: { organizati
       else setStatus("Connexion refusée. Vérifiez l’identifiant de l’organisation et votre identifiant.");
     }
   }
-  return <div className="space-y-3 border-t border-slate-200 pt-5">
-    <label htmlFor="luxia-principal" className="block text-sm font-medium text-slate-700">Votre identifiant</label>
-    <input id="luxia-principal" value={principalName} onChange={e => setPrincipalName(e.target.value)} autoComplete="username webauthn" className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-[#1f5fbf] focus:outline-none focus:ring-2 focus:ring-[#eaf1fb]" placeholder="Votre identifiant" />
-    <button onClick={login} disabled={!principalName || !organization} className="w-full flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-base font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50">
-      <Fingerprint className="w-5 h-5" aria-hidden /> Se connecter avec une clé d’accès
+  return <div className="lx-stack">
+    <div className="lx-field">
+      <label htmlFor="luxia-principal" className="lx-label">Votre identifiant</label>
+      <input id="luxia-principal" value={principalName} onChange={e => setPrincipalName(e.target.value)} autoComplete="username webauthn" className="lx-input" placeholder="Votre identifiant" />
+    </div>
+    <button onClick={login} disabled={!principalName || !organization} className="lx-btn lx-btn--primary">
+      <Fingerprint size={20} aria-hidden /> Se connecter avec une clé d’accès
     </button>
-    {status && <p className="text-sm text-slate-600 text-center" role="status">{status}</p>}
-    <p className="text-center text-sm"><Link href="/login/recovery" className="font-medium text-[#1f5fbf] hover:underline">J’ai perdu ma clé d’accès</Link></p>
+    {status && <p className="lx-status" role="status">{status}</p>}
+    <p className="lx-status"><Link href="/login/recovery" className="lx-link">J’ai perdu ma clé d’accès</Link></p>
   </div>;
 }

@@ -72,27 +72,27 @@ export function AcceptInvitation() {
   }
 
   if (token === null) return null;
-  if (!token) return <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{MESSAGES.INVITATION_INVALID}</p>;
+  if (!token) return <p className="lx-alert lx-alert--danger m-0" role="alert">{MESSAGES.INVITATION_INVALID}</p>;
   if (status === "done") return (
-    <div className="space-y-4">
-      <p className="flex items-center gap-2 text-base font-medium text-green-700"><CheckCircle2 className="h-5 w-5" aria-hidden /> Votre compte est activé.</p>
-      <p className="text-base text-slate-700">Identifiant de l’organisation : <span className="font-mono font-semibold">{organization}</span>. Connectez-vous maintenant avec votre clé d’accès.</p>
-      <Link href={`/login?org=${encodeURIComponent(organization)}`} className="flex w-full items-center justify-center rounded-md bg-[#1f5fbf] px-4 py-2.5 text-base font-medium text-white hover:bg-[#194e9e]">Se connecter</Link>
+    <div className="lx-stack">
+      <p className="lx-alert lx-alert--success m-0" role="status"><CheckCircle2 size={18} className="flex-shrink-0" aria-hidden /> Votre compte est activé.</p>
+      <p className="m-0 text-[15px] leading-relaxed text-[var(--text-secondary)]">Identifiant de l’organisation : <span className="font-mono font-semibold text-[var(--text)]">{organization}</span>. Connectez-vous maintenant avec votre clé d’accès.</p>
+      <Link href={`/login?org=${encodeURIComponent(organization)}`} className="lx-btn lx-btn--primary">Se connecter</Link>
     </div>
   );
   return (
-    <form onSubmit={accept} className="space-y-4">
-      <div className="space-y-1.5">
-        <label htmlFor="invitation-principal" className="block text-sm font-medium text-slate-700">Choisissez votre identifiant</label>
+    <form onSubmit={accept} className="lx-stack">
+      <div className="lx-field">
+        <label htmlFor="invitation-principal" className="lx-label">Choisissez votre identifiant</label>
         <input id="invitation-principal" value={principalName} onChange={e => setPrincipalName(e.target.value)} required maxLength={254} autoComplete="username" autoCapitalize="none"
-          placeholder="prenom.nom@entreprise.com" className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-[#1f5fbf] focus:outline-none focus:ring-2 focus:ring-[#eaf1fb]" />
+          placeholder="prenom.nom@entreprise.com" className="lx-input" />
       </div>
-      {message && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{message}</p>}
-      <button type="submit" disabled={status === "busy" || !principalName} className="flex w-full items-center justify-center gap-2 rounded-md bg-[#1f5fbf] px-4 py-2.5 text-base font-medium text-white hover:bg-[#194e9e] disabled:opacity-50">
-        <Fingerprint className="h-5 w-5" aria-hidden />
+      {message && <p className="lx-alert lx-alert--danger m-0" role="alert">{message}</p>}
+      <button type="submit" disabled={status === "busy" || !principalName} className="lx-btn lx-btn--primary">
+        <Fingerprint size={20} aria-hidden />
         {status === "busy" ? "Activation en cours..." : "Créer ma clé d’accès et rejoindre l’organisation"}
       </button>
-      <p className="text-sm text-slate-600">Votre rôle et vos accès ont été définis par votre administrateur. Votre clé d’accès reste sur votre appareil.</p>
+      <p className="lx-hint">Votre rôle et vos accès ont été définis par votre administrateur. Votre clé d’accès reste sur votre appareil.</p>
     </form>
   );
 }

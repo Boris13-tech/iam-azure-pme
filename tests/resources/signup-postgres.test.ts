@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { withTenantDb } from "../../lib/db/scoped-client";
 import { LUXIA_ORG_ADMIN_V1 } from "../../lib/auth/native-role-catalog";
 import { GOVERNANCE_ADMIN_V2 } from "../../lib/resources/admin-bundle";
 import { signupCodeHash } from "../../lib/onboarding/signup";
-import { generateSignupCode } from "../../scripts/operators/signup-codes";
+import { generateSignupCode, issueConfirmed, issueFromPlan, planMarker, planSignupCode, SIGNUP_PLAN_VALIDITY_MS, SignupPlanRefusal } from "../../scripts/operators/signup-codes";
 import { POST as signupBegin } from "../../app/api/auth/signup/begin/route";
 import { POST as signupComplete } from "../../app/api/auth/signup/complete/route";
 import { POST as loginBegin } from "../../app/api/auth/local/begin/route";
@@ -149,4 +149,71 @@ describe.runIf(enabled)("Beta-code signup: atomic organization and first adminis
     expect(await owner.organization.count({ where: { slug } })).toBe(0);
     expect((await owner.signupCode.findUniqueOrThrow({ where: { id } })).status).toBe("RESERVED");
   });
+
+  it("the operator gate refuses a plan past its deadline at the write, by the database's clock", async () => {
+    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `late ${suffix}` },
+      { host: "localhost", database: "ci", schema: "public", role: "ci" }, "c".repeat(40), new Date(Date.now() - 3_600_000));
+    await expect(issueFromPlan(owner, plan, digest)).rejects.toThrow("PLAN_EXPIRED");
+    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(0);
+  });
+
+  it("a plan whose deadline passes during the write leaves no row (wall clock, checked after the insert)", async () => {
+    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `slow ${suffix}` },
+      { host: "localhost", database: "ci", schema: "public", role: "ci" }, "c".repeat(40), new Date(Date.now() - SIGNUP_PLAN_VALIDITY_MS + 1_000));
+    await expect(issueFromPlan(owner, plan, digest, new Date(), { beforeWrite: () => new Promise((done) => setTimeout(done, 2_000)) })).rejects.toThrow("PLAN_EXPIRED");
+    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(0);
+  });
+
+  it("the operator gate issues one usable code per confirmed plan, and only its hash is stored", async () => {
+    // Through issueConfirmed, the command's only path to the write (review follow-up of #121).
+    const target = { host: "localhost", database: "ci", schema: "public", role: "ci" };
+    const current = { target, toolVersion: "c".repeat(40) };
+    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `gate ${suffix}` }, target, "c".repeat(40));
+    const count = () => owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } });
+    for (const [confirm, now, reason] of [[undefined, current, "CONFIRMATION_MISMATCH"], [digest, { ...current, target: { ...target, role: "other" } }, "TARGET_MISMATCH"],
+      [digest, { ...current, toolVersion: "unknown" }, "TOOL_VERSION_UNKNOWN"]] as const) {
+      await expect(issueConfirmed(owner, { plan, digest }, confirm, now)).rejects.toThrow(reason);
+      expect(await count(), reason).toBe(0);
+    }
+    const { code, row } = await issueConfirmed(owner, { plan, digest }, digest, current);
+    expect(row).toMatchObject({ status: "ISSUED", issuedBy: "ci", note: `${planMarker(digest)} gate ${suffix}`, codeHash: signupCodeHash(code) });
+    expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(2 * 86_400_000);
+    await expect(issueConfirmed(owner, { plan, digest }, digest, current)).rejects.toThrow(SignupPlanRefusal);
+    expect(await count()).toBe(1);
+    const begin = await call(signupBegin, "/api/auth/signup/begin", request(code, `gate-${suffix}`));
+    expect(begin.status).toBe(200);
+  });
+
+  it("two concurrent issuances of one plan write one code at most, even when both pass the replay check first", async () => {
+    // Correction pass of #121: a barrier holds each transaction after its replay check until all have made it, so the
+    // checks really overlap; only Serializable isolation then keeps a second code out.
+    const target = { host: "localhost", database: "ci", schema: "public", role: "ci" };
+    const current = { target, toolVersion: "c".repeat(40) };
+    const { plan, digest } = planSignupCode({ by: "ci", days: "2", note: `race ${suffix}` }, target, "c".repeat(40));
+    let waiting = 0, reached = 0;
+    let release!: () => void;
+    const all = new Promise<void>((done) => { release = done; });
+    const barrier = async () => {
+      reached += 1; waiting += 1;
+      if (waiting === 2) release();
+      await Promise.race([all, new Promise((done) => setTimeout(done, 10_000))]);
+    };
+    const results = await Promise.allSettled([0, 1].map(() => issueFromPlan(owner, plan, digest, new Date(), { beforeWrite: barrier })));
+    expect(reached, "both transactions passed the replay check before either wrote").toBe(2);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    // The other one was stopped by the database's serialization check (Prisma P2034, SQLSTATE 40001), not by the replay
+    // check, which it had already passed: Serializable isolation is what keeps the second code out.
+    const [rejected] = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(rejected.reason).not.toBeInstanceOf(SignupPlanRefusal);
+    // Structured fields only, never the message text (Codex, fourth pass of #121).
+    expect(rejected.reason).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    const error = rejected.reason as Prisma.PrismaClientKnownRequestError;
+    expect([error.code, (error.meta as { code?: string } | undefined)?.code]).toEqual(expect.arrayContaining([expect.stringMatching(/^(P2034|40001)$/)]));
+    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(digest) } } })).toBe(1);
+    // And without the barrier, through the command's path.
+    const again = planSignupCode({ by: "ci", days: "2", note: `race2 ${suffix}` }, target, "c".repeat(40));
+    const loose = await Promise.allSettled(Array.from({ length: 4 }, () => issueConfirmed(owner, again, again.digest, current)));
+    expect(loose.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(await owner.signupCode.count({ where: { note: { startsWith: planMarker(again.digest) } } })).toBe(1);
+  }, 30_000);
 });

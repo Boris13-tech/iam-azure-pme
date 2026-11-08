@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
-import { beforeAll, afterAll, describe, expect, it } from "vitest";
+import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { withTenantDb } from "../../lib/db/scoped-client";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import * as review from "../../lib/resources/access-reviews";
+import { GET as reviewGET, POST as reviewPOST } from "../../app/api/canonical/access-reviews/[[...path]]/route";
+const session = vi.hoisted(() => ({ requireAuth: vi.fn() }));
+vi.mock("../../lib/auth/require-auth", () => session);
 
 const auth = { organizationId: randomUUID(), tenantId: randomUUID(), subjectId: randomUUID() };
 const reviewer = { ...auth, subjectId: randomUUID() };
@@ -84,6 +87,23 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Access Reviews real a
     const audits = await review.reviewAudit(auth, c.id);
     expect(audits.filter(row => row.operation === "ACCESS_REVIEW.ITEM.KEEP")).toHaveLength(1);
     expect(audits.filter(row => row.operation === "ACCESS_REVIEW.CAMPAIGN.COMPLETE")).toHaveLength(1);
+  });
+  it("campaign creation is in the campaign's own history, through the service and through HTTP", async () => {
+    const c = await campaign();
+    const audits = await review.reviewAudit(auth, c.id);
+    expect(audits.map(row => [row.operation, row.result, row.actorSubjectId])).toEqual([["ACCESS_REVIEW.CAMPAIGN.CREATE", "SUCCESS", auth.subjectId]]);
+    expect(audits[0].metadata).toEqual({ campaignId: c.id });
+    // Same path as the console: POST /api/canonical/access-reviews, then GET /{id}/audit (the route parses and serializes).
+    session.requireAuth.mockResolvedValue(auth);
+    const created = await reviewPOST(new Request("http://localhost/api/canonical/access-reviews", { method: "POST",
+      headers: { "content-type": "application/json", "x-luxia-change-id": `review-ui:${randomUUID()}` },
+      body: JSON.stringify({ name: "Console campaign", scopeId, reviewerSubjectId: reviewer.subjectId, startsAt: new Date().toISOString(), dueAt: new Date(Date.now() + 86400000).toISOString() }) }),
+      { params: Promise.resolve({}) });
+    expect(created.status).toBe(200);
+    const { id } = await created.json();
+    const history = await reviewGET(new Request(`http://localhost/api/canonical/access-reviews/${id}/audit`), { params: Promise.resolve({ path: [id, "audit"] }) });
+    expect(history.status).toBe(200);
+    expect((await history.json()).map((row: { operation: string; result: string }) => [row.operation, row.result])).toEqual([["ACCESS_REVIEW.CAMPAIGN.CREATE", "SUCCESS"]]);
   });
   it("REVOKE atomic/idempotent; audit safe whitelist; no recreation", async () => {
     const c = await campaign(), item = (await review.listReviewItems(auth, c.id))[0];

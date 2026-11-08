@@ -1,6 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
-import { ShieldCheck, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
+import { AuthAlert, AuthShell } from '@/components/auth/auth-shell';
 import { OrganizationLogin } from './organization-login';
 
 export const dynamic = 'force-dynamic';
@@ -20,28 +21,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const errorMsg = sp?.error ? ERRORS[sp.error] ?? '' : '';
 
   return (
-    <div className="min-h-screen bg-[#f7f8fa] flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8">
-        <div className="mb-8">
-          <div className="mb-6 flex items-center gap-2 text-slate-900">
-            <ShieldCheck className="h-6 w-6 text-[#1f5fbf]" aria-hidden />
-            <span className="text-lg font-bold tracking-wide">LUXIA</span>
-            <span className="text-lg text-slate-500">Identity</span>
-          </div>
-          <h1 className="text-2xl font-semibold text-slate-900">Connexion</h1>
-          <p className="mt-1 text-base text-slate-600">Indiquez l’identifiant de votre organisation, puis votre méthode de connexion.</p>
-        </div>
-
-        {errorMsg && (
-          <div className="mb-6 flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" aria-hidden />
-            <p className="break-words">{errorMsg}</p>
-          </div>
-        )}
-
-        <OrganizationLogin initialOrganization={typeof sp?.org === 'string' ? sp.org : ''} />
-        <p className="mt-6 text-center text-sm text-slate-600">Vous avez un code d’accès bêta ? <Link href="/signup" className="font-medium text-[#1f5fbf] hover:underline">Créer une organisation</Link></p>
-      </div>
-    </div>
+    <AuthShell
+      title="Connexion"
+      description="Indiquez l’identifiant de votre organisation, puis connectez-vous avec votre clé d’accès."
+      footer={<p>Vous avez un code d’accès bêta ? <Link href="/signup" className="lx-link">Créer une organisation</Link></p>}
+    >
+      {errorMsg && <div className="mb-5"><AuthAlert><AlertCircle size={18} className="mt-0.5 flex-shrink-0" aria-hidden /><span>{errorMsg}</span></AuthAlert></div>}
+      <OrganizationLogin initialOrganization={typeof sp?.org === 'string' ? sp.org : ''} />
+    </AuthShell>
   );
 }
