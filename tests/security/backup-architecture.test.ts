@@ -15,6 +15,13 @@ const role = read("scripts/backup/luxia-backup-role.sql");
 const SECRET_KEY_PREFIX = ["AGE", "SECRET", "KEY", "1"].join("-");
 
 describe("Independent backup architecture", () => {
+  it("the restore verifier checks partitioned parents too, not only plain tables", () => {
+    // Review follow-up of #172: reading through a partitioned parent must be isolated as well.
+    const verifier = readFileSync("scripts/backup/verify-restored.mjs", "utf8");
+    expect(verifier).toContain("c.relkind IN ('r', 'p') AND c.relforcerowsecurity");
+    expect(verifier).not.toContain("c.relkind = 'r'");
+  });
+
   it("the backup workflow runs on a schedule or by hand only, with read-only repository access and the protected environment", () => {
     expect(workflow).toMatch(/^on:\n  schedule:\n(    #.*\n)*    - cron: '[^']+'\n  workflow_dispatch:\n\n/m);
     expect(workflow).not.toMatch(/pull_request|push:/);
