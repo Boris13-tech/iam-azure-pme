@@ -41,16 +41,12 @@ describe("Dashboard list states and business flows", () => {
   it("access reviews: the reviewer sees names, not identifiers, and errors in words", () => {
     for (const raw of ["{item.subjectId}", "{item.assignmentId}", "{item.entitlementId}", 'item.resourceIds.join(", ")'])
       expect(reviews, raw).not.toContain(raw);
-    expect(reviews).toContain("person(item.subjectId)");
-    expect(reviews).toContain("right(item.entitlementId)");
+    expect(reviews).toContain("{person(item)}");
+    expect(reviews).toContain("{right(item)}");
+    // Names come with the items, under access_reviews.read: no lookup that depends on subjects.read / resources.read.
+    expect(reviews).toContain("item.subjectName ??");
+    for (const lookup of ["/api/canonical/subjects", "/api/canonical/resources", "/api/canonical/resource-governance/entitlements"])
+      expect(reviews, lookup).not.toContain(lookup);
     expect(reviews).not.toMatch(/setError\(failure instanceof Error \? failure\.message : "REQUEST_DENIED"\)/);
-  });
-
-  it("only a catalog that follows `after` is paged: another would repeat one request, and one journal event, per page", () => {
-    const call = (url: string) => reviews.slice(reviews.indexOf(`names("${url}"`)).split(String.fromCharCode(10))[0];
-    expect(call("/api/canonical/resource-governance/entitlements")).toMatch(/, true\);$/);
-    expect(call("/api/canonical/resources")).not.toMatch(/, true\);$/);
-    expect(call("/api/canonical/subjects")).not.toMatch(/, true\);$/);
-    expect(read("app/api/canonical/resources/route.ts")).not.toContain("after");
   });
 });
