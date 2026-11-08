@@ -57,6 +57,8 @@ jobs:
       contents: read
       actions: read
     outputs:
+      approved: ${{ steps.approval.outputs.approved_by }}
+      not_attempted: ${{ steps.deploy.outputs.not_attempted }}
       attempted: ${{ steps.deploy.outputs.attempted }}
       deployment: ${{ steps.deploy.outputs.deployment }}
       previous: ${{ steps.deploy.outputs.previous }}
@@ -92,6 +94,9 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN }}
         run: |
           set -euo pipefail
+          # Explicit evidence for the confirm job: this step started and has sent nothing yet. A step that never
+          # finished leaves no output at all, and the confirm job then asks for a manual check.
+          echo "not_attempted=true" >> "$GITHUB_OUTPUT"
           for v in VERCEL_TOKEN TEAM PROJECT REPO_ID; do [[ -n "${!v}" ]] || { echo "::error::$v is not configured on the Production environment"; exit 1; }; done
           api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
           previous="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
@@ -99,8 +104,9 @@ jobs:
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
           # Written before the request: from here on, a deployment may exist even if its answer never arrives.
           echo "attempted=true" >> "$GITHUB_OUTPUT"
-          # The run is recorded on the deployment: if the answer to this request is lost, the rollback still finds it.
-          body="$(jq -n --arg sha "$SHA" --argjson repo "$REPO_ID" --arg project "$PROJECT" --arg run "$GITHUB_RUN_ID" \
+          # The run and its attempt are recorded on the deployment: if the answer to this request is lost, the rollback
+          # still finds it, and a deployment of an earlier attempt of the same run cannot stand in for it.
+          body="$(jq -n --arg sha "$SHA" --argjson repo "$REPO_ID" --arg project "$PROJECT" --arg run "$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT" \
             '{name: "iam-azure-pme", project: $project, target: "production", meta: {luxiaRun: $run}, gitSource: {type: "github", repoId: $repo, ref: "main", sha: $sha}}')"
           created="$(api -X POST "https://api.vercel.com/v13/deployments?forceNew=1&teamId=$TEAM" -d "$body")"
           id="$(jq -r .id <<< "$created")"
@@ -150,46 +156,54 @@ jobs:
           DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
         run: |
           set -uo pipefail
-          # One deadline for the whole recovery, inside this step's own time limit. Every request is bounded, and a lost
-          # answer is never taken as success: only what Vercel reports about Production decides.
+          # One deadline for the whole recovery, well inside this step's own time limit (540 of 660 s). Every request and
+          # every pause is cut to the time left, and none starts after the deadline, so the diagnostic below is always
+          # written. A lost answer is never taken as success: only what Vercel reports about Production decides.
           budget="${ROLLBACK_BUDGET_SECONDS:-540}"; [[ "$budget" =~ ^[0-9]+$ ]] && (( budget <= 540 )) || budget=540  # shorter in tests, never longer
           deadline=$((SECONDS + budget))
-          api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          api() {
+            local left=$((deadline - SECONDS)); (( left > 3 )) || return 124
+            local limit=$(( left - 2 < 30 ? left - 2 : 30 ))
+            curl -sS --fail-with-body --connect-timeout "$(( limit < 10 ? limit : 10 ))" --max-time "$limit" -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"
+          }
+          pause() { local left=$((deadline - SECONDS)); (( left > 3 )) || return 1; sleep "$(( left - 3 < 10 ? left - 3 : 10 ))"; }
           production() { api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty'; }
           unresolved=""
-          # 1. Every deployment of this run: the one whose answer arrived, and any found by this run's metadata.
+          # 1. Every deployment of this attempt: the one whose answer arrived, and any found by this attempt's metadata.
           listed="" ; listing=""
           for i in 1 2 3 4 5 6; do
-            if listing="$(api "https://api.vercel.com/v6/deployments?projectId=$PROJECT&teamId=$TEAM&limit=20&meta-luxiaRun=$GITHUB_RUN_ID")"; then
+            if listing="$(api "https://api.vercel.com/v6/deployments?projectId=$PROJECT&teamId=$TEAM&limit=20&meta-luxiaRun=$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT")"; then
               listed="$(jq -r '.deployments[]?.uid' <<< "$listing")"; break
             fi
-            listing=""; (( SECONDS < deadline )) || break; sleep 10
+            listing=""; pause || break
           done
           [[ -n "$listing" ]] || unresolved="the deployments of this run could not be listed"
           ids="$(printf '%s\n%s\n' "$DEPLOYMENT" "$listed" | grep -v '^$' | sort -u || true)"
-          # A creation request was sent, yet no deployment of this run is known: it may still appear and go live.
+          # A creation request was sent, yet no deployment of this attempt is known: it may still appear and go live.
           [[ -n "$ids" ]] || unresolved="${unresolved:-a deployment was requested but none of this run can be found; it may still go live}"
           # 2. Each must be finished (ready, failed or cancelled) before the promotion, or it could still reach Production.
           for one in $ids; do
             state=""
-            while (( SECONDS < deadline )); do
+            while (( deadline - SECONDS > 3 )); do
               state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r '.readyState // empty')" || state=""
               [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] && break
               api -X PATCH "https://api.vercel.com/v12/deployments/$one/cancel?teamId=$TEAM" > /dev/null || true
-              sleep 10
+              pause || break
             done
             [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] || unresolved="deployment $one is still ${state:-unknown}"
           done
           # 3. Promote the previous deployment; a refused or lost answer is retried once, Production state decides.
           current=""; confirmed=""
           for attempt in 1 2; do
+            (( deadline - SECONDS > 3 )) || { echo "::warning::no time left for promotion request $attempt"; break; }
             api -X POST "https://api.vercel.com/v10/projects/$PROJECT/promote/$PREVIOUS?teamId=$TEAM" > /dev/null \
               || echo "::warning::promotion request $attempt failed or its answer was lost; Production state decides"
-            window=$((SECONDS + 120)); (( attempt == 2 )) && window=$deadline
-            while (( SECONDS < window && SECONDS < deadline )); do
+            # The first request waits at most half the time left (and 2 minutes), so the retry always has its turn.
+            half=$(( (deadline - SECONDS) / 2 )); window=$((SECONDS + (half < 120 ? half : 120))); (( attempt == 2 )) && window=$deadline
+            while (( SECONDS < window && deadline - SECONDS > 3 )); do
               current="$(production)" || current=""
               if [[ "$current" == "$PREVIOUS" ]]; then confirmed=1; break 2; fi
-              sleep 10
+              pause || break
             done
           done
           if [[ -n "$unresolved" ]]; then
@@ -256,6 +270,8 @@ jobs:
         env:
           BASE: https://iam-azure-pme.vercel.app
           DEPLOY_RESULT: ${{ needs.deploy.result }}
+          APPROVED: ${{ needs.deploy.outputs.approved }}
+          NOT_ATTEMPTED: ${{ needs.deploy.outputs.not_attempted }}
           ATTEMPTED: ${{ needs.deploy.outputs.attempted }}
         run: |
           set -u
@@ -266,7 +282,12 @@ jobs:
             if [ "$login" = "200" ] && grep -q '<title>LUXIA' login.html && [ "$api" = "401" ]; then ok=1; break; fi
             sleep 20
           done
+          # "Nothing was deployed" only on explicit evidence: the approval step refused (the deploy step never ran), or
+          # the deploy step finished before sending its request. Missing outputs (a runner cut off) prove nothing.
+          nothing=""
+          [ -z "$APPROVED" ] && [ "$DEPLOY_RESULT" = "failure" ] && nothing="the approval was refused"
+          [ "$NOT_ATTEMPTED" = "true" ] && [ "$ATTEMPTED" != "true" ] && nothing="the deploy step stopped before its request"
           if [ "$DEPLOY_RESULT" = "success" ] && [ -n "$ok" ]; then echo "Production serves LUXIA after the deployment"; exit 0; fi
-          if [ "$ATTEMPTED" != "true" ] && [ -n "$ok" ]; then echo "nothing was deployed (deploy job: $DEPLOY_RESULT); Production serves LUXIA"; exit 0; fi
+          if [ -n "$nothing" ] && [ -n "$ok" ]; then echo "nothing was deployed ($nothing; deploy job: $DEPLOY_RESULT); Production serves LUXIA"; exit 0; fi
           echo "::error::MANUAL CHECK REQUIRED: deploy job ended $DEPLOY_RESULT (deployment attempted: ${ATTEMPTED:-unknown}); Production public check: ${ok:+passed}${ok:-FAILED}. Find which deployment serves Production and follow docs/operations/PRODUCTION-CHANGE-RECORD.md"
           exit 1
