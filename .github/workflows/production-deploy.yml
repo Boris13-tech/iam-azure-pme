@@ -1,0 +1,305 @@
+name: Production deploy
+
+# The only way to change the code running in Production (docs/operations/PRODUCTION-CHANGE-RECORD.md, GOV-001).
+# It starts with the exact commit; the deploy job waits in the protected "Production" environment until an account
+# holding the approval right approves it in GitHub, and its first step refuses to go on unless that approval is
+# recorded for this run. The job then deploys that commit through the Vercel API (gitSource), checks Production from
+# outside, and promotes back the previous deployment if a check fails. A separate job, holding no secret, checks
+# Production again even when the deploy job was cancelled or cut off. No local command line and no personal credential.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-character commit SHA on main, with a green CI run
+        required: true
+        type: string
+      reason:
+        description: Why this deployment (recorded in the change record)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: The commit is on main and its CI passed
+        env:
+          SHA: ${{ inputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full 40-character lowercase commit SHA"; exit 1; }
+          status="$(gh api "repos/$REPO/compare/$SHA...main" --jq .status)"
+          [[ "$status" == "ahead" || "$status" == "identical" ]] || { echo "::error::$SHA is not on main ($status)"; exit 1; }
+          green="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&status=success&per_page=10" --jq '[.workflow_runs[] | select(.head_branch == "main")] | length')"
+          [[ "$green" -ge 1 ]] || { echo "::error::no successful CI run on main for $SHA"; exit 1; }
+          echo "verified: $SHA is on main with a green CI run"
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-24.04
+    # A required reviewer on the environment. Nothing below runs before that approval, and the first step checks it.
+    environment: Production
+    # Budget: approval check 2, deploy 13, checks 3, rollback 11, record 1 (minutes); the rollback always keeps its window.
+    timeout-minutes: 32
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      approved: ${{ steps.approval.outputs.approved_by }}
+      refused: ${{ steps.approval.outputs.refused }}
+      not_attempted: ${{ steps.deploy.outputs.not_attempted }}
+      attempted: ${{ steps.deploy.outputs.attempted }}
+      deployment: ${{ steps.deploy.outputs.deployment }}
+      previous: ${{ steps.deploy.outputs.previous }}
+    # The Vercel token is not here: only the two steps that call Vercel receive it.
+    env:
+      SHA: ${{ inputs.sha }}
+      REASON: ${{ inputs.reason }}
+      TEAM: ${{ vars.VERCEL_TEAM_ID }}
+      PROJECT: ${{ vars.VERCEL_PROJECT_ID }}
+      REPO_ID: ${{ vars.GITHUB_REPOSITORY_ID_FOR_VERCEL }}
+      BASE: https://iam-azure-pme.vercel.app
+    steps:
+      - name: The approval of this run is recorded for Production
+        id: approval
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Fail closed: if the approval cannot be read, or none is recorded for the Production environment on this run
+          # (for example the environment lost its required reviewer), nothing is deployed.
+          # A refusal writes "refused=true" first: the confirm job's explicit evidence that the deploy step never ran.
+          refuse() { echo "refused=true" >> "$GITHUB_OUTPUT"; echo "::error::$1: nothing is deployed"; exit 1; }
+          raw="$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/approvals")" || refuse "the approvals of this run cannot be read"
+          approved="$(jq -r '[.[] | select(.state == "approved") | select(any(.environments[]?; .name == "Production")) | .user.login] | unique | join(",")' <<< "$raw")" \
+            || refuse "the approvals of this run cannot be read"
+          [[ -n "$approved" ]] || refuse "no approval is recorded for the Production environment on this run"
+          echo "approved_by=$approved" >> "$GITHUB_OUTPUT"
+          echo "approved for Production by: $approved"
+
+      - name: Deploy the exact commit and wait until it serves Production
+        id: deploy
+        timeout-minutes: 13
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Explicit evidence for the confirm job: this step started and has sent nothing yet. A step that never
+          # finished leaves no output at all, and the confirm job then asks for a manual check.
+          echo "not_attempted=true" >> "$GITHUB_OUTPUT"
+          for v in VERCEL_TOKEN TEAM PROJECT REPO_ID; do [[ -n "${!v}" ]] || { echo "::error::$v is not configured on the Production environment"; exit 1; }; done
+          api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          previous="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
+          [[ -n "$previous" ]] || { echo "::error::cannot read the current Production deployment"; exit 1; }
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          # Written before the request: from here on, a deployment may exist even if its answer never arrives.
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+          # The run and its attempt are recorded on the deployment: if the answer to this request is lost, the rollback
+          # still finds it, and a deployment of an earlier attempt of the same run cannot stand in for it.
+          body="$(jq -n --arg sha "$SHA" --argjson repo "$REPO_ID" --arg project "$PROJECT" --arg run "$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT" \
+            '{name: "iam-azure-pme", project: $project, target: "production", meta: {luxiaRun: $run}, gitSource: {type: "github", repoId: $repo, ref: "main", sha: $sha}}')"
+          created="$(api -X POST "https://api.vercel.com/v13/deployments?forceNew=1&teamId=$TEAM" -d "$body")"
+          id="$(jq -r .id <<< "$created")"
+          echo "deployment=$id" >> "$GITHUB_OUTPUT"
+          [[ "$(jq -r .projectId <<< "$created")" == "$PROJECT" ]] || { echo "::error::deployment $id is not in the configured project"; exit 1; }
+          for i in $(seq 1 60); do
+            state="$(api "https://api.vercel.com/v13/deployments/$id?teamId=$TEAM" | jq -r .readyState)"
+            [[ "$state" == "READY" ]] && break
+            [[ "$state" == "ERROR" || "$state" == "CANCELED" ]] && { echo "::error::deployment $id ended $state"; exit 1; }
+            (( SECONDS < 600 )) || break
+            sleep 10
+          done
+          if [[ "$state" != "READY" ]]; then
+            # Stopped before failing: an unattended build must not reach Production after this run has reported failure.
+            api -X PATCH "https://api.vercel.com/v12/deployments/$id/cancel?teamId=$TEAM" > /dev/null || echo "::warning::cancel of $id was refused"
+            echo "::error::deployment $id not ready after 10 minutes"; exit 1
+          fi
+          current="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
+          [[ "$current" == "$id" ]] || { echo "::error::Production serves $current, not $id"; exit 1; }
+          echo "Production now serves $id (previous $previous)"
+
+      - name: Check Production from outside
+        id: checks
+        timeout-minutes: 3
+        run: |
+          set -u
+          check() {
+            login=$(curl -s -o login.html -w '%{http_code}' --max-time 20 "$BASE/login") || login=000
+            root=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "$BASE/") || root="000 -"
+            api=$(curl -s -o api.json -w '%{http_code}' --max-time 20 "$BASE/api/canonical/sessions") || api=000
+            [ "$login" = "200" ] && grep -q '<title>LUXIA' login.html && [ "$root" = "307 $BASE/login" ] \
+              && [ "$api" = "401" ] && grep -q '"error":"Unauthorized"' api.json
+          }
+          for attempt in 1 2 3; do
+            if check; then echo "after-checks passed (attempt $attempt)"; exit 0; fi
+            echo "attempt $attempt failed: login=$login root=$root api=$api"; sleep 20
+          done
+          echo "::error::after-checks failed"; exit 1
+
+      - name: Promote the previous deployment back if a check failed
+        id: rollback
+        if: (failure() || cancelled()) && steps.deploy.outputs.attempted == 'true'
+        timeout-minutes: 11
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN }}
+          PREVIOUS: ${{ steps.deploy.outputs.previous }}
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
+        run: |
+          set -uo pipefail
+          # One deadline for the whole recovery, well inside this step's own time limit (540 of 660 s). Every request and
+          # every pause is cut to the time left, and none starts after the deadline, so the diagnostic below is always
+          # written. A lost answer is never taken as success: only what Vercel reports about Production decides.
+          budget="${ROLLBACK_BUDGET_SECONDS:-540}"; [[ "$budget" =~ ^[0-9]+$ ]] && (( budget <= 540 )) || budget=540  # shorter in tests, never longer
+          deadline=$((SECONDS + budget))
+          # 'stop' is the end of the current phase (never later than the deadline): requests and pauses are cut to it.
+          stop=$deadline
+          remaining() { local end=$(( stop < deadline ? stop : deadline )); echo $(( end - SECONDS )); }
+          api() {
+            local left; left=$(remaining); (( left > 3 )) || return 124
+            local limit=$(( left - 2 < 30 ? left - 2 : 30 ))
+            curl -sS --fail-with-body --connect-timeout "$(( limit < 10 ? limit : 10 ))" --max-time "$limit" -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"
+          }
+          pause() { local left; left=$(remaining); (( left > 3 )) || return 1; sleep "$(( left - 3 < 10 ? left - 3 : 10 ))"; }
+          production() { api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty'; }
+          unresolved=""
+          # 1. Every deployment of this attempt: the one whose answer arrived, and any found by this attempt's metadata.
+          listed="" ; listing=""
+          for i in 1 2 3 4 5 6; do
+            if listing="$(api "https://api.vercel.com/v6/deployments?projectId=$PROJECT&teamId=$TEAM&limit=20&meta-luxiaRun=$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT")"; then
+              listed="$(jq -r '.deployments[]?.uid' <<< "$listing")"; break
+            fi
+            listing=""; pause || break
+          done
+          [[ -n "$listing" ]] || unresolved="the deployments of this run could not be listed"
+          ids="$(printf '%s\n%s\n' "$DEPLOYMENT" "$listed" | grep -v '^$' | sort -u || true)"
+          # A creation request was sent, yet no deployment of this attempt is known: it may still appear and go live.
+          [[ -n "$ids" ]] || unresolved="${unresolved:-a deployment was requested but none of this run can be found; it may still go live}"
+          # 2. Each must be finished (ready, failed or cancelled) before the promotion, or it could still reach Production.
+          for one in $ids; do
+            state=""
+            while (( deadline - SECONDS > 3 )); do
+              state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r '.readyState // empty')" || state=""
+              [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] && break
+              api -X PATCH "https://api.vercel.com/v12/deployments/$one/cancel?teamId=$TEAM" > /dev/null || true
+              pause || break
+            done
+            [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] || unresolved="deployment $one is still ${state:-unknown}"
+          done
+          # 3. Promote the previous deployment; a refused or lost answer is retried once, Production state decides.
+          current=""; confirmed=""
+          for attempt in 1 2; do
+            stop=$deadline
+            (( deadline - SECONDS > 3 )) || { echo "::warning::no time left for promotion request $attempt"; break; }
+            # The first request and its checks use at most half the time left (and 2 minutes): every request and pause
+            # of that phase is cut to its window, so the retry always has its turn.
+            half=$(( (deadline - SECONDS) / 2 )); (( attempt == 1 )) && stop=$((SECONDS + (half < 120 ? half : 120)))
+            api -X POST "https://api.vercel.com/v10/projects/$PROJECT/promote/$PREVIOUS?teamId=$TEAM" > /dev/null \
+              || echo "::warning::promotion request $attempt failed or its answer was lost; Production state decides"
+            while (( $(remaining) > 3 )); do
+              # A failed read keeps the last state actually seen; "seen" stays empty if Production was never read.
+              if observed="$(production)" && [[ -n "$observed" ]]; then current="$observed"; fi
+              if [[ "$current" == "$PREVIOUS" ]]; then confirmed=1; break 2; fi
+              pause || break
+            done
+          done
+          stop=$deadline
+          if [[ -n "$unresolved" ]]; then
+            echo "::error::ROLLBACK UNRESOLVED: $unresolved. Production last seen serving ${current:-unknown (never read)}. Runbook: docs/operations/PRODUCTION-CHANGE-RECORD.md"
+            exit 1
+          fi
+          if [[ -n "$confirmed" ]]; then echo "::warning::rolled back: Production serves $PREVIOUS"; exit 0; fi
+          echo "::error::ROLLBACK NOT CONFIRMED: Production last seen serving ${current:-unknown (never read)}, not $PREVIOUS"; exit 1
+
+      - name: Record the change (approval, commit, deployments, checks)
+        id: record
+        if: always()
+        timeout-minutes: 1
+        env:
+          RUN_ID: ${{ github.run_id }}
+          APPROVED_BY: ${{ steps.approval.outputs.approved_by }}
+          DEPLOYMENT: ${{ steps.deploy.outputs.deployment }}
+          PREVIOUS: ${{ steps.deploy.outputs.previous }}
+          DEPLOY: ${{ steps.deploy.outcome }}
+          CHECKS: ${{ steps.checks.outcome }}
+          ROLLBACK: ${{ steps.rollback.outcome }}
+        run: |
+          set -euo pipefail
+          # The reason is free text: kept out of the table syntax, whole in the JSON record.
+          reason_cell="$(printf '%s' "$REASON" | tr '\r\n|`' '    ' | cut -c1-300)"
+          jq -n --arg run "$RUN_ID" --arg sha "$SHA" --arg reason "$REASON" --arg approved "${APPROVED_BY:-none}" \
+            --arg deployment "${DEPLOYMENT:-none}" --arg previous "${PREVIOUS:-unknown}" --arg deploy "${DEPLOY:-not run}" \
+            --arg checks "${CHECKS:-not run}" --arg rollback "${ROLLBACK:-not needed}" \
+            '{run: $run, commit: $sha, reason: $reason, approvedBy: $approved, deployment: $deployment, previous: $previous, deploy: $deploy, checks: $checks, rollback: $rollback}' \
+            > production-change-record.json
+          {
+            echo "## Production change record"
+            echo "| Item | Value |"; echo "|---|---|"
+            echo "| Commit | \`$SHA\` |"
+            echo "| Reason | $reason_cell |"
+            echo "| Approved for Production by (this run) | ${APPROVED_BY:-none: nothing was deployed} |"
+            echo "| Deployment | \`${DEPLOYMENT:-none}\` |"
+            echo "| Previous (rollback target) | \`${PREVIOUS:-unknown}\` |"
+            echo "| Deploy | ${DEPLOY:-not run} |"
+            echo "| After-checks | ${CHECKS:-not run} |"
+            echo "| Rollback | ${ROLLBACK:-not needed} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the change record (90 days; copied to the evidence store by the operator)
+        if: always() && steps.record.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-change-record-${{ github.run_id }}
+          path: production-change-record.json
+          retention-days: 90
+          if-no-files-found: error
+
+  confirm:
+    # Runs even when the deploy job was cancelled, failed or cut off. It holds no secret and no token permission: it
+    # only reads public pages, and makes the run red, with the runbook, whenever Production is not proven healthy.
+    needs: deploy
+    if: always() && needs.deploy.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Production serves LUXIA after this run
+        id: confirm
+        env:
+          BASE: https://iam-azure-pme.vercel.app
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          REFUSED: ${{ needs.deploy.outputs.refused }}
+          NOT_ATTEMPTED: ${{ needs.deploy.outputs.not_attempted }}
+          ATTEMPTED: ${{ needs.deploy.outputs.attempted }}
+        run: |
+          set -u
+          ok=""
+          for attempt in 1 2 3; do
+            login=$(curl -s -o login.html -w '%{http_code}' --max-time 20 "$BASE/login") || login=000
+            api=$(curl -s -o api.json -w '%{http_code}' --max-time 20 "$BASE/api/canonical/sessions") || api=000
+            if [ "$login" = "200" ] && grep -q '<title>LUXIA' login.html && [ "$api" = "401" ]; then ok=1; break; fi
+            sleep 20
+          done
+          # "Nothing was deployed" only on explicit evidence, never contradicted by attempted=true: the approval step
+          # wrote refused=true (the deploy step never ran), or the deploy step finished before sending its request.
+          # Missing outputs (a runner cut off) prove nothing.
+          nothing=""
+          [ "$REFUSED" = "true" ] && [ "$ATTEMPTED" != "true" ] && nothing="the approval was refused"
+          [ "$NOT_ATTEMPTED" = "true" ] && [ "$ATTEMPTED" != "true" ] && nothing="the deploy step stopped before its request"
+          if [ "$DEPLOY_RESULT" = "success" ] && [ -n "$ok" ]; then echo "Production serves LUXIA after the deployment"; exit 0; fi
+          if [ -n "$nothing" ] && [ -n "$ok" ]; then echo "nothing was deployed ($nothing; deploy job: $DEPLOY_RESULT); Production serves LUXIA"; exit 0; fi
+          echo "::error::MANUAL CHECK REQUIRED: deploy job ended $DEPLOY_RESULT (deployment attempted: ${ATTEMPTED:-unknown}); Production public check: ${ok:+passed}${ok:-FAILED}. Find which deployment serves Production and follow docs/operations/PRODUCTION-CHANGE-RECORD.md"
+          exit 1
