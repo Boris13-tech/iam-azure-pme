@@ -330,7 +330,7 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
       relyingPartyId: "localhost", allowedOrigin: "http://localhost:3000", credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", algorithmId: "WEBAUTHN_ES256" } });
     if (opts.signIn) {
       // A session with its sign-in evidence, and a journal event naming the person by identifier: what R6 must not touch.
-      await SessionStore.createSession({ ...scope(org), subjectId: subject.id, identityAccountId: entra.id }, undefined, undefined,
+      await SessionStore.createSession({ ...scope(org), subjectId: subject.id, identityAccountId: entra.id },
         { evidence: entraSignInEvidence({ ...scope(org), subjectId: subject.id, identityAccountId: entra.id, providerConnectionId: org.entra }, "VERIFIED", "R6_TEST") });
       await owner.canonicalAdminAuditEvent.create({ data: { ...scope(org), actorSubjectId: org.admin, targetSubjectId: subject.id, operation: "SUBJECT.UPDATE",
         changeId: `r6:${randomUUID()}`, result: "SUCCESS", metadata: { nameChanged: false, lifecycleFrom: "ACTIVE", lifecycleTo: "RETIRED" } } });
