@@ -210,18 +210,19 @@ jobs:
             api -X POST "https://api.vercel.com/v10/projects/$PROJECT/promote/$PREVIOUS?teamId=$TEAM" > /dev/null \
               || echo "::warning::promotion request $attempt failed or its answer was lost; Production state decides"
             while (( $(remaining) > 3 )); do
-              current="$(production)" || current=""
+              # A failed read keeps the last state actually seen; "seen" stays empty if Production was never read.
+              if observed="$(production)" && [[ -n "$observed" ]]; then current="$observed"; fi
               if [[ "$current" == "$PREVIOUS" ]]; then confirmed=1; break 2; fi
               pause || break
             done
           done
           stop=$deadline
           if [[ -n "$unresolved" ]]; then
-            echo "::error::ROLLBACK UNRESOLVED: $unresolved. Production serves ${current:-unknown}. Runbook: docs/operations/PRODUCTION-CHANGE-RECORD.md"
+            echo "::error::ROLLBACK UNRESOLVED: $unresolved. Production last seen serving ${current:-unknown (never read)}. Runbook: docs/operations/PRODUCTION-CHANGE-RECORD.md"
             exit 1
           fi
           if [[ -n "$confirmed" ]]; then echo "::warning::rolled back: Production serves $PREVIOUS"; exit 0; fi
-          echo "::error::ROLLBACK NOT CONFIRMED: Production serves ${current:-unknown}, not $PREVIOUS"; exit 1
+          echo "::error::ROLLBACK NOT CONFIRMED: Production last seen serving ${current:-unknown (never read)}, not $PREVIOUS"; exit 1
 
       - name: Record the change (approval, commit, deployments, checks)
         id: record

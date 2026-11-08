@@ -230,8 +230,20 @@ describe("Production deploy workflow (GOV-001)", () => {
       *"/promote/"*) echo '{}' ;;
       *) echo '{"readyState":"READY"}' ;; esac`, { DEPLOYMENT: "dpl_new" });
     expect(status).not.toBe(0);
-    expect(output).toContain("ROLLBACK NOT CONFIRMED: Production serves dpl_new");
+    expect(output).toContain("ROLLBACK NOT CONFIRMED: Production last seen serving dpl_new");
     expect(calls.match(/\/promote\/dpl_old/g)).toHaveLength(2);
+  }, 30_000);
+
+  it.runIf(hasShell)("rollback: a failed last read keeps the Production state actually seen in the diagnostic (CI of d0c87c0)", () => {
+    // Production is read once (still the new deployment), then every read fails: the diagnostic names what was seen.
+    const api = `case "$url" in
+      *"/v9/projects/"*) n="$(dirname "$0")/reads"; if [[ -f "$n" ]]; then exit 28; fi; touch "$n"; echo '{"targets":{"production":{"id":"dpl_new"}}}' ;;
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo '{}' ;;
+      *) echo '{"readyState":"READY"}' ;; esac`;
+    const { status, output } = run("rollback", api, { DEPLOYMENT: "dpl_new" });
+    expect(status).not.toBe(0);
+    expect(output).toContain("ROLLBACK NOT CONFIRMED: Production last seen serving dpl_new, not dpl_old");
   }, 30_000);
 
   it.runIf(hasShell)("rollback: a deployment that will not stop is unresolved, within the budget", () => {
