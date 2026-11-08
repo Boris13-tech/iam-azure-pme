@@ -72,7 +72,8 @@ describe("Production canary", () => {
     expect(real.output).not.toContain("ALERT DRILL");
   });
   it.skipIf(process.platform === "win32")("drill: past, too far ahead or invalid end times are ignored; no variable changes nothing", () => {
-    for (const value of [at(-1), at(121), "tomorrow-ish", "2026-13-45T99:00:00Z"]) {
+    // Relative expressions ("+1 hour", "next hour") would move the end time on every run (Antigravity, review of #185).
+    for (const value of [at(-1), at(121), "tomorrow-ish", "2026-13-45T99:00:00Z", "+1 hour", "next hour", "1 hour", "now + 30 minutes"]) {
       const result = runWithOutput(healthy, { DRILL_UNTIL: value });
       expect(result.status, value).toBe(0);
       expect(result.output, value).toContain("CANARY_ALERT_DRILL_UNTIL ignored");
