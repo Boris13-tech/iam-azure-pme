@@ -71,7 +71,7 @@ const customer = () => ({ type: "VERIFIED_CUSTOMER_REQUEST", id: `REQ-${randomUU
   verificationMethods: ["CALLBACK_KNOWN_CONTACT", "SIGNED_LETTER_OR_CONTRACT"], documentSha256: sha(randomUUID()), requestedActions: ["CLOSE_ORGANIZATION"] });
 async function close(org: Org) {
   const input = { action: "CLOSE_ORGANIZATION", organization: org.slug, reason: "Fin du pilote (test R7)", reference: customer() };
-  const opts = { issuedAt: new Date(Math.floor(Date.now() / 1000) * 1000), toolVersion: "test-tool-version", dns: absent, certificationOrganizations: [org.slug] };
+  const opts = { issuedAt: new Date(Math.floor(Date.now() / 1000) * 1000), toolVersion: "a".repeat(40), dns: absent, certificationOrganizations: [org.slug] };
   const { digest } = await planBreakGlass(owner, input, opts);
   await applyBreakGlass(owner, input, { ...opts, confirm: digest, irreversible: org.slug });
 }
