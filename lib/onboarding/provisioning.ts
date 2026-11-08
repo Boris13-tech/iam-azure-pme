@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { CURRENT_WEBAUTHN_CRYPTO } from "../identity";
 import { LUXIA_ORG_ADMIN_V1 } from "../auth/native-role-catalog";
 import { GOVERNANCE_ADMIN_V2 } from "../resources/admin-bundle";
+import { AuthorizationModeInvalidError, authorizationModeValid } from "../auth/authorization-mode";
 
 // Shared by signup (founder) and invitation acceptance. Called inside a transaction that already
 // set app.organization_id / app.tenant_id. Nothing here reads authority from the request.
@@ -36,6 +37,8 @@ export async function createPasskeyIdentity(tx: Tx, scope: Scope, input: {
  * the server catalog only. Entitlements are reused when they already exist in the tenant.
  */
 export async function grantAdministrator(tx: Tx, scope: Scope, input: { subjectId: string; actorSubjectId: string; changePrefix: string; metadata: Prisma.InputJsonObject }) {
+  // P5: signup and invitation acceptance grant without a session; with no valid mode in Production, nothing is granted.
+  if (!authorizationModeValid()) throw new AuthorizationModeInvalidError();
   const grant = async (keys: readonly string[], sourceRef: string) => {
     const ids: string[] = [];
     for (const key of keys) {

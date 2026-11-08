@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { SessionStore } from "./session-store";
+import { authorizationModeValid } from "./authorization-mode";
 
 // First Admin / Break-glass v1, B2: the recovery-only session (design section 5).
 // getAuthContext / requireAuth never return a RECOVERY session (FULL only). This is the only way to
@@ -26,6 +27,8 @@ export type RecoveryContext = Readonly<{
 }>;
 
 export async function getRecoveryContext(): Promise<RecoveryContext | null> {
+  // P5: a recovery session replaces credentials; with no valid mode in Production it is not honoured either.
+  if (!authorizationModeValid()) return null;
   const token = (await cookies()).get("luxia_session")?.value;
   if (!token) return null;
   const session = await SessionStore.getRecoverySession(token);

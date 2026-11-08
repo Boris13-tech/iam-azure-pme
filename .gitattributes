@@ -1,2 +1,5 @@
 # Preserve the exact bytes pinned by the operator runner's session-disposition gate.
 docs/certification/PR14-SESSION-DELTA-ATTRIBUTION-2026-10-08.md -text
+
+# SQL is applied by checksum (Prisma records each migration's hash): always LF, on every platform and checkout.
+*.sql text eol=lf
