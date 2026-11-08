@@ -7,7 +7,7 @@ import { MESSAGE, dashboardSection, expect, freshOrganization, navigationEntries
 // signs in, and sees no administration entry; the server refuses the administration data as well.
 const ADMIN_ONLY = ["Identités", "Organisation", "Authentification", "Ressources", "Séparation des tâches", "Revues d’accès", "Journal d’audit"];
 
-test("an invited member joins with a passkey and has no administration access", async ({ page, browser }) => {
+test("an invited member joins with a passkey and has no administration access", async ({ page, browser, baseURL }) => {
   await addVirtualAuthenticator(page);
   const organization = freshOrganization("invite");
   await signUpThroughUi(page, organization);
@@ -25,7 +25,7 @@ test("an invited member joins with a passkey and has no administration access", 
   await expect(page.getByText(`${memberName} (Membre)`)).toBeVisible();
 
   // The invitee, in a fresh browser with its own passkey device.
-  const invitee = await newDevice(browser);
+  const invitee = await newDevice(browser, baseURL);
   try {
     const principalName = `member-${randomBytes(4).toString("hex")}@example.test`;
     await invitee.page.goto(link);
@@ -50,7 +50,7 @@ test("an invited member joins with a passkey and has no administration access", 
   }
 
   // The link worked once: a third browser gets the fixed invalid-link message.
-  const late = await newDevice(browser);
+  const late = await newDevice(browser, baseURL);
   try {
     await late.page.goto(link);
     await late.page.getByLabel("Choisissez votre identifiant", { exact: true }).fill(`late-${randomBytes(4).toString("hex")}@example.test`);

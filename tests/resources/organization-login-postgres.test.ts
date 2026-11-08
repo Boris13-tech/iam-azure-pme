@@ -139,6 +139,33 @@ describe.runIf(enabled)("Organization-aware sign-in and anti-enumeration (app_us
     }
   });
 
+  it("the server refuses a correctly signed assertion without user verification, and a well-formed wrong signature (review of #141)", async () => {
+    // Assertions a browser never sends: they reach the server's own checks, which alone can refuse them.
+    const passkey = softwarePasskey();
+    const principalName = `uv-${suffix}`;
+    const { accountId } = await person(a, principalName, []);
+    await owner.localAuthenticator.create({ data: { organizationId: a.organizationId, tenantId: a.tenantId, identityAccountId: accountId, type: "PASSKEY",
+      credentialId: passkey.credentialId, publicKey: passkey.publicKeyPem, relyingPartyId: "localhost", allowedOrigin: "http://localhost:3000",
+      userVerificationRequired: true, credentialSchemaVersion: 2, credentialFormat: "WEBAUTHN_PUBLIC_KEY", algorithmId: "WEBAUTHN_ES256" } });
+    const sessions = () => owner.session.count({ where: { identityAccountId: accountId } });
+    const refuse = async (assertion: (challenge: string) => Record<string, string>) => {
+      const started = await beginJson({ organization: a.slug, principalName });
+      const response = await post(complete, "/api/auth/local/complete", { organization: a.slug, transactionId: started.body.transactionId, challenge: started.body.challenge, ...assertion(started.body.challenge) });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "LOCAL_AUTHENTICATION_FAILED" });
+      expect(response.headers.get("set-cookie")).toBeNull();
+    };
+    // 1. User present, not verified (flags 0x01): the signature is valid, only the UV check refuses it.
+    await refuse((challenge) => passkey.assert(challenge, { flags: 0x01 }));
+    // 2. A valid signature of other data: well formed (it parses), wrong for this assertion.
+    await refuse((challenge) => ({ ...passkey.assert(challenge), signature: passkey.assert(`${challenge}x`).signature }));
+    expect(await sessions()).toBe(0);
+    // The same passkey, user verified and correctly signed, signs in: the refusals come from the checks, not the setup.
+    const started = await beginJson({ organization: a.slug, principalName });
+    const done = await post(complete, "/api/auth/local/complete", { organization: a.slug, transactionId: started.body.transactionId, challenge: started.body.challenge, ...passkey.assert(started.body.challenge) });
+    expect(done.status).toBe(200);
+  });
+
   it("a passkey of another person of the same organization cannot complete someone else's sign-in", async () => {
     const mallory = softwarePasskey();
     const { accountId } = await person(a, "mallory", []);

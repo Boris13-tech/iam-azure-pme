@@ -46,9 +46,14 @@ export const test = base.extend<{ clientAddress: string }>({
 });
 export { expect };
 
-/** Another person's browser: its own context (cookies, storage), network address and passkey device. */
-export async function newDevice(browser: Browser): Promise<{ context: BrowserContext; page: Page; authenticator: VirtualAuthenticator }> {
-  const context = await browser.newContext({ extraHTTPHeaders: { "x-real-ip": newClientAddress() } });
+/**
+ * Another person's browser: its own context (cookies, storage), network address and passkey device. The base URL
+ * is passed explicitly (review of #141): relative navigation in that context never depends on Playwright applying
+ * the configuration's options to a context created by hand.
+ */
+export async function newDevice(browser: Browser, baseURL: string | undefined): Promise<{ context: BrowserContext; page: Page; authenticator: VirtualAuthenticator }> {
+  if (!baseURL) throw new Error("E2E_BASE_URL_MISSING");
+  const context = await browser.newContext({ baseURL, extraHTTPHeaders: { "x-real-ip": newClientAddress() } });
   const page = await context.newPage();
   return { context, page, authenticator: await addVirtualAuthenticator(page) };
 }

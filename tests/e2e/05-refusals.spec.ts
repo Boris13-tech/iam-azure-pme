@@ -71,3 +71,38 @@ test("wrong organization, unknown person and cancelled ceremonies are refused wi
     expect(new URL(page.url()).pathname).toBe("/login/recovery");
   }
 });
+
+// Review of #141: a cancelled ceremony is refused by the browser before the server sees anything. Here the browser
+// completes a real ceremony and one byte of its signature is changed on the way: only the server's signature check
+// can refuse it. No session is opened, and the same passkey signs in afterwards.
+test("a real ceremony whose signature is altered on the way is refused by the server, and opens no session", async ({ page, context }) => {
+  await addVirtualAuthenticator(page);
+  const organization = freshOrganization("forged");
+  await signUpThroughUi(page, organization);
+  await page.context().clearCookies();
+
+  let altered = false;
+  await page.route("**/api/auth/local/complete", async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as { signature?: string };
+    // A character inside the r value (well past the DER header), so the signature still parses and only the
+    // signature check itself can refuse it.
+    if (typeof body.signature === "string" && body.signature.length > 40) {
+      const at = 20, current = body.signature[at];
+      body.signature = body.signature.slice(0, at) + (current === "A" ? "B" : "A") + body.signature.slice(at + 1);
+      altered = true;
+    }
+    await route.continue({ postData: JSON.stringify(body) });
+  });
+  const answer = page.waitForResponse((response) => response.url().endsWith("/api/auth/local/complete"));
+  await startPasskeySignIn(page, organization.slug, organization.principalName);
+  expect((await answer).status()).toBe(401);
+  expect(altered).toBe(true);
+  await expectSignInRefused(page, MESSAGE.signInRefused);
+  expect((await context.cookies()).some((cookie) => cookie.name === "luxia_session" && cookie.value)).toBe(false);
+  await page.goto("/dashboard");
+  await page.waitForURL("**/login");
+
+  // Nothing was locked by the refusal: the unaltered ceremony signs in.
+  await page.unroute("**/api/auth/local/complete");
+  await signInWithPasskey(page, organization.slug, organization.principalName);
+});

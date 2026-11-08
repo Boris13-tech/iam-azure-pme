@@ -3,7 +3,10 @@ import type { CDPSession, Page } from "@playwright/test";
 // A Chrome virtual WebAuthn authenticator (DevTools Protocol), attached to one page: a platform
 // passkey device (CTAP2, internal transport, discoverable credentials, user verification). The app
 // runs its real ceremonies against it; nothing in the application is stubbed. It is software, not
-// hardware: it proves the flows and the server checks, never a hardware binding (attestation "none").
+// hardware: it proves the flows, and with an altered signature (05-refusals) the server's signature check; the
+// server's user-verification check needs an assertion a browser never sends, and is proven at the route level
+// (tests/resources/organization-login-postgres.test.ts). It never proves a hardware binding (attestation "none"),
+// which stays a separate gate: a real Windows Hello, phone or security key sign-in on Production.
 
 export type VirtualCredential = {
   credentialId: string;

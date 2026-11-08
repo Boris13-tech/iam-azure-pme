@@ -20,8 +20,11 @@ test("the founder signs in with the passkey, signs out, and the dashboard is clo
 
   await page.goto("/dashboard");
   await page.waitForURL("**/login");
-  // The revoked token is refused by the server too, not only absent from the browser.
-  await context.addCookies([{ ...session!, expires: -1 }]);
+  // The revoked token is refused by the server too, not only absent from the browser (review of #141): it is put back
+  // as a cookie valid for an hour, the request is shown to carry it, and the server still sends back to /login.
+  await context.addCookies([{ ...session!, expires: Math.floor(Date.now() / 1000) + 3600 }]);
+  const sent = page.waitForRequest((request) => new URL(request.url()).pathname === "/dashboard");
   await page.goto("/dashboard");
+  expect((await (await sent).allHeaders()).cookie ?? "").toContain(`luxia_session=${session!.value}`);
   await page.waitForURL("**/login");
 });
