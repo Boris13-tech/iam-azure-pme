@@ -53,3 +53,42 @@ export async function purgeExpiredTransactions(enforce = retentionEnforced(), db
   if (total.backlog) console.error("retention: backlog remains", JSON.stringify({ rounds: total.rounds, enforced: enforce }));
   return total;
 }
+
+/**
+ * R4 (finished invitations) and R6 (people retired for 30 days) run as dry runs only, whatever LUXIA_RETENTION_ENFORCE
+ * says, until the hold register exists (D8.2): a held organization must be skipped before anything is deleted or
+ * pseudonymized (Beta scope, section 4.3). Lifting this is a reviewed change, with the hold register in place.
+ */
+export const R4_R6_ENFORCE_AVAILABLE = false;
+
+type MechanismStatus = { eligible: number; overdue: number; oldestHours: number };
+export type RetentionStatus = { R3: MechanismStatus; R4: MechanismStatus; R6: MechanismStatus };
+export type RetentionReport = {
+  r3: RetentionCounts;
+  r4: { invitations: number; enforced: boolean };
+  r6: { subjects: number; displayNames: number; principalNames: number; enforced: boolean };
+  status: RetentionStatus;
+  overdue: boolean;
+};
+
+/**
+ * The daily retention run: R3 (enforced when enabled), R4 and R6 (dry runs for now), then the status of every mechanism
+ * (eligible records, records past their period plus 3 days, age of the oldest). Every call is recorded by the database
+ * (owner-only RetentionRun); this returns counts and ages only. A record past its period plus 3 days is the backlog
+ * alert (Beta scope, section 4.1); its delivery to the operator is wired with the error reporter (D8.3).
+ */
+export async function runRetention(enforce = retentionEnforced(), db = rawPrisma): Promise<RetentionReport> {
+  const r3 = await purgeExpiredTransactions(enforce, db);
+  const enforceR4R6 = enforce && R4_R6_ENFORCE_AVAILABLE;
+  const [r4] = await db.$queryRaw<Array<{ counts: RetentionReport["r4"] }>>`
+    SELECT luxia_retention_purge_invitations(${RETENTION_BATCH}::integer, ${enforceR4R6}::boolean) AS counts`;
+  const [r6] = await db.$queryRaw<Array<{ counts: RetentionReport["r6"] }>>`
+    SELECT luxia_retention_pseudonymize_retired(${RETENTION_BATCH}::integer, ${enforceR4R6}::boolean) AS counts`;
+  const [status] = await db.$queryRaw<Array<{ status: RetentionStatus }>>`SELECT luxia_retention_status() AS status`;
+  const overdue = (["R3", "R4", "R6"] as const).some((mechanism) => status.status[mechanism].overdue > 0);
+  if (overdue) {
+    const counts = Object.fromEntries((["R3", "R4", "R6"] as const).map((m) => [m, { overdue: status.status[m].overdue, oldestHours: status.status[m].oldestHours }]));
+    console.error("retention: records past their period plus 3 days", JSON.stringify(counts));
+  }
+  return { r3, r4: r4.counts, r6: r6.counts, status: status.status, overdue };
+}
