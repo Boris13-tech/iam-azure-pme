@@ -28,8 +28,10 @@ on:
 permissions:
   contents: read
 
-# One Production operation at a time, never queued: the first job refuses while another activation or deploy is open,
-# and the Production job holds the lock it shares with production-deploy.yml (Codex, reviews of #191).
+# One Production operation at a time, never queued, with no concurrency group: a group keeps one pending run that a later
+# dispatch or re-run replaces (Codex, reviews of #191). The first job refuses while another activation or deploy is open,
+# and the Production job checks again after its approval and before acting, which also covers a re-run of that job alone:
+# of two overlapping operations, at least one sees the other and refuses.
 
 jobs:
   # Replaces the former `needs: test-and-build` of the commit-message triggers in ci.yml (removed): a Production
@@ -118,11 +120,6 @@ jobs:
     if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
     runs-on: ubuntu-latest
     environment: Production
-    # Backstop for two dispatches in the same seconds; the first job already refuses while another operation is open, so
-    # no run waits here to be replaced by a later one (Codex and Antigravity, reviews of #191).
-    concurrency:
-      group: production-operations
-      cancel-in-progress: false
     # actions: read for the release verifier (the CI run of the release), after the approval.
     permissions:
       contents: read
@@ -159,6 +156,13 @@ jobs:
           path: .gate
           sparse-checkout: scripts/ops
           persist-credentials: false
+
+      - name: Still no other Production operation, checked again inside this job (also on a re-run of this job alone)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: bash .gate/scripts/ops/verify-no-other-operation.sh
 
       - name: After approval, the release still resolves to the checked-out commit
         env:
@@ -501,6 +505,10 @@ jobs:
   canonical-identity-bootstrap:
     needs: ci-verified
     if: ${{ inputs.operation == 'identity-preflight' || inputs.operation == 'identity-apply' }}
+    # actions: read for the called job's check that no other Production operation is open.
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/production-identity-bootstrap.yml
     with:
       mode: ${{ inputs.operation == 'identity-apply' && 'apply' || 'preflight' }}

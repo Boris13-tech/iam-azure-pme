@@ -25,9 +25,10 @@ on:
 permissions:
   contents: read
 
-# One Production operation at a time, never queued: the verify job refuses while another activation or deploy is open,
-# and the deploy job holds the lock it shares with production-activation-gate.yml, so an activation cannot change the
-# schema between this deploy's schema check and its deployment (Codex, reviews of #191).
+# One Production operation at a time, never queued, with no concurrency group: a group keeps one pending run that a later
+# dispatch or re-run replaces (Codex, reviews of #191). The verify job refuses while another activation or deploy is open,
+# and the deploy job checks again after its approval, before its schema check, which also covers a re-run of that job
+# alone: an activation started after that check sees this deploy and refuses, so the schema cannot change under it.
 
 jobs:
   verify:
@@ -66,20 +67,15 @@ jobs:
     runs-on: ubuntu-24.04
     # A required reviewer on the environment. Nothing below runs before that approval, and the first step checks it.
     environment: Production
-    # Backstop for two dispatches in the same seconds; the first job already refuses while another operation is open, so
-    # no run waits here to be replaced by a later one (Codex and Antigravity, reviews of #191).
-    concurrency:
-      group: production-operations
-      cancel-in-progress: false
-    # Budget: approval check 2, two checkouts 2 + 2, release again 2, schema 2, deploy 13, checks 3, rollback 11, record 1,
-    # artifact 2 (minutes); the rollback always keeps its window.
-    timeout-minutes: 40
+    # Budget: approval check 2, two checkouts 2 + 2, alone 2, release again 2, schema 2, deploy 13, checks 3, rollback 11,
+    # record 1, artifact 2 (minutes); the rollback always keeps its window.
+    timeout-minutes: 42
     permissions:
       contents: read
       actions: read
     outputs:
       approved: ${{ steps.approval.outputs.approved_by }}
-      refused: ${{ steps.approval.outputs.refused || steps.rerelease.outputs.refused || steps.schema.outputs.refused }}
+      refused: ${{ steps.approval.outputs.refused || steps.alone.outputs.refused || steps.rerelease.outputs.refused || steps.schema.outputs.refused }}
       not_attempted: ${{ steps.deploy.outputs.not_attempted }}
       attempted: ${{ steps.deploy.outputs.attempted }}
       deployment: ${{ steps.deploy.outputs.deployment }}
@@ -128,6 +124,18 @@ jobs:
           path: .gate
           sparse-checkout: scripts/ops
           persist-credentials: false
+
+      - name: Still no other Production operation, checked again inside this job (also on a re-run of this job alone)
+        id: alone
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          refuse() { echo "refused=true" >> "$GITHUB_OUTPUT"; echo "::error::$1: nothing is deployed"; exit 1; }
+          bash .gate/scripts/ops/verify-no-other-operation.sh || refuse "another Production operation is open"
 
       - name: After approval, the release is still this commit
         id: rerelease

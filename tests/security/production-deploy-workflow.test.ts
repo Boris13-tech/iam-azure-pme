@@ -52,7 +52,7 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(step(deploy, "schema").env).toEqual({ DATABASE_URL: "${{ secrets.DATABASE_URL }}" });
     expect(step(deploy, "schema").run).toContain("bash .gate/scripts/ops/verify-schema-release.sh release/prisma/migrations");
     expect(step(deploy, "schema").run).toContain('refuse() { echo "refused=true" >> "$GITHUB_OUTPUT"');
-    expect(deploy.outputs?.refused).toBe("${{ steps.approval.outputs.refused || steps.rerelease.outputs.refused || steps.schema.outputs.refused }}");
+    expect(deploy.outputs?.refused).toBe("${{ steps.approval.outputs.refused || steps.alone.outputs.refused || steps.rerelease.outputs.refused || steps.schema.outputs.refused }}");
   });
 
   it("deploys only after approval in the protected environment, and its first step checks that approval is recorded", () => {

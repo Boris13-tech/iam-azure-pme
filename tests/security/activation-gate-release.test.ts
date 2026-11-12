@@ -14,17 +14,37 @@ const verified = gate.jobs["ci-verified"], activation = gate.jobs["database-acti
 const index = (job: Job, match: (s: Step) => boolean) => job.steps.findIndex(match);
 
 describe("activation gate: the authorized release, not main's tip", () => {
-  it("one Production operation at a time, never queued: the first job refuses while another is open; the Production jobs share a lock", () => {
-    type Wf = { concurrency?: unknown; jobs: Record<string, Job & { concurrency?: unknown }> };
-    const deploy = yaml.load(readFileSync(".github/workflows/production-deploy.yml", "utf8").replace(/\r\n/g, "\n")) as Wf;
+  it("one Production operation at a time, never queued: no concurrency group; refused in the first job, and again inside every Production job", () => {
+    type Wf = { concurrency?: unknown; jobs: Record<string, Job & { concurrency?: unknown; permissions?: unknown }> };
+    const load = (path: string) => yaml.load(readFileSync(path, "utf8").replace(/\r\n/g, "\n")) as Wf;
+    const deploy = load(".github/workflows/production-deploy.yml"), identity = load(".github/workflows/production-identity-bootstrap.yml");
     const own = yaml.load(text) as Wf;
-    // No workflow-level group: a whole run waiting in a group could be replaced by a later dispatch (Codex, review of #191).
-    expect(own.concurrency).toBeUndefined();
-    expect(deploy.concurrency).toBeUndefined();
-    const lock = { group: "production-operations", "cancel-in-progress": false };
-    expect(own.jobs["database-activation"].concurrency).toEqual(lock);
-    expect(deploy.jobs.deploy.concurrency).toEqual(lock);
-    // The check comes first in the job that runs before any approval, in both workflows, for every operation.
+    // No concurrency group anywhere, workflow or job: a group keeps one pending run, which a later dispatch or a re-run
+    // of a Production job alone replaces (Codex, reviews of #191).
+    for (const workflow of [own, deploy, identity]) {
+      expect(workflow.concurrency).toBeUndefined();
+      for (const job of Object.values(workflow.jobs)) expect(job.concurrency).toBeUndefined();
+    }
+    // Inside every job bound to Production: checked again after the approval and before anything acts, so a re-run of
+    // that job alone (its first job is then not run again) is checked too.
+    const env = { GH_TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}", RUN_ID: "${{ github.run_id }}" };
+    const production = [own.jobs["database-activation"], deploy.jobs.deploy, identity.jobs["canonical-identity-bootstrap"]];
+    for (const job of production) {
+      expect(job.environment).toBe("Production");
+      const at = job.steps.findIndex((s) => (s.run ?? "").includes("scripts/ops/verify-no-other-operation.sh"));
+      expect(at).toBeGreaterThan(0);
+      expect(job.steps[at].if).toBeUndefined();
+      expect(job.steps[at].env).toEqual(env);
+      // Nothing before it reads a Production secret or calls an external service.
+      for (const before of job.steps.slice(0, at)) {
+        expect(JSON.stringify(before.env ?? {})).not.toContain("secrets.");
+        expect(before.run ?? "").not.toMatch(/psql|prisma|curl|vercel/i);
+      }
+      expect((job.permissions as Record<string, string>).actions).toBe("read");
+    }
+    expect(deploy.jobs.deploy.steps.find((s) => s.id === "alone")!.run).toContain('|| refuse "another Production operation is open"');
+    expect(own.jobs["canonical-identity-bootstrap"].permissions).toEqual({ contents: "read", actions: "read" });
+    // The check also comes first in the job that runs before any approval, in both dispatched workflows, for every operation.
     for (const [job, checkout] of [[own.jobs["ci-verified"], 0], [deploy.jobs.verify, 0]] as const) {
       expect(job.steps[checkout].uses).toMatch(/^actions\/checkout@[0-9a-f]{40}$/);
       const busy = job.steps[checkout + 1];

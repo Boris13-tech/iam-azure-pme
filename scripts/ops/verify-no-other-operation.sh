@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # One Production operation at a time, never queued: a new activation or deploy is refused while another run of either
 # Production workflow is queued, waiting (for its approval, for example) or in progress. A refused dispatch fails at
-# once, with its reason in its own log; GitHub's concurrency group (on the Production jobs) stays as the backstop
-# against two dispatches in the same seconds, which then both see each other and both refuse.
+# once, with its reason in its own log. No concurrency group is used: a group keeps one pending run, which a later
+# dispatch or re-run replaces. Each workflow runs this in its first job and again inside its Production job, after the
+# approval and before acting, so a re-run of that job alone is checked too. A run stays "in progress" for as long as
+# its Production job runs, so of two overlapping operations at least one sees the other and refuses; both may refuse.
 # Read-only: GitHub API through `gh api` (GH_TOKEN, REPO=owner/name, RUN_ID = this run, never refused for itself).
 set -euo pipefail
 
