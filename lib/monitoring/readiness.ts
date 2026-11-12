@@ -40,8 +40,9 @@ export function authorizationReady(env: Readonly<Record<string, string | undefin
 type Check = () => Promise<unknown>;
 /**
  * The database answers, through the role the application really uses, and that role is the restricted runtime role:
- * neither it nor any role it is a member of (it could SET ROLE to one) is a superuser or bypasses row-level security,
- * or owns a relation, a schema, a function or a type outside the system schemas (an owner could turn RLS off; a
+ * neither it nor any role it is a member of (it could SET ROLE to one) is a superuser, bypasses row-level security, or
+ * can create roles (before PostgreSQL 16 such a role can grant itself a BYPASSRLS role), databases or replication
+ * connections (the posture of scripts/certify-resources-local.cjs); and none of them owns a relation, a schema, a function or a type outside the system schemas (an owner could turn RLS off; a
  * schema's owner can drop what it holds; a function's owner can replace it, and the guards are trigger functions). A
  * misconfigured DATABASE_URL with the owner's credential fails here (Codex and Antigravity, reviews of #189).
  * pg_has_role(…, 'MEMBER') covers the role itself and every role reached through membership, with or without INHERIT.
@@ -49,7 +50,8 @@ type Check = () => Promise<unknown>;
  */
 export async function runtimeRoleRestricted(db: { $queryRaw: typeof rawPrisma.$queryRaw }): Promise<boolean> {
   const rows = await db.$queryRaw<Array<{ restricted: boolean }>>`
-    SELECT (NOT EXISTS (SELECT 1 FROM pg_roles x WHERE (x.rolsuper OR x.rolbypassrls) AND pg_has_role(r.oid, x.oid, 'MEMBER'))
+    SELECT (NOT EXISTS (SELECT 1 FROM pg_roles x
+        WHERE (x.rolsuper OR x.rolbypassrls OR x.rolcreaterole OR x.rolcreatedb OR x.rolreplication) AND pg_has_role(r.oid, x.oid, 'MEMBER'))
       AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE pg_has_role(r.oid, c.relowner, 'MEMBER') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')
       AND NOT EXISTS (SELECT 1 FROM pg_namespace n

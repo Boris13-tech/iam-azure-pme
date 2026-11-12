@@ -73,6 +73,23 @@ describe.runIf(enabled)("readiness: the runtime role check on PostgreSQL, with r
     expect(await restrictedAsLogin(), "membership removed").toBe(true);
   }, 30_000);
 
+  it("a role that can create roles or databases, or open replication connections, fails, directly or through membership", async () => {
+    // The posture of scripts/certify-resources-local.cjs (Codex, review of 08353d6). Before PostgreSQL 16 a CREATEROLE
+    // role can grant itself membership in a BYPASSRLS role.
+    for (const attribute of ["CREATEROLE", "CREATEDB", "REPLICATION"]) {
+      const off = `NO${attribute}`;
+      await sql(`ALTER ROLE ${login} ${attribute}`);
+      expect(await restrictedAsLogin(), `${attribute}, directly`).toBe(false);
+      await sql(`ALTER ROLE ${login} ${off}`);
+      await sql(`ALTER ROLE ${groups.mid} ${attribute}`);
+      await sql(`GRANT ${groups.mid} TO ${login}`);
+      expect(await restrictedAsLogin(), `${attribute}, through membership`).toBe(false);
+      await sql(`REVOKE ${groups.mid} FROM ${login}`);
+      await sql(`ALTER ROLE ${groups.mid} ${off}`);
+    }
+    expect(await restrictedAsLogin(), "no such attribute left").toBe(true);
+  }, 30_000);
+
   it("the owner of a table, a schema, a function or a type fails, directly or through membership", async () => {
     const owned: Array<[string, string, string]> = [
       ["a table", `CREATE TABLE ${schema}.t (x int)`, `ALTER TABLE ${schema}.t OWNER TO`],
