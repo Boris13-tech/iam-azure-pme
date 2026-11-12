@@ -64,7 +64,9 @@ describe("Production deploy workflow (GOV-001)", () => {
     }
     expect(step(deploy, "checks").run).toMatch(/curl [^\n]*-H @"\$header"[^\n]*\/api\/internal\/readiness/);
     expect(step(deploy, "checks").run).not.toMatch(/-H "x-luxia-monitoring-token/);
-    // Removed on every exit of the step, also when it is interrupted (Antigravity, review of #189).
+    // An EXIT trap removes it whenever the step's shell exits, normally or on an error (Antigravity, review of #189). A
+    // runner killed outright (SIGKILL) runs no trap; the file then dies with the runner's temporary space. This test
+    // checks that the trap is written, not an interruption.
     expect(step(deploy, "checks").run).toContain(`> "$header"); trap 'rm -f "$header"' EXIT`);
   });
 
