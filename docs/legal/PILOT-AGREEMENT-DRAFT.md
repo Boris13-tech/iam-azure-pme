@@ -62,7 +62,7 @@ The Pilot is provided **without any availability, performance or support-time co
 
 ## 9. Retention, return and deletion
 
-1. **During the Pilot:** the periods of [DATA-RETENTION-AND-DELETION.md](DATA-RETENTION-AND-DELETION.md) apply. Default proposal: the journal and sign-in records are kept 1 year. **Automatic deletions run from the first day of the Pilot.** A record is deleted after its period, within **[7] days** for the daily deletions and within the following **month** for the journal and sign-in records, which are first deleted on the Pilot's first anniversary.
+1. **During the Pilot:** the periods of [DATA-RETENTION-AND-DELETION.md](DATA-RETENTION-AND-DELETION.md) apply. Default proposal: the journal and sign-in records are kept 1 year. **Automatic deletions run from the first day of the Pilot.** A record is deleted after its period, within **[7] days** for the daily deletions and within the following **month** for the journal and sign-in records, whose first deletion therefore takes place between the Pilot's first anniversary and one month later.
 2. **At the end of the Pilot:**
    - on request made within **[15] days**, LUXIA provides an export of the Customer's data in a machine-readable format within **[15] days**;
    - LUXIA then deletes the Customer's organization and its data within **[90] days**, and confirms it in writing;

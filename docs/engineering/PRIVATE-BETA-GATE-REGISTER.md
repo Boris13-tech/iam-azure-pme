@@ -1,6 +1,6 @@
 # Private Beta gate register (G1 to G8)
 
-> **Superseded on 2026-10-23 by the single checklist [PRIVATE_BETA_READINESS.md](../../PRIVATE_BETA_READINESS.md).** Kept for history; it is no longer updated.
+> **Superseded on 2026-10-23 by the single checklist [PRIVATE_BETA_READINESS.md](../../PRIVATE_BETA_READINESS.md).** Kept for history; it is no longer updated. Its G8 retention criteria (R1 to R3) are out of date: G8 closes only on the opening criteria of the [Beta scope](PRIVATE-BETA-SCOPE.md), section 4.5 (operator amendment of 2026-11-12).
 
 | Item | State |
 |---|---|
