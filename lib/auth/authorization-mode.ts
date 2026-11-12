@@ -6,6 +6,15 @@ const NON_PRODUCTION_VERCEL = ["preview", "development"];
 const NON_PRODUCTION_APP = ["development", "test", "staging", "preview"];
 
 /**
+ * Whether this process runs as Production: Vercel or LUXIA marks it, or it is a production build that no platform marks
+ * with a known non-Production value. The single definition shared by the authorization mode and readiness.
+ */
+export function isProductionProcess(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  if (env.VERCEL_ENV === "production" || env.APP_ENV === "production") return true;
+  return env.NODE_ENV === "production" && !NON_PRODUCTION_VERCEL.includes(env.VERCEL_ENV ?? "") && !NON_PRODUCTION_APP.includes(env.APP_ENV ?? "");
+}
+
+/**
  * The authorization mode from the environment. In Production (Vercel or LUXIA marks it, or a production process that
  * no platform marks with a known non-Production value), a missing or unknown AUTHZ_MODE resolves to null, and then no
  * session is honoured (auth-context.ts) and the gateway refuses (fail closed, I3), never a silent fallback to legacy.
@@ -16,8 +25,7 @@ export function resolveAuthorizationMode(
 ): AuthorizationMode | null {
   const rawMode = env.AUTHZ_MODE;
   if (VALID_MODES.includes(rawMode as AuthorizationMode)) return rawMode as AuthorizationMode;
-  if (env.VERCEL_ENV === "production" || env.APP_ENV === "production") return null;
-  if (env.NODE_ENV === "production" && !NON_PRODUCTION_VERCEL.includes(env.VERCEL_ENV ?? "") && !NON_PRODUCTION_APP.includes(env.APP_ENV ?? "")) return null;
+  if (isProductionProcess(env)) return null;
   if (rawMode) console.warn("[AUTHZ] Unknown AUTHZ_MODE outside Production, falling back to 'legacy'");
   return "legacy";
 }

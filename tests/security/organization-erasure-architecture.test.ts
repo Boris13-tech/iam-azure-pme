@@ -153,4 +153,13 @@ describe("R7 organization erasure: operator plan", () => {
     expect(refusal(() => checkErasurePlan({ plan, digest }, digest, "acme", { target, toolVersion: "b".repeat(40) }, at))).toBe("TOOL_VERSION_MISMATCH");
     expect(refusal(() => checkErasurePlan(null, digest, "acme", current, at))).toBe("NOT_AN_ERASURE_PLAN");
   });
+
+  it("an unproven version is refused at apply, even when the plan says the same and its digest was recomputed (Codex, review of #188)", () => {
+    for (const unproven of ["unknown", "", "A".repeat(40), "a".repeat(39)]) {
+      const edited = { ...plan, toolVersion: unproven }, editedDigest = planDigest(edited);
+      expect(refusal(() => checkErasurePlan({ plan: edited, digest: editedDigest }, editedDigest, "acme", { target, toolVersion: unproven }, at)), unproven).toBe("TOOL_VERSION_UNKNOWN");
+      expect(refusal(() => checkErasurePlan({ plan: edited, digest: editedDigest }, editedDigest, "acme", current, at)), unproven).toBe("TOOL_VERSION_UNKNOWN");
+      expect(refusal(() => checkErasurePlan({ plan, digest }, digest, "acme", { target, toolVersion: unproven }, at)), unproven).toBe("TOOL_VERSION_UNKNOWN");
+    }
+  });
 });

@@ -11,8 +11,15 @@ import { GET as readiness, dynamic as readinessDynamic } from "../../app/api/int
 import { dynamic as healthDynamic } from "../../app/api/health/route";
 import { middleware } from "../../middleware";
 import {
-  MONITORING_TOKEN_HEADER, READINESS_CACHE_MS, READINESS_TIMEOUT_MS, databaseReady, monitoringTokenAccepted, resetReadinessCache,
+  MONITORING_TOKEN_HEADER, READINESS_CACHE_MS, READINESS_TIMEOUT_MS, authorizationReady, databaseReady, monitoringTokenAccepted,
+  readiness as readinessOf, resetReadinessCache, sessionReady,
 } from "../../lib/monitoring/readiness";
+
+// The resolver's SQL goes through the same mocked client: tell the two queries apart by their text.
+const isSessionQuery = (args: unknown[]) => Array.isArray(args[0]) && (args[0] as string[]).join("?").includes("luxia_session_resolve");
+const ALL_TRUE = { authorization: true, database: true, session: true };
+// The database check's answer for the restricted runtime role (not superuser, no BYPASSRLS, owns no table).
+const RESTRICTED = [{ restricted: true }];
 
 const TOKEN = "t".repeat(48);
 const saved = process.env.LUXIA_MONITORING_TOKEN;
@@ -20,7 +27,7 @@ const call = (headers: Record<string, string> = {}) => readiness(new Request("ht
 const withToken = () => call({ [MONITORING_TOKEN_HEADER]: TOKEN });
 const unauthenticated = (path: string) => middleware(new NextRequest(`http://localhost:3000${path}`));
 
-beforeEach(() => { query.mockReset(); query.mockResolvedValue([{ "?column?": 1 }]); resetReadinessCache(); process.env.LUXIA_MONITORING_TOKEN = TOKEN; });
+beforeEach(() => { query.mockReset(); query.mockImplementation((...args: unknown[]) => Promise.resolve(isSessionQuery(args) ? [] : RESTRICTED)); resetReadinessCache(); process.env.LUXIA_MONITORING_TOKEN = TOKEN; });
 afterEach(() => { vi.useRealTimers(); if (saved === undefined) delete process.env.LUXIA_MONITORING_TOKEN; else process.env.LUXIA_MONITORING_TOKEN = saved; });
 
 describe("Monitoring slice 1: public liveness, protected readiness", () => {
@@ -59,18 +66,49 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     expect(monitoringTokenAccepted(TOKEN, TOKEN)).toBe(true);
   });
 
-  it("with the token: 200 ready when the database answers, 503 when it fails; the body is only {ready}", async () => {
+  it("with the token: 200 ready when all three checks hold, 503 when the database fails; the body is only booleans", async () => {
     let response = await withToken();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ready: true });
+    expect(await response.json()).toEqual({ ready: true, checks: ALL_TRUE });
     expect(response.headers.get("cache-control")).toBe("no-store");
     resetReadinessCache();
-    query.mockRejectedValue(new Error("connection refused to db.internal:5432 as app_user"));
+    query.mockImplementation((...args: unknown[]) => isSessionQuery(args) ? Promise.resolve([]) : Promise.reject(new Error("connection refused to db.internal:5432 as app_user")));
     response = await withToken();
     expect(response.status).toBe(503);
     const text = await response.text();
-    expect(JSON.parse(text)).toEqual({ ready: false });
+    expect(JSON.parse(text)).toEqual({ ready: false, checks: { ...ALL_TRUE, database: false } });
     expect(text).not.toMatch(/refused|internal|5432|app_user/);
+  });
+
+  it("database reached through a role that is not the restricted runtime role (owner, superuser, BYPASSRLS): not ready", async () => {
+    // The real query was run on PostgreSQL 17: app_user → true; the superuser owner → false; a non-superuser owner of one
+    // table → false (Codex, review of #189). Here: what the check does with each answer.
+    for (const rows of [[{ restricted: false }], [], [{ restricted: null }], [{ restricted: true }, { restricted: true }], [{}], "x"]) {
+      resetReadinessCache();
+      query.mockImplementation((...args: unknown[]) => Promise.resolve(isSessionQuery(args) ? [] : rows));
+      const response = await withToken();
+      expect(response.status, JSON.stringify(rows)).toBe(503);
+      expect(await response.json(), JSON.stringify(rows)).toEqual({ ready: false, checks: { ...ALL_TRUE, database: false } });
+    }
+    const sql = (query.mock.calls.find((args) => !isSessionQuery(args))![0] as string[]).join("?");
+    // The role and every role it is a member of: no superuser, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION
+    // (Antigravity, review of 4d7bad9; Codex, review of 08353d6: the certification script's posture).
+    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM pg_roles x\s+WHERE \(x\.rolsuper OR x\.rolbypassrls OR x\.rolcreaterole OR x\.rolcreatedb OR x\.rolreplication\) AND pg_has_role\(r\.oid, x\.oid, 'MEMBER'\)\)/);
+    // No relation and no schema owned, directly or through membership, in any non-system schema (Antigravity).
+    expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, c\.relowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, n\.nspowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    // Nor a function (the guards are trigger functions: their owner could replace them) or a type (Antigravity, 0c4fdeb).
+    expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, p\.proowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, t\.typowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    expect(sql).not.toContain("current_schema()");
+    expect(sql).toMatch(/WHERE r\.rolname = current_user/);
+  });
+
+  it("database unavailable everywhere (both queries fail): 503, and neither the database nor the session check passes", async () => {
+    query.mockRejectedValue(new Error("ECONNREFUSED"));
+    const response = await withToken();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ready: false, checks: { authorization: true, database: false, session: false } });
   });
 
   it("a database that does not answer in time counts as not ready", async () => {
@@ -91,9 +129,9 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     expect(await pending).toBe(false);
     expect(await databaseReady(undefined, start + READINESS_CACHE_MS)).toBe(false);
     expect(query).toHaveBeenCalledTimes(1);
-    answer([1]);
+    answer(RESTRICTED);
     await vi.advanceTimersByTimeAsync(0);
-    query.mockResolvedValue([1]);
+    query.mockResolvedValue(RESTRICTED);
     expect(await databaseReady(undefined, start + READINESS_CACHE_MS)).toBe(true);
     expect(query).toHaveBeenCalledTimes(2);
   });
@@ -106,7 +144,7 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
 
   it("the database sees one check per period, whatever the call rate (single flight, then cache)", async () => {
     let release!: () => void;
-    query.mockReturnValue(new Promise((resolve) => { release = () => resolve([1]); }));
+    query.mockReturnValue(new Promise((resolve) => { release = () => resolve(RESTRICTED); }));
     const start = 1_000_000;
     const burst = Array.from({ length: 25 }, () => databaseReady(undefined, start));
     release();
@@ -125,5 +163,82 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     for (const path of ["/api/health/x", "/api/healthz", "/api/internal/readiness/x", "/api/internal/other", "/api/canonical/subjects"]) {
       expect((await unauthenticated(path)).status, path).toBe(401);
     }
+  });
+});
+
+// Codex F2, consolidated review of the Release Candidate: readiness covers what a signed-in user needs.
+describe("Readiness for the Production deploy: authorization configuration, database, session path", () => {
+  it("authorization: in Production only native is ready; a missing, unknown or non-native mode is not", () => {
+    for (const marker of [{ VERCEL_ENV: "production" }, { APP_ENV: "production" }]) {
+      expect(authorizationReady({ ...marker, AUTHZ_MODE: "native" }), JSON.stringify(marker)).toBe(true);
+      for (const mode of [undefined, "", "Native", "native ", "legacy", "shadow", "native-shadow-legacy", "anything"]) {
+        expect(authorizationReady({ ...marker, AUTHZ_MODE: mode }), `${JSON.stringify(marker)} ${mode}`).toBe(false);
+      }
+    }
+    // An unmarked production process counts as Production, with the same definition as the mode (isProductionProcess):
+    // missing and every non-native mode are refused there too (Codex, review of #189).
+    expect(authorizationReady({ NODE_ENV: "production" })).toBe(false);
+    expect(authorizationReady({ NODE_ENV: "production", AUTHZ_MODE: "native" })).toBe(true);
+    for (const mode of ["legacy", "shadow", "native-shadow-legacy"]) {
+      expect(authorizationReady({ NODE_ENV: "production", AUTHZ_MODE: mode }), mode).toBe(false);
+      expect(authorizationReady({ NODE_ENV: "production", VERCEL_ENV: "", APP_ENV: "", AUTHZ_MODE: mode }), mode).toBe(false);
+    }
+    expect(authorizationReady({ NODE_ENV: "production", VERCEL_ENV: "preview", AUTHZ_MODE: "legacy" })).toBe(true);
+    // Outside Production any resolved mode is ready (development, CI, previews keep the legacy fallback).
+    expect(authorizationReady({ VERCEL_ENV: "preview", AUTHZ_MODE: "legacy" })).toBe(true);
+    expect(authorizationReady({ NODE_ENV: "test" })).toBe(true);
+  });
+
+  it("authorization misconfigured: not ready even when the database and the session path are fine", async () => {
+    const report = await readinessOf({ VERCEL_ENV: "production", AUTHZ_MODE: "legacy" });
+    expect(report).toEqual({ ready: false, checks: { authorization: false, database: true, session: true } });
+    resetReadinessCache();
+    expect(await readinessOf({ VERCEL_ENV: "production", AUTHZ_MODE: "native" })).toEqual({ ready: true, checks: ALL_TRUE });
+  });
+
+  it("the session check goes through the real resolver, with a fresh random token each time, and needs no session back", async () => {
+    const hashes: unknown[] = [];
+    query.mockImplementation((...args: unknown[]) => { if (isSessionQuery(args)) hashes.push(args[1]); return Promise.resolve(isSessionQuery(args) ? [] : RESTRICTED); });
+    expect(await sessionReady(undefined, 1_000_000)).toBe(true);
+    expect(await sessionReady(undefined, 1_000_000 + READINESS_CACHE_MS)).toBe(true);
+    expect(hashes).toHaveLength(2);
+    for (const hash of hashes) expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(hashes[0]).not.toBe(hashes[1]);
+  });
+
+  it("session path failing: a resolver that errors is not ready, and the whole answer is 503", async () => {
+    query.mockImplementation((...args: unknown[]) => isSessionQuery(args)
+      ? Promise.reject(new Error('function luxia_session_resolve(text) does not exist')) : Promise.resolve(RESTRICTED));
+    const response = await withToken();
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ ready: false, checks: { ...ALL_TRUE, session: false } });
+    expect(text).not.toMatch(/luxia_session_resolve|does not exist/);
+  });
+
+  it("session path failing: a resolver that returns a live session for a random token is not ready", async () => {
+    const live = { id: "s", organizationId: "o", tenantId: "t", subjectId: "u", identityAccountId: "a", scope: "FULL", revokedAt: null,
+      expiresAt: new Date(Date.now() + 3_600_000), lastSeenAt: new Date() };
+    query.mockImplementation((...args: unknown[]) => Promise.resolve(isSessionQuery(args) ? [live] : RESTRICTED));
+    expect(await sessionReady(undefined, 1_000_000)).toBe(false);
+  });
+
+  it("session path that does not answer in time is not ready (timeout)", async () => {
+    vi.useFakeTimers();
+    query.mockImplementation((...args: unknown[]) => isSessionQuery(args) ? new Promise(() => {}) : Promise.resolve(RESTRICTED));
+    const pending = readinessOf({ NODE_ENV: "test" }, 1_000_000);
+    await vi.advanceTimersByTimeAsync(READINESS_TIMEOUT_MS + 1);
+    expect(await pending).toEqual({ ready: false, checks: { ...ALL_TRUE, session: false } });
+  });
+
+  it("token absent or invalid: 401 like any unauthenticated path, and no check runs", async () => {
+    for (const headers of [{}, { [MONITORING_TOKEN_HEADER]: "x".repeat(48) }] as Array<Record<string, string>>) {
+      const response = await call(headers);
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "Unauthorized" });
+    }
+    delete process.env.LUXIA_MONITORING_TOKEN;
+    expect((await withToken()).status).toBe(401);
+    expect(query).not.toHaveBeenCalled();
   });
 });

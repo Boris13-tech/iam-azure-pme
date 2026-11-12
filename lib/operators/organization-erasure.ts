@@ -88,6 +88,9 @@ export function checkErasurePlan(saved: unknown, confirm: string | undefined, ty
   if (!typed || typed !== plan.organization.slug) refuse("IRREVERSIBLE_CONFIRMATION_REQUIRED");
   if (!(now.getTime() <= Date.parse(plan.notAfter))) refuse("PLAN_EXPIRED");
   if (canonicalJson(plan.target) !== canonicalJson(current.target)) refuse("TARGET_MISMATCH");
+  // Both must be proven commits: two equal "unknown" values (a plan edited and its public digest recomputed, applied
+  // from modified code) would otherwise match (Codex, review of #188).
+  if (!/^[0-9a-f]{40}$/.test(current.toolVersion) || !/^[0-9a-f]{40}$/.test(plan.toolVersion)) refuse("TOOL_VERSION_UNKNOWN");
   if (plan.toolVersion !== current.toolVersion) refuse("TOOL_VERSION_MISMATCH");
   return plan;
 }

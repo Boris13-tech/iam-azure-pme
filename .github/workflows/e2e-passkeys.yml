@@ -1,0 +1,101 @@
+name: E2E passkeys
+
+# Passkey journeys end to end through the real pages (tests/e2e, Playwright + Chrome's virtual WebAuthn
+# authenticator) against a production build of this commit, on an ephemeral PostgreSQL with the same
+# runtime role and grants as Production (app_user, forced RLS). No secret, no remote service, no deploy.
+on:
+  pull_request:
+    branches:
+      - main
+
+# Least privilege for the workflow token.
+permissions:
+  contents: read
+
+jobs:
+  passkey-journeys:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: prisma
+          POSTGRES_PASSWORD: prisma_password
+          POSTGRES_DB: luxia_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prisma -d luxia_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # The application connects as app_user, as in Production; the suite issues signup codes as the owner.
+      DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public
+      DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
+      E2E_OWNER_DATABASE_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
+      # The WebAuthn origin and RP ID come from the request (http://localhost:3200, localhost); the sign-out
+      # Origin check compares with NEXT_PUBLIC_APP_URL, inlined at build time.
+      NEXT_PUBLIC_APP_URL: http://localhost:3200
+      E2E_BASE_URL: http://localhost:3200
+      AUTHZ_MODE: native
+      NEXT_TELEMETRY_DISABLED: '1'
+
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci --legacy-peer-deps
+
+    - name: Install Chromium for Playwright
+      run: npx playwright install --with-deps chromium
+
+    - name: Migrate and bootstrap the runtime role
+      run: |
+        npx prisma migrate deploy
+        psql -v ON_ERROR_STOP=1 "${DATABASE_MIGRATION_URL%%\?*}" -f scripts/ci/bootstrap-app-user.sql
+      env:
+        DATABASE_URL: ${{ env.DATABASE_MIGRATION_URL }}
+
+    - name: Build
+      run: npx next build
+
+    - name: Start the application
+      run: |
+        nohup npx next start -p 3200 > "$RUNNER_TEMP/next.log" 2>&1 &
+        for attempt in $(seq 1 60); do
+          if curl -fsS -o /dev/null "$E2E_BASE_URL/login"; then exit 0; fi
+          sleep 2
+        done
+        cat "$RUNNER_TEMP/next.log"
+        exit 1
+
+    - name: Passkey journeys (Playwright, headless Chromium)
+      run: npm run test:e2e
+      env:
+        CI: 'true'
+
+    - name: Application log on failure
+      if: failure()
+      run: cat "$RUNNER_TEMP/next.log"
+
+    - name: Playwright report and traces on failure
+      if: failure()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: playwright-report
+        path: |
+          playwright-report/
+          test-results/
+        retention-days: 7

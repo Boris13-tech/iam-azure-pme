@@ -13,18 +13,23 @@
 // Legacy users with no bridge cannot be attributed and are not part of it; plan and apply report their
 // count for the whole database, and that count needs the operator's attention.
 // Evidence files hold the organization identifiers and the counts per table, never row content.
-import { execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { applyErasure, checkErasurePlan, erasureEndpoint, ErasureRefusal, planErasure, type ErasurePlan, type ErasureTarget } from "../../lib/operators/organization-erasure";
+import { loadedSources, toolVersion as sourceVersion } from "./tool-version";
 
 function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(`--${name}`);
   return at >= 0 ? args[at + 1] : undefined;
 }
+/**
+ * The commit of the sources this command actually loaded, proven byte for byte against a clean checkout, with no
+ * inherited GIT_* variable; "unknown" otherwise, which refuses a plan (shared with break-glass: tool-version.ts).
+ * Not the working directory's HEAD: that would name a commit whatever code runs (Codex, consolidated RC review).
+ */
 function toolVersion(): string {
-  try { return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return "unknown"; }
+  return sourceVersion(loadedSources());
 }
 async function currentTarget(db: PrismaClient, url: string): Promise<ErasureTarget> {
   const [row] = await db.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
