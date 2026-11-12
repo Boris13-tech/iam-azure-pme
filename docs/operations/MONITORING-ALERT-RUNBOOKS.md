@@ -94,7 +94,18 @@ Severity at a glance:
 
 ## 6. R3: retention job failed or silent (S3)
 
-**Detection.** The daily call to `/api/internal/retention` returned 500 (the log line carries a `RETENTION_*` code only), or no `RetentionRun` row for 3 days (heartbeat, monitoring slice 4).
+**Detection.** Four signals leave the daily job through the error reporter (`LUXIA_ERROR_DSN`; constants only, no row content, no organization). Without the DSN nothing is sent, and only the log lines remain.
+
+| Alert | Signal | Raised when |
+|---|---|---|
+| Failed run | Error event, component `retention`, with the `RETENTION_*` code (or `RETENTION_FAILED`), and a failed check-in | The call to `/api/internal/retention` returned 500 |
+| No run for 3 days | Check-in monitor `retention-daily` (schedule `7 3 * * *`, the platform cron's own) | 3 consecutive check-ins are missed or failed |
+| Backlog | Error event `RETENTION_BACKLOG` | A record is past its period plus 3 days (R3, R4 or R6; held organizations are not counted) |
+| Hold review overdue | Error event `RETENTION_HOLD_REVIEW_OVERDUE` | A hold is past its review date. The hold stays in effect: renew or release it ([hold runbook](RETENTION-HOLD-RUNBOOK.md)) |
+
+In the error tracker, each of the three event codes and the check-in monitor needs an alert rule that e-mails the operator and the second recipient: the monitor's own issue alert, and "a new issue is created" or "an issue changes state from resolved to unresolved" for the events.
+
+**Drill (G7: each alert tested once).** With the cron secret, `GET /api/internal/retention?drill=failed-run`, `?drill=backlog` or `?drill=silence` sends the same kind of signal, named `RETENTION_ALERT_DRILL_FAILED_RUN`, `RETENTION_ALERT_DRILL_BACKLOG`, or a check-in to the monitor `retention-daily-drill`. A drill runs no purge and reads no data. The drill monitor expects a check-in every minute, so one check-in followed by nothing raises the missed-check-in alert within minutes; delete that monitor afterwards. Record the fired and received times for each.
 
 **Diagnosis by code.**
 

@@ -3,7 +3,7 @@
 // request, user, header, cookie, query string or body can leave (I5, E15). Any Sentry-protocol backend works
 // (Sentry, GlitchTip, Bugsink): the DSN is the only coupling. Without a DSN, nothing is sent.
 
-export type ErrorComponent = "session" | "request";
+export type ErrorComponent = "session" | "request" | "retention";
 export const REPORT_TIMEOUT_MS = 1_500;
 
 type Target = { url: string };
@@ -38,7 +38,12 @@ export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
   "AUTHZ_MODE_INVALID", "CROSS_ORGANIZATION_WRITE_DENIED", "CROSS_TENANT_WRITE_DENIED", "ENTITLEMENT_COLLISION",
   "INVALID_AUTHENTICATION_EVIDENCE", "INVALID_AUTHENTICATION_EVIDENCE_VERSION", "INVALID_CURSOR", "INVALID_PROJECTION_EVIDENCE",
   "INVALID_RETRY_POLICY", "LOCAL_IDENTITY_CREATION_FAILED", "ORGANIZATION_NOT_FOUND", "POSTURE_UNAVAILABLE", "PRODUCTION_SECRET_STORE_REQUIRED", "PUBLIC_KEY_UNAVAILABLE",
-  "READINESS_DATABASE_ROLE", "READINESS_TIMEOUT", "READINESS_UNEXPECTED_SESSION", "REJECTED_EVIDENCE_REQUIRED", "RETRY_EXHAUSTED", "RUNTIME_DRAINING", "RUNTIME_NOT_DRAINING", "RUNTIME_NOT_READY",
+  "READINESS_DATABASE_ROLE", "READINESS_TIMEOUT", "READINESS_UNEXPECTED_SESSION", "REJECTED_EVIDENCE_REQUIRED",
+  // Retention (D8.3): the daily job's alerts, the refusals of its database functions, and the alert drills.
+  "RETENTION_ALERT_DRILL_BACKLOG", "RETENTION_ALERT_DRILL_FAILED_RUN", "RETENTION_ALREADY_RUNNING", "RETENTION_ARGUMENT_OUT_OF_RANGE",
+  "RETENTION_BACKLOG", "RETENTION_FAILED", "RETENTION_HOLD_REQUIRES_BYPASSRLS", "RETENTION_HOLD_REVIEW_OVERDUE", "RETENTION_OWNER_REQUIRES_BYPASSRLS",
+  "RETENTION_R4_ENFORCE_NOT_ACTIVATED", "RETENTION_R6_ENFORCE_NOT_ACTIVATED", "RETENTION_REQUIRES_READ_COMMITTED",
+  "RETRY_EXHAUSTED", "RUNTIME_DRAINING", "RUNTIME_NOT_DRAINING", "RUNTIME_NOT_READY",
   "SIGN_IN_EVIDENCE_MISMATCH", "SUBJECT_READ_FAILED", "WEBAUTHN_UNAVAILABLE",
 ]);
 const known = (set: ReadonlySet<string>, value: unknown, fallback: string) => (typeof value === "string" && set.has(value) ? value : fallback);
@@ -63,13 +68,12 @@ export function buildEvent(error: unknown, component: ErrorComponent, routePath?
   };
 }
 
-/** Sends one error event. Never throws, never waits longer than the timeout, no-op without a DSN. */
-export async function reportError(error: unknown, component: ErrorComponent, routePath?: string): Promise<boolean> {
+/** One envelope item to the backend. Never throws, never waits longer than the timeout, no-op without a DSN. */
+async function send(header: Record<string, string>, type: "event" | "check_in", payload: unknown): Promise<boolean> {
   try {
     const target = envelopeTarget();
     if (!target) return false;
-    const event = buildEvent(error, component, routePath);
-    const body = `${JSON.stringify({ event_id: event.event_id, sent_at: new Date().toISOString() })}\n${JSON.stringify({ type: "event" })}\n${JSON.stringify(event)}\n`;
+    const body = `${JSON.stringify({ ...header, sent_at: new Date().toISOString() })}\n${JSON.stringify({ type })}\n${JSON.stringify(payload)}\n`;
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), REPORT_TIMEOUT_MS);
     try {
@@ -81,4 +85,48 @@ export async function reportError(error: unknown, component: ErrorComponent, rou
   } catch {
     return false;
   }
+}
+
+/** Sends one error event. Never throws, never waits longer than the timeout, no-op without a DSN. */
+export async function reportError(error: unknown, component: ErrorComponent, routePath?: string): Promise<boolean> {
+  let event: ReturnType<typeof buildEvent>;
+  try { event = buildEvent(error, component, routePath); } catch { return false; }
+  return send({ event_id: event.event_id }, "event", event);
+}
+
+/**
+ * Scheduled jobs the watcher expects to hear from (Sentry check-in protocol, D8.3): a closed list, defined in code.
+ * The watcher raises its alert after `missesBeforeAlert` consecutive missed or failed check-ins. The daily retention
+ * run: 3 misses is the "no run for 3 days" alert of the Private Beta scope (4.1). The drill monitor expects a check-in
+ * every minute, so that sending one and then nothing proves the silence alert within minutes.
+ */
+export const CHECK_IN_MONITORS = {
+  "retention-daily": { schedule: "7 3 * * *", marginMinutes: 180, maxRuntimeMinutes: 5, missesBeforeAlert: 3 },
+  "retention-daily-drill": { schedule: "* * * * *", marginMinutes: 1, maxRuntimeMinutes: 1, missesBeforeAlert: 3 },
+} as const;
+export type CheckInMonitor = keyof typeof CHECK_IN_MONITORS;
+
+/** The check-in LUXIA sends: the monitor's fixed configuration and a status, nothing else. */
+export function buildCheckIn(monitor: CheckInMonitor, status: "ok" | "error") {
+  const config = CHECK_IN_MONITORS[monitor];
+  return {
+    check_in_id: Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join(""),
+    monitor_slug: monitor,
+    status,
+    environment: (process.env.APP_ENV || process.env.VERCEL_ENV || "unknown").replace(/[^\w-]/g, "").slice(0, 32),
+    monitor_config: {
+      schedule: { type: "crontab", value: config.schedule },
+      checkin_margin: config.marginMinutes,
+      max_runtime: config.maxRuntimeMinutes,
+      timezone: "UTC",
+      failure_issue_threshold: config.missesBeforeAlert,
+      recovery_threshold: 1,
+    },
+  };
+}
+
+/** Sends one check-in. Never throws, never waits longer than the timeout, no-op without a DSN. */
+export async function reportCheckIn(monitor: CheckInMonitor, status: "ok" | "error"): Promise<boolean> {
+  if (!Object.hasOwn(CHECK_IN_MONITORS, monitor) || (status !== "ok" && status !== "error")) return false;
+  return send({}, "check_in", buildCheckIn(monitor, status));
 }
