@@ -189,8 +189,15 @@ describe("Production deploy workflow (GOV-001)", () => {
       [vercelEnvs([{ key: "AUTHZ_MODE", target: ["production"] }, { key: "LUXIA_MONITORING_TOKEN", target: ["production"] }]), {}, "CRON_SECRET is not set for Production"],
       [vercelEnvs([{ key: "AUTHZ_MODE", target: ["preview", "development"] }, { key: "LUXIA_MONITORING_TOKEN", target: ["production"] }, { key: "CRON_SECRET", target: ["production"] }]), {}, "AUTHZ_MODE is not set for Production"],
       [vercelEnvs([]), {}, "AUTHZ_MODE is not set for Production"],
-      [`*"/v10/projects/"*) echo 'not json' ;;`, {}, "AUTHZ_MODE is not set for Production"],
+      [`*"/v10/projects/"*) echo 'not json' ;;`, {}, "environment variables cannot be read"],
     ];
+    // Values in Vercel's answer are dropped as it is read: a value never reaches the step's output.
+    const withValues = vercelEnvs([{ key: "AUTHZ_MODE", target: ["production"], value: "value-must-not-leak" }]);
+    const leaked = run("deploy", `case "$url" in ${project("dpl_old")} ${withValues}
+        *) echo '{}' ;; esac`);
+    expect(leaked.output).toContain("LUXIA_MONITORING_TOKEN is not set for Production");
+    expect(leaked.output + leaked.out).not.toContain("value-must-not-leak");
+    expect(step(deploy, "deploy").run).toContain(`| jq -c '[.envs[]? | {key, target}]')"`);
     for (const [envs, env, message] of refusals) {
       const { status, output, out, calls } = run("deploy", `case "$url" in ${project("dpl_old")} ${envs}
         *) echo '{"id":"dpl_new","projectId":"prj","readyState":"READY"}' ;; esac`, env);

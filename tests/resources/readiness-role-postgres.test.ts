@@ -11,15 +11,18 @@ import { runtimeRoleRestricted } from "../../lib/monitoring/readiness";
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const sfx = randomUUID().slice(0, 8).replace(/-/g, "");
 const login = `rd_${sfx}_login`, password = randomBytes(18).toString("hex");
+// A login role that does not inherit what it is granted (the role attribute, valid on every PostgreSQL version: CI runs
+// 15 for these suites, Production 17). It can still SET ROLE to a role it is a member of.
+const noInherit = `rd_${sfx}_noinh`;
 const groups = { bypass: `rd_${sfx}_bypass`, mid: `rd_${sfx}_mid`, owner: `rd_${sfx}_owner` };
 const schema = `rd_${sfx}`;
 let owner: PrismaClient;
 const sql = (statement: string) => owner.$executeRawUnsafe(statement);
 
-/** The check, run in a session of the login role itself. */
-async function restrictedAsLogin(): Promise<boolean> {
+/** The check, run in a session of a login role itself. */
+async function restrictedAsLogin(role = login): Promise<boolean> {
   const url = new URL(process.env.DATABASE_URL!);
-  url.username = login; url.password = password;
+  url.username = role; url.password = password;
   const client = new PrismaClient({ datasources: { db: { url: url.toString() } } });
   try { return await runtimeRoleRestricted(client); } finally { await client.$disconnect(); }
 }
@@ -28,6 +31,7 @@ describe.runIf(enabled)("readiness: the runtime role check on PostgreSQL, with r
   beforeAll(async () => {
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL! } } });
     await sql(`CREATE ROLE ${login} LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`);
+    await sql(`CREATE ROLE ${noInherit} LOGIN NOINHERIT PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`);
     await sql(`CREATE ROLE ${groups.bypass} NOLOGIN BYPASSRLS`);
     await sql(`CREATE ROLE ${groups.mid} NOLOGIN`);
     await sql(`CREATE ROLE ${groups.owner} NOLOGIN`);
@@ -37,21 +41,21 @@ describe.runIf(enabled)("readiness: the runtime role check on PostgreSQL, with r
   afterAll(async () => {
     if (!owner) return;
     await sql(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    for (const role of [login, groups.bypass, groups.mid, groups.owner]) {
+    for (const role of [login, noInherit, groups.bypass, groups.mid, groups.owner]) {
       await sql(`DROP OWNED BY ${role} CASCADE`).catch(() => undefined);
       await sql(`DROP ROLE IF EXISTS ${role}`);
     }
     await owner.$disconnect();
-  });
+  }, 30_000);
 
   it("the application's runtime role passes; the owner connection fails", async () => {
     expect(await runtimeRoleRestricted(rawPrisma)).toBe(true);
     expect(await runtimeRoleRestricted(owner)).toBe(false);
-  });
+  }, 30_000);
 
   it("a plain login role with nothing passes", async () => {
     expect(await restrictedAsLogin()).toBe(true);
-  });
+  }, 30_000);
 
   it("a member of a BYPASSRLS role fails: directly, through another role, and without INHERIT", async () => {
     await sql(`GRANT ${groups.bypass} TO ${login}`);
@@ -62,11 +66,12 @@ describe.runIf(enabled)("readiness: the runtime role check on PostgreSQL, with r
     expect(await restrictedAsLogin(), "through another role").toBe(false);
     await sql(`REVOKE ${groups.mid} FROM ${login}`);
     await sql(`REVOKE ${groups.bypass} FROM ${groups.mid}`);
-    await sql(`GRANT ${groups.bypass} TO ${login} WITH INHERIT FALSE`);
-    expect(await restrictedAsLogin(), "without INHERIT: SET ROLE still reaches it").toBe(false);
-    await sql(`REVOKE ${groups.bypass} FROM ${login}`);
+    expect(await restrictedAsLogin(noInherit), "a NOINHERIT role, before the grant").toBe(true);
+    await sql(`GRANT ${groups.bypass} TO ${noInherit}`);
+    expect(await restrictedAsLogin(noInherit), "a NOINHERIT role: SET ROLE still reaches it").toBe(false);
+    await sql(`REVOKE ${groups.bypass} FROM ${noInherit}`);
     expect(await restrictedAsLogin(), "membership removed").toBe(true);
-  });
+  }, 30_000);
 
   it("the owner of a table, a schema, a function or a type fails, directly or through membership", async () => {
     const owned: Array<[string, string, string]> = [
@@ -85,8 +90,12 @@ describe.runIf(enabled)("readiness: the runtime role check on PostgreSQL, with r
       await sql(`${alter} CURRENT_USER`);
     }
     await sql(`ALTER SCHEMA ${schema} OWNER TO ${login}`);
-    expect(await restrictedAsLogin(), "a schema").toBe(false);
+    expect(await restrictedAsLogin(), "a schema, directly").toBe(false);
+    await sql(`ALTER SCHEMA ${schema} OWNER TO ${groups.owner}`);
+    await sql(`GRANT ${groups.owner} TO ${login}`);
+    expect(await restrictedAsLogin(), "a schema, through membership").toBe(false);
+    await sql(`REVOKE ${groups.owner} FROM ${login}`);
     await sql(`ALTER SCHEMA ${schema} OWNER TO CURRENT_USER`);
     expect(await restrictedAsLogin(), "nothing owned any more").toBe(true);
-  });
+  }, 30_000);
 });

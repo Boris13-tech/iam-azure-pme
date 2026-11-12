@@ -110,11 +110,13 @@ jobs:
           api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H @"$auth" -H "Content-Type: application/json" "$@"; }
           # Monitoring parameters, before anything is sent (Codex F2, consolidated review of the Release Candidate): the
           # after-checks need the readiness token, and the new deployment needs its authorization mode, readiness token
-          # and cron secret in Vercel's Production environment. Names only: no value is read or printed.
+          # and cron secret in Vercel's Production environment. Vercel's answer is reduced to names and targets as it is read
+          # (piped through jq): no value is kept in a variable, compared or printed.
           [[ "${#MONITORING_TOKEN}" -ge 32 ]] || { echo "::error::LUXIA_MONITORING_TOKEN is missing or shorter than 32 characters on the Production environment: nothing is deployed"; exit 1; }
-          envs="$(api "https://api.vercel.com/v10/projects/$PROJECT/env?teamId=$TEAM")" || { echo "::error::the Vercel project's environment variables cannot be read: nothing is deployed"; exit 1; }
+          envs="$(api "https://api.vercel.com/v10/projects/$PROJECT/env?teamId=$TEAM" | jq -c '[.envs[]? | {key, target}]')" \
+            || { echo "::error::the Vercel project's environment variables cannot be read: nothing is deployed"; exit 1; }
           for key in AUTHZ_MODE LUXIA_MONITORING_TOKEN CRON_SECRET; do
-            jq -e --arg key "$key" 'any(.envs[]?; .key == $key and (((.target // []) | if type == "array" then . else [.] end) | index("production")) != null)' <<< "$envs" > /dev/null \
+            jq -e --arg key "$key" 'any(.[]?; .key == $key and (((.target // []) | if type == "array" then . else [.] end) | index("production")) != null)' <<< "$envs" > /dev/null \
               || { echo "::error::$key is not set for Production in the Vercel project: nothing is deployed"; exit 1; }
           done
           unset envs
