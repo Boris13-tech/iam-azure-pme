@@ -28,8 +28,10 @@ on:
 permissions:
   contents: read
 
+# One Production operation at a time, shared with production-deploy.yml: a deploy's schema check cannot be overtaken by
+# an activation running beside it (Codex, review of #191).
 concurrency:
-  group: production-activation
+  group: production-operations
   cancel-in-progress: false
 
 jobs:
@@ -351,6 +353,11 @@ jobs:
           -- Resource scopes, SoD and access reviews: the migrations grant less than the broad grant (Codex, review of #190).
           REVOKE UPDATE, DELETE, TRUNCATE ON "ResourceScope", "ResourceScopeMember" FROM app_user;
           REVOKE DELETE, TRUNCATE ON "SoDPolicy", "SoDRule", "AccessReviewCampaign", "AccessReviewItem" FROM app_user;
+          -- Prisma's migration history decides whether code may be deployed: the runtime role reads it, never writes it
+          -- (Codex, review of #191). The table exists once Prisma has run.
+          DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
+            REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON "_prisma_migrations" FROM app_user;
+          END IF; END $$;
           REVOKE DELETE, TRUNCATE ON "AuthTransaction", "LocalAuthChallenge" FROM app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
@@ -444,6 +451,12 @@ jobs:
                                WHERE d.refobjid = c.oid AND d.deptype IN ('a', 'i') AND (has_sequence_privilege(current_user, s.oid, 'USAGE') OR has_sequence_privilege(current_user, s.oid, 'SELECT'))))
               `;
               if (ownerOnly.length > 0) throw new Error(`Runtime role holds privileges on owner-only tables: ${ownerOnly.map((row) => row.relname).join(", ")}`);
+              // The migration history decides deployments: the runtime role reads it, never writes it.
+              const history = await db.$queryRaw<Array<{ writable: boolean }>>`
+                SELECT EXISTS (SELECT 1 FROM unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE']) p
+                  WHERE has_table_privilege(current_user, 'public._prisma_migrations', p)) AS writable
+              `;
+              if (history[0]?.writable !== false) throw new Error("Runtime role can write the migration history");
 
               console.log("Runtime role PASS: app_user / NOSUPERUSER / NOBYPASSRLS / resolve_session EXECUTE");
               console.log(`RLS PASS: ${requiredRlsTables.length} tenant-scoped tables enabled and forced`);

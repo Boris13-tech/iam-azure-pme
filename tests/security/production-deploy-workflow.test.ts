@@ -40,6 +40,11 @@ describe("Production deploy workflow (GOV-001)", () => {
   it("before anything is sent, Production's schema must be exactly the release's: code and schema are one version", () => {
     const ids = deploy.steps.map((s) => s.id ?? s.name);
     expect(ids.indexOf("approval")).toBe(0);
+    expect(ids.indexOf("rerelease")).toBeGreaterThan(0);
+    expect(ids.indexOf("rerelease")).toBeLessThan(ids.indexOf("schema"));
+    // After the approval, the release is verified again: a tag moved during the wait stops the deploy.
+    expect(step(deploy, "rerelease").env).toEqual({ RELEASE: "${{ inputs.release }}", SHA: "${{ inputs.sha }}", GH_TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}" });
+    expect(step(deploy, "rerelease").run).toContain('bash .gate/scripts/ops/verify-release.sh "$RELEASE" "$SHA" || refuse');
     expect(ids.indexOf("schema")).toBeGreaterThan(0);
     expect(ids.indexOf("schema")).toBeLessThan(ids.indexOf("deploy"));
     const migrations = deploy.steps.find((s) => s.name === "Checkout the release's migrations") as Step & { with?: Record<string, unknown> };
@@ -47,7 +52,7 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(step(deploy, "schema").env).toEqual({ DATABASE_URL: "${{ secrets.DATABASE_URL }}" });
     expect(step(deploy, "schema").run).toContain("bash .gate/scripts/ops/verify-schema-release.sh release/prisma/migrations");
     expect(step(deploy, "schema").run).toContain('refuse() { echo "refused=true" >> "$GITHUB_OUTPUT"');
-    expect(deploy.outputs?.refused).toBe("${{ steps.approval.outputs.refused || steps.schema.outputs.refused }}");
+    expect(deploy.outputs?.refused).toBe("${{ steps.approval.outputs.refused || steps.rerelease.outputs.refused || steps.schema.outputs.refused }}");
   });
 
   it("deploys only after approval in the protected environment, and its first step checks that approval is recorded", () => {
@@ -88,7 +93,8 @@ describe("Production deploy workflow (GOV-001)", () => {
   });
 
   it("the time budget keeps the rollback's window inside the job (Codex F3, review of #136)", () => {
-    const minutes = deploy.steps.filter((s) => s.run).map((s) => s["timeout-minutes"]);
+    // Every step of the job, checkouts and artifact included, has its own limit, and together they fit in the job's.
+    const minutes = deploy.steps.map((s) => s["timeout-minutes"]);
     expect(minutes.every((m) => typeof m === "number")).toBe(true);
     expect((minutes as number[]).reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(deploy["timeout-minutes"]!);
     expect(step(deploy, "rollback")["timeout-minutes"]).toBe(11);

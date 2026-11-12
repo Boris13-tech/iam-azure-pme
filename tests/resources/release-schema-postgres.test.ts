@@ -40,6 +40,21 @@ describe.runIf(enabled)("verify-schema-release.sh on PostgreSQL", () => {
     expect(out).toContain("not applied in the database, but in the release: 29991231000000_not_applied");
   });
 
+  it("the runtime role reads the migration history and cannot write it: the history cannot be forged to let older code deploy", () => {
+    const runtime = new URL(process.env.DATABASE_URL!); runtime.search = "";
+    const as = (sql: string) => {
+      const result = spawnSync("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", runtime.toString(), "-c", sql], { encoding: "utf8" });
+      return result.status === 0 ? "OK" : /permission denied/.test(result.stderr) ? "DENIED" : `OTHER: ${result.stderr.trim()}`;
+    };
+    expect(as(`SELECT count(*) FROM "_prisma_migrations"`)).toBe("OK");
+    const last = migrations.at(-1)!;
+    for (const sql of [`DELETE FROM "_prisma_migrations" WHERE "migration_name" = '${last}'`,
+      `UPDATE "_prisma_migrations" SET "rolled_back_at" = now() WHERE "migration_name" = '${last}'`,
+      `INSERT INTO "_prisma_migrations" ("id", "checksum", "migration_name", "started_at", "finished_at", "applied_steps_count") VALUES ('forged', 'x', '29991231000000_forged', now(), now(), 1)`,
+      `TRUNCATE "_prisma_migrations"`])
+      expect(as(sql), sql).toBe("DENIED");
+  });
+
   it("the runtime role can run the same read, as the deploy workflow does", () => {
     const copy = join(work, "runtime"); cpSync("prisma/migrations", copy, { recursive: true });
     expect(verify(copy.replace(/\\/g, "/"), process.env.DATABASE_URL!).code).toBe(0);

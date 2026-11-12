@@ -25,8 +25,10 @@ on:
 permissions:
   contents: read
 
+# One Production operation at a time, shared with production-activation-gate.yml: an activation cannot change the
+# schema between this deploy's schema check and its deployment (Codex, review of #191).
 concurrency:
-  group: production-deploy
+  group: production-operations
   cancel-in-progress: false
 
 jobs:
@@ -59,14 +61,15 @@ jobs:
     runs-on: ubuntu-24.04
     # A required reviewer on the environment. Nothing below runs before that approval, and the first step checks it.
     environment: Production
-    # Budget: approval check 2, deploy 13, checks 3, rollback 11, record 1 (minutes); the rollback always keeps its window.
-    timeout-minutes: 32
+    # Budget: approval check 2, two checkouts 2 + 2, release again 2, schema 2, deploy 13, checks 3, rollback 11, record 1,
+    # artifact 2 (minutes); the rollback always keeps its window.
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: read
     outputs:
       approved: ${{ steps.approval.outputs.approved_by }}
-      refused: ${{ steps.approval.outputs.refused || steps.schema.outputs.refused }}
+      refused: ${{ steps.approval.outputs.refused || steps.rerelease.outputs.refused || steps.schema.outputs.refused }}
       not_attempted: ${{ steps.deploy.outputs.not_attempted }}
       attempted: ${{ steps.deploy.outputs.attempted }}
       deployment: ${{ steps.deploy.outputs.deployment }}
@@ -100,6 +103,7 @@ jobs:
           echo "approved for Production by: $approved"
 
       - name: Checkout the release's migrations
+        timeout-minutes: 2
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.sha }}
@@ -108,11 +112,27 @@ jobs:
           persist-credentials: false
 
       - name: Checkout the schema verifier (this workflow's commit)
+        timeout-minutes: 2
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: .gate
           sparse-checkout: scripts/ops
           persist-credentials: false
+
+      - name: After approval, the release is still this commit
+        id: rerelease
+        timeout-minutes: 2
+        env:
+          RELEASE: ${{ inputs.release }}
+          SHA: ${{ inputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The approval may come long after the dispatch: a tag moved meanwhile stops the deploy (Codex and Antigravity,
+          # reviews of #191), as in the activation gate.
+          refuse() { echo "refused=true" >> "$GITHUB_OUTPUT"; echo "::error::$1: nothing is deployed"; exit 1; }
+          bash .gate/scripts/ops/verify-release.sh "$RELEASE" "$SHA" || refuse "the authorized release no longer resolves to this commit"
 
       - name: Production's schema is exactly the release's
         id: schema
@@ -332,6 +352,7 @@ jobs:
 
       - name: Keep the change record (90 days; copied to the evidence store by the operator)
         if: always() && steps.record.outcome == 'success'
+        timeout-minutes: 2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: production-change-record-${{ github.run_id }}

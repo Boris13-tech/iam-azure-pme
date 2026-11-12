@@ -7,7 +7,8 @@
 #   - the latest completed CI run of that commit on main (push) succeeded.
 # Read-only: GitHub API through `gh api` (GH_TOKEN, REPO=owner/name). Inputs arrive as arguments, never interpolated
 # into the workflow script. On success it prints key=value lines (release, sha, ci_run_id, ci_run_url); on any doubt it
-# prints "REFUSED: ..." and exits 1. Run again after the approval, so that a tag moved meanwhile stops the operation.
+# prints "REFUSED: ..." and exits 1. Both workflows run it again after the approval, so that a tag moved meanwhile stops
+# the operation.
 set -euo pipefail
 
 release="${1:-}"

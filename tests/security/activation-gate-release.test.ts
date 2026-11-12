@@ -14,6 +14,17 @@ const verified = gate.jobs["ci-verified"], activation = gate.jobs["database-acti
 const index = (job: Job, match: (s: Step) => boolean) => job.steps.findIndex(match);
 
 describe("activation gate: the authorized release, not main's tip", () => {
+  it("one Production operation at a time: the gate and the deploy share one concurrency group, never cancelled", () => {
+    const deploy = yaml.load(readFileSync(".github/workflows/production-deploy.yml", "utf8")) as { concurrency: unknown };
+    const own = yaml.load(text) as { concurrency: unknown };
+    expect(own.concurrency).toEqual({ group: "production-operations", "cancel-in-progress": false });
+    expect(deploy.concurrency).toEqual(own.concurrency);
+  });
+
+  it("the posture check refuses a runtime role that can write the migration history", () => {
+    expect(text).toContain('if (history[0]?.writable !== false) throw new Error("Runtime role can write the migration history");');
+  });
+
   it("takes the release and its SHA as inputs", () => {
     expect(gate.on.workflow_dispatch.inputs.release).toMatchObject({ type: "string" });
     expect(gate.on.workflow_dispatch.inputs.sha).toMatchObject({ type: "string" });
