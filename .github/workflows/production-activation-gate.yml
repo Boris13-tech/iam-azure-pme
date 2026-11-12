@@ -252,6 +252,12 @@ jobs:
           -- R3: retention runs are owner-only, and only the purge function deletes expired sign-in rows.
           REVOKE ALL ON "RetentionRun" FROM app_user;
           REVOKE ALL ON SEQUENCE "RetentionRun_id_seq" FROM app_user;
+          -- R7: the erasure record is owner-only.
+          REVOKE ALL ON "OrganizationErasure" FROM app_user;
+          REVOKE ALL ON SEQUENCE "OrganizationErasure_id_seq" FROM app_user;
+          -- F2 and F3: provider connections and secret references are never deleted.
+          REVOKE DELETE, TRUNCATE ON "ProviderConnection" FROM app_user;
+          REVOKE DELETE, TRUNCATE ON "ProviderSecretReference" FROM app_user;
           REVOKE DELETE, TRUNCATE ON "AuthTransaction", "LocalAuthChallenge" FROM app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
