@@ -16,6 +16,14 @@ on:
         description: Required only for identity-apply
         required: false
         type: string
+      release:
+        description: Activation only. The authorized release, a tag (rc-private-beta-1) or the full commit SHA
+        required: false
+        type: string
+      sha:
+        description: Activation only. The full 40-character commit SHA that the release must be, on main, with a green CI run
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -38,6 +46,8 @@ jobs:
       ci_run_url: ${{ steps.verify.outputs.ci_run_url }}
       ci_head_sha: ${{ steps.verify.outputs.ci_head_sha }}
       ci_workflow_name: ${{ steps.verify.outputs.ci_workflow_name }}
+      release_sha: ${{ steps.release.outputs.sha }}
+      release_ci_run_url: ${{ steps.release.outputs.ci_run_url }}
     steps:
       - name: Dispatched from main, on a commit whose CI passed
         id: verify
@@ -68,11 +78,45 @@ jobs:
           echo "ci_head_sha=$run_sha" >> "$GITHUB_OUTPUT"
           echo "ci_workflow_name=$run_name" >> "$GITHUB_OUTPUT"
 
+      # The workflow above is main's; what it applies is the release the operator authorized, never main's tip: a merge
+      # into main after the authorization changes nothing in this operation.
+      - name: Checkout the release verifier (this workflow's commit)
+        if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: scripts/ops
+          persist-credentials: false
+
+      - name: Activation only, the authorized release is one commit on main with a green CI run
+        id: release
+        if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
+        env:
+          RELEASE: ${{ inputs.release }}
+          SHA: ${{ inputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          verified="$(bash scripts/ops/verify-release.sh "$RELEASE" "$SHA")" || { echo "$verified"; exit 1; }
+          echo "$verified"
+          grep -E '^(sha|ci_run_url)=' <<< "$verified" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Authorized release"
+            echo "| Field | Value |"
+            echo "|---|---|"
+            sed -E 's/^([a-z_]+)=(.*)$/| \1 | \2 |/' <<< "$verified"
+            echo "| Workflow commit (main) | $GITHUB_SHA |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   database-activation:
     needs: ci-verified
     if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
     runs-on: ubuntu-latest
     environment: Production
+    # actions: read for the release verifier (the CI run of the release), after the approval.
+    permissions:
+      contents: read
+      actions: read
     services:
       postgres:
         image: postgres:15
@@ -93,8 +137,34 @@ jobs:
       PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
       PRODUCTION_BACKUP_BRANCH_ID: ${{ vars.PRODUCTION_BACKUP_BRANCH_ID }}
     steps:
-      - name: Checkout immutable baseline
+      - name: Checkout the authorized release, not main's tip
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.ci-verified.outputs.release_sha }}
+          persist-credentials: false
+
+      - name: Checkout the release verifier (this workflow's commit)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: .gate
+          sparse-checkout: scripts/ops
+          persist-credentials: false
+
+      - name: After approval, the release still resolves to the checked-out commit
+        env:
+          RELEASE: ${{ inputs.release }}
+          SHA: ${{ needs.ci-verified.outputs.release_sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The approval may come much later than the dispatch: a tag moved meanwhile, or a checkout of anything else,
+          # stops the activation before Production is touched.
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "REFUSED: no verified release"; exit 1; }
+          bash .gate/scripts/ops/verify-release.sh "$RELEASE" "$SHA"
+          head="$(git rev-parse HEAD)"
+          [[ "$head" == "$SHA" ]] || { echo "REFUSED: checked out $head, not the authorized $SHA"; exit 1; }
+          echo "Release verified after approval: $RELEASE = $SHA"
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -180,10 +250,22 @@ jobs:
           DATABASE_URL="$DATABASE_MIGRATION_URL" npx prisma migrate resolve --applied 20260917000000_init
           echo "Verified legacy baseline reconciliation PASS"
 
+      - name: Before migrating, the database holds no migration outside the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}" bash .gate/scripts/ops/verify-schema-release.sh prisma/migrations --before-migrate
+
       - name: Apply additive migrations
         env:
           DATABASE_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
         run: npx prisma migrate deploy
+
+      - name: The applied migrations are exactly the release's
+        shell: bash
+        run: |
+          set -euo pipefail
+          PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}" bash .gate/scripts/ops/verify-schema-release.sh prisma/migrations
 
       - name: Recreate unsafe runtime role without BYPASSRLS
         shell: bash
@@ -241,9 +323,16 @@ jobs:
           GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
           GRANT EXECUTE ON FUNCTION public.luxia_organization_lock_active(TEXT) TO app_user;
           GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO app_user;
-          GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO app_user;
-          GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;
-          GRANT EXECUTE ON FUNCTION public.luxia_retention_status() TO app_user;
+          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_purge_invitations(integer,boolean)') IS NOT NULL THEN
+            GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO app_user;
+          END IF; END $$;
+          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_pseudonymize_retired(integer,boolean)') IS NOT NULL THEN
+            GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;
+          END IF; END $$;
+          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_status()') IS NOT NULL THEN
+            GRANT EXECUTE ON FUNCTION public.luxia_retention_status() TO app_user;
+          END IF; END $$;
+          -- (The three retention functions above came after rc-private-beta-1: granted only when the release has them.)
           -- Re-apply the narrower grants of later migrations, which the broad grant above would widen again
           -- (same mirror as the CI bootstrap): Customer Self-Onboarding v1, and T0 (append-only audit trail).
           REVOKE ALL ON "SignupCode", "RateLimitBucket", "RateLimitConfig" FROM app_user;
@@ -345,6 +434,17 @@ jobs:
                 }
               }
 
+              // Owner-only tables (forced row-level security, no policy): no privilege for the runtime role, nor on their sequences.
+              const ownerOnly = await db.$queryRaw<Array<{ relname: string }>>`
+                SELECT c.relname FROM pg_class c
+                WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND c.relrowsecurity AND c.relforcerowsecurity
+                  AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid)
+                  AND (EXISTS (SELECT 1 FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p WHERE has_table_privilege(current_user, c.oid, p))
+                    OR EXISTS (SELECT 1 FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
+                               WHERE d.refobjid = c.oid AND d.deptype IN ('a', 'i') AND (has_sequence_privilege(current_user, s.oid, 'USAGE') OR has_sequence_privilege(current_user, s.oid, 'SELECT'))))
+              `;
+              if (ownerOnly.length > 0) throw new Error(`Runtime role holds privileges on owner-only tables: ${ownerOnly.map((row) => row.relname).join(", ")}`);
+
               console.log("Runtime role PASS: app_user / NOSUPERUSER / NOBYPASSRLS / resolve_session EXECUTE");
               console.log(`RLS PASS: ${requiredRlsTables.length} tenant-scoped tables enabled and forced`);
             } finally {
@@ -368,9 +468,13 @@ jobs:
           echo "Production HTTP smoke PASS"
 
       - name: Activation evidence
+        env:
+          RELEASE: ${{ inputs.release }}
+          SHA: ${{ needs.ci-verified.outputs.release_sha }}
         run: |
           echo "Production database activation PASS"
-          echo "Commit: $GITHUB_SHA"
+          echo "Release: $RELEASE = $SHA (code checked out and migrations applied: this commit only)"
+          echo "Workflow commit (main): $GITHUB_SHA"
           echo "Rollback branch: $PRODUCTION_BACKUP_BRANCH_ID"
 
   canonical-identity-bootstrap:

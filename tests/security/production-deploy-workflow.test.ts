@@ -19,33 +19,50 @@ const MONITORING = "m".repeat(40); // the readiness token of the tests' Producti
 const VERCEL = "vercel-test-token-0123456789abcdef"; // the deploy token of the tests: it must never reach a command line
 
 describe("Production deploy workflow (GOV-001)", () => {
-  it("starts only by hand, with the exact commit and a reason", () => {
+  it("starts only by hand, with the authorized release, the exact commit and a reason", () => {
     expect(Object.keys(parsed.on)).toEqual(["workflow_dispatch"]);
+    expect(workflow).toMatch(/release:\n        description: [^\n]+\n        required: true/);
+    expect(workflow).toMatch(/sha:\n        description: [^\n]+\n        required: true/);
     expect(workflow).toMatch(/reason:\n        description: [^\n]+\n        required: true/);
     expect(parsed.permissions).toEqual({ contents: "read" });
     expect(Object.keys(parsed.jobs)).toEqual(["verify", "deploy", "confirm"]);
   });
 
-  it("verifies the commit is a full SHA on main with a green CI run, before any approval is asked", () => {
+  it("verifies, before any approval is asked, that the authorized release is this commit, on main, with a green CI run", () => {
     const script = JSON.stringify(verify);
     expect(script).not.toMatch(/environment|secrets\./);
-    expect(verify.steps[0].run).toContain('[[ "$SHA" =~ ^[0-9a-f]{40}$ ]]');
-    expect(verify.steps[0].run).toContain("compare/$SHA...main");
-    expect(verify.steps[0].run).toContain("actions/workflows/ci.yml/runs?head_sha=$SHA&status=success");
+    // The checks themselves are in scripts/ops/verify-release.sh (tests/security/verify-release-script.test.ts).
+    expect(verify.steps[0].uses).toMatch(/^actions\/checkout@[0-9a-f]{40}$/);
+    expect(step(verify, "release").env).toEqual({ RELEASE: "${{ inputs.release }}", SHA: "${{ inputs.sha }}", GH_TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}" });
+    expect(step(verify, "release").run).toContain('bash scripts/ops/verify-release.sh "$RELEASE" "$SHA"');
+  });
+
+  it("before anything is sent, Production's schema must be exactly the release's: code and schema are one version", () => {
+    const ids = deploy.steps.map((s) => s.id ?? s.name);
+    expect(ids.indexOf("approval")).toBe(0);
+    expect(ids.indexOf("schema")).toBeGreaterThan(0);
+    expect(ids.indexOf("schema")).toBeLessThan(ids.indexOf("deploy"));
+    const migrations = deploy.steps.find((s) => s.name === "Checkout the release's migrations") as Step & { with?: Record<string, unknown> };
+    expect(migrations.with).toMatchObject({ ref: "${{ inputs.sha }}", path: "release", "sparse-checkout": "prisma/migrations", "persist-credentials": false });
+    expect(step(deploy, "schema").env).toEqual({ DATABASE_URL: "${{ secrets.DATABASE_URL }}" });
+    expect(step(deploy, "schema").run).toContain("bash .gate/scripts/ops/verify-schema-release.sh release/prisma/migrations");
+    expect(step(deploy, "schema").run).toContain('refuse() { echo "refused=true" >> "$GITHUB_OUTPUT"');
+    expect(deploy.outputs?.refused).toBe("${{ steps.approval.outputs.refused || steps.schema.outputs.refused }}");
   });
 
   it("deploys only after approval in the protected environment, and its first step checks that approval is recorded", () => {
     expect(deploy.needs).toBe("verify");
     expect(deploy.environment).toBe("Production");
     expect(deploy.steps[0].id).toBe("approval");
-    expect(deploy.steps[1].id).toBe("deploy");
-    expect(deploy.steps[1].run).toContain('gitSource: {type: "github", repoId: $repo, ref: "main", sha: $sha}');
-    expect(deploy.steps[1].run).toContain('[[ "$current" == "$id" ]]');
+    expect(step(deploy, "deploy").run).toContain('gitSource: {type: "github", repoId: $repo, ref: "main", sha: $sha}');
+    expect(step(deploy, "deploy").run).toContain('[[ "$current" == "$id" ]]');
   });
 
   it("the Vercel token reaches only the two steps that call Vercel (Antigravity, review of #136)", () => {
     expect([...workflow.matchAll(/secrets\.(\w+)/g)].map((m) => m[1]))
-      .toEqual(["VERCEL_DEPLOY_TOKEN", "LUXIA_MONITORING_TOKEN", "LUXIA_MONITORING_TOKEN", "VERCEL_DEPLOY_TOKEN"]);
+      .toEqual(["DATABASE_URL", "VERCEL_DEPLOY_TOKEN", "LUXIA_MONITORING_TOKEN", "LUXIA_MONITORING_TOKEN", "VERCEL_DEPLOY_TOKEN"]);
+    // The runtime role's URL reaches only the schema check (a read of the migration history).
+    expect(deploy.steps.filter((s) => JSON.stringify(s.env ?? {}).includes("secrets.DATABASE_URL")).map((s) => s.id)).toEqual(["schema"]);
     expect(JSON.stringify(deploy.env ?? {})).not.toContain("secrets");
     const holders = (name: string) => deploy.steps.filter((s) => JSON.stringify(s.env ?? {}).includes(`secrets.${name}`)).map((s) => s.id);
     expect(holders("VERCEL_DEPLOY_TOKEN")).toEqual(["deploy", "rollback"]);
