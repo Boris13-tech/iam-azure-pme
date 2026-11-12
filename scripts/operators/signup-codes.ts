@@ -12,13 +12,13 @@
 // digest. `issue` writes only with that digest, within 15 minutes, against the same database, role
 // and tool commit as the plan, and at most once per plan. Revocation stays immediate: it only
 // removes access, and must stay fast during an incident.
-import { execSync } from "node:child_process";
 import { randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { signupCodeHash } from "../../lib/onboarding/signup";
 import { canonicalJson, planDigest } from "../../lib/operators/break-glass";
+import { loadedSources, toolVersion as sourceVersion } from "./tool-version";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"; // no 0/O, 1/I/L, U
 export const SIGNUP_PLAN_VALIDITY_MS = 15 * 60_000;
@@ -109,11 +109,13 @@ function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(`--${name}`);
   return at >= 0 ? args[at + 1] : undefined;
 }
-/** The commit of this script's own repository; "unknown" if its files differ from that commit, which refuses a plan. */
+/**
+ * The commit of the sources this command actually loaded, proven byte for byte against a clean checkout, with no
+ * inherited GIT_* variable; "unknown" otherwise, which refuses a plan (shared with break-glass: tool-version.ts).
+ * The previous check ran git with the inherited environment (Codex, consolidated RC review).
+ */
 function toolVersion(): string {
-  const cwd = dirname(resolve(process.argv[1]));
-  const git = (command: string) => execSync(command, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
-  try { return git("git status --porcelain --untracked-files=no") ? "unknown" : git("git rev-parse HEAD"); } catch { return "unknown"; }
+  return sourceVersion(loadedSources());
 }
 async function currentTarget(db: PrismaClient, url: string): Promise<SignupTarget> {
   const [row] = await db.$queryRaw<Array<{ database: string; role: string }>>`SELECT current_database() AS database, current_user AS role`;
