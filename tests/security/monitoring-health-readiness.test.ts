@@ -91,10 +91,11 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
       expect(await response.json(), JSON.stringify(rows)).toEqual({ ready: false, checks: { ...ALL_TRUE, database: false } });
     }
     const sql = (query.mock.calls.find((args) => !isSessionQuery(args))![0] as string[]).join("?");
-    expect(sql).toMatch(/NOT r\.rolsuper AND NOT r\.rolbypassrls\s+AND NOT EXISTS/);
-    // No relation and no schema owned outside the system schemas, in any schema, not only the current one (Antigravity).
-    expect(sql).toMatch(/WHERE c\.relowner = r\.oid AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
-    expect(sql).toMatch(/WHERE n\.nspowner = r\.oid AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    // The role and every role it is a member of: no superuser, no BYPASSRLS (Antigravity, review of 4d7bad9).
+    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM pg_roles x WHERE \(x\.rolsuper OR x\.rolbypassrls\) AND pg_has_role\(r\.oid, x\.oid, 'MEMBER'\)\)/);
+    // No relation and no schema owned, directly or through membership, in any non-system schema (Antigravity).
+    expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, c\.relowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, n\.nspowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
     expect(sql).not.toContain("current_schema()");
     expect(sql).toMatch(/WHERE r\.rolname = current_user/);
   });

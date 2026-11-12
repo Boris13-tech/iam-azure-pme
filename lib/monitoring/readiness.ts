@@ -40,17 +40,18 @@ export function authorizationReady(env: Readonly<Record<string, string | undefin
 type Check = () => Promise<unknown>;
 /**
  * The database answers, through the role the application really uses, and that role is the restricted runtime role:
- * not a superuser, cannot bypass row-level security, owns no relation and no schema outside the system schemas (an
- * owner could turn RLS off; a schema's owner can drop what it holds). A misconfigured DATABASE_URL with the owner's
- * credential fails here (Codex and Antigravity, reviews of #189).
+ * neither it nor any role it is a member of (it could SET ROLE to one) is a superuser or bypasses row-level security,
+ * or owns a relation or a schema outside the system schemas (an owner could turn RLS off; a schema's owner can drop
+ * what it holds). A misconfigured DATABASE_URL with the owner's credential fails here (Codex and Antigravity, reviews
+ * of #189). pg_has_role(…, 'MEMBER') covers the role itself and every role reached through membership.
  */
 const databaseCheck: Check = async () => {
   const rows = await rawPrisma.$queryRaw<Array<{ restricted: boolean }>>`
-    SELECT (NOT r.rolsuper AND NOT r.rolbypassrls
+    SELECT (NOT EXISTS (SELECT 1 FROM pg_roles x WHERE (x.rolsuper OR x.rolbypassrls) AND pg_has_role(r.oid, x.oid, 'MEMBER'))
       AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE c.relowner = r.oid AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')
+        WHERE pg_has_role(r.oid, c.relowner, 'MEMBER') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')
       AND NOT EXISTS (SELECT 1 FROM pg_namespace n
-        WHERE n.nspowner = r.oid AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')) AS restricted
+        WHERE pg_has_role(r.oid, n.nspowner, 'MEMBER') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')) AS restricted
     FROM pg_roles r WHERE r.rolname = current_user`;
   if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.restricted !== true) throw new Error("READINESS_DATABASE_ROLE");
 };
