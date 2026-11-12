@@ -62,3 +62,9 @@ GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLE
 GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;
 -- D8.1: the retention status of the daily job (same grant as the migration gives app_user in Production).
 GRANT EXECUTE ON FUNCTION public.luxia_retention_status() TO app_user;
+-- D8.2: the hold register and its history are owner-only (same as the migration gives app_user in Production);
+-- only when the release has them (the gate may apply a release from before D8.2).
+DO $$ BEGIN IF to_regclass('public."RetentionHold"') IS NOT NULL THEN
+  REVOKE ALL ON "RetentionHold", "RetentionHoldEvent" FROM app_user;
+  REVOKE ALL ON SEQUENCE "RetentionHoldEvent_id_seq" FROM app_user;
+END IF; END $$;

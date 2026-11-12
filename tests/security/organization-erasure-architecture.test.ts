@@ -61,7 +61,8 @@ describe("R7 organization erasure: migration architecture", () => {
     const scoped = [...schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)]
       .filter(([, , body]) => /^\s+organizationId\s/m.test(body)).map(([, name]) => name)
       // OrganizationErasure outlives the organization. LegacyUserBridge is never erased: its presence refuses the erasure.
-      .filter((name) => name !== "OrganizationErasure" && name !== "LegacyUserBridge");
+      // RetentionHold (D8.2) is never erased either: an active hold makes the erasure fail (completeness check, foreign key).
+      .filter((name) => name !== "OrganizationErasure" && name !== "LegacyUserBridge" && name !== "RetentionHold");
     expect([...scoped].sort()).toEqual([...ERASURE_TABLES].sort());
     const erase = fn(migration, "luxia_organization_erase");
     for (const text of ["ERASURE_REQUIRES_BYPASSRLS", "ERASURE_ORGANIZATION_NOT_CLOSED", "ERASURE_LEGACY_DATA_PRESENT", "ERASURE_INCOMPLETE", `"expectedOrganizationId" = p_organization_id`,

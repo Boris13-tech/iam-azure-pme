@@ -1564,3 +1564,29 @@ model RetentionRun {
 
   @@index([ranAt])
 }
+
+/// D8.2 hold register (Beta scope, section 4.3): one row per organization under an active hold. Owner-only table (no
+/// app_user access), written only by luxia_retention_hold_place, _renew and _release, read by R4, R6 and their status.
+/// Its foreign key to Organization (ON DELETE RESTRICT, in the migration) makes R7 fail while a hold is active.
+model RetentionHold {
+  organizationId String    @id
+  basisReference String
+  scope          String    @default("ORGANIZATION")
+  reviewDate     DateTime  @db.Date
+  placedAt       DateTime  @default(now()) @db.Timestamptz(6)
+  renewedAt      DateTime? @db.Timestamptz(6)
+}
+
+/// D8.2: append-only history of holds (PLACE, RENEW, RELEASE), the operator journal of holds. heldOrganizationId, not
+/// organizationId, so that the record of a release outlives the erasure of the organization.
+model RetentionHoldEvent {
+  id                 BigInt    @id @default(autoincrement())
+  heldOrganizationId String
+  action             String
+  basisReference     String
+  scope              String    @default("ORGANIZATION")
+  reviewDate         DateTime? @db.Date
+  at                 DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([heldOrganizationId, at], map: "RetentionHoldEvent_held_idx")
+}

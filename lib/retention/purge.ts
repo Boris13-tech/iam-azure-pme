@@ -56,26 +56,31 @@ export async function purgeExpiredTransactions(enforce = retentionEnforced(), db
 
 /**
  * R4 (finished invitations) and R6 (people retired for 30 days) run as dry runs only, whatever LUXIA_RETENTION_ENFORCE
- * says, until the hold register exists (D8.2): a held organization must be skipped before anything is deleted or
- * pseudonymized (Beta scope, section 4.3). Lifting this is a reviewed change, with the hold register in place.
+ * says. The hold register exists (D8.2): both skip a held organization (Beta scope, section 4.3). Lifting the dry run is
+ * a separate reviewed change, with the database guard that refuses enforcement to the runtime role.
  */
 export const R4_R6_ENFORCE_AVAILABLE = false;
 
 type MechanismStatus = { eligible: number; overdue: number; oldestHours: number };
-export type RetentionStatus = { R3: MechanismStatus; R4: MechanismStatus; R6: MechanismStatus };
+/** R4 and R6 count only what they may act on; "held" is what holds keep. */
+type HeldMechanismStatus = MechanismStatus & { held: number };
+export type RetentionStatus = { R3: MechanismStatus; R4: HeldMechanismStatus; R6: HeldMechanismStatus;
+  holds: { active: number; overdueReview: number } };
 export type RetentionReport = {
   r3: RetentionCounts;
   r4: { invitations: number; enforced: boolean };
   r6: { subjects: number; displayNames: number; principalNames: number; enforced: boolean };
   status: RetentionStatus;
   overdue: boolean;
+  holdReviewOverdue: boolean;
 };
 
 /**
  * The daily retention run: R3 (enforced when enabled), R4 and R6 (dry runs for now), then the status of every mechanism
  * (eligible records, records past their period plus 3 days, age of the oldest). Every call is recorded by the database
  * (owner-only RetentionRun); this returns counts and ages only. A record past its period plus 3 days is the backlog
- * alert (Beta scope, section 4.1); its delivery to the operator is wired with the error reporter (D8.3).
+ * alert (Beta scope, section 4.1). A hold past its review date stays in effect and raises the overdue-review alert
+ * (section 4.3). Their delivery to the operator is wired with the error reporter (D8.3).
  */
 export async function runRetention(enforce = retentionEnforced(), db = rawPrisma): Promise<RetentionReport> {
   const r3 = await purgeExpiredTransactions(enforce, db);
@@ -90,5 +95,7 @@ export async function runRetention(enforce = retentionEnforced(), db = rawPrisma
     const counts = Object.fromEntries((["R3", "R4", "R6"] as const).map((m) => [m, { overdue: status.status[m].overdue, oldestHours: status.status[m].oldestHours }]));
     console.error("retention: records past their period plus 3 days", JSON.stringify(counts));
   }
-  return { r3, r4: r4.counts, r6: r6.counts, status: status.status, overdue };
+  const holdReviewOverdue = status.status.holds.overdueReview > 0;
+  if (holdReviewOverdue) console.error("retention: holds past their review date", JSON.stringify(status.status.holds));
+  return { r3, r4: r4.counts, r6: r6.counts, status: status.status, overdue, holdReviewOverdue };
 }

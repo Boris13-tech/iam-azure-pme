@@ -12,7 +12,8 @@ const { cronAuthorized, retentionEnforced, RETENTION_BATCH, RETENTION_MAX_ROUNDS
 // The database functions of the daily run, told apart by their SQL text.
 const R4_COUNTS = { invitations: 4, enforced: false };
 const R6_COUNTS = { subjects: 1, displayNames: 1, principalNames: 1, enforced: false };
-const STATUS = { R3: { eligible: 3, overdue: 0, oldestHours: 0 }, R4: { eligible: 4, overdue: 0, oldestHours: 0 }, R6: { eligible: 1, overdue: 0, oldestHours: 0 } };
+const STATUS = { R3: { eligible: 3, overdue: 0, oldestHours: 0 }, R4: { eligible: 4, overdue: 0, oldestHours: 0, held: 0 },
+  R6: { eligible: 1, overdue: 0, oldestHours: 0, held: 0 }, holds: { active: 0, overdueReview: 0 } };
 const fn = (args: unknown[]) => /luxia_retention_(\w+)\(/.exec((args[0] as string[]).join("?"))?.[1] ?? "?";
 function stubDatabase(status = STATUS) {
   queryRaw.mockImplementation((...args: unknown[]) => {
@@ -73,12 +74,12 @@ describe("R3 retention job: authorization", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
       r3: { localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: false, rounds: 1, backlog: false },
-      r4: R4_COUNTS, r6: R6_COUNTS, status: STATUS, overdue: false });
+      r4: R4_COUNTS, r6: R6_COUNTS, status: STATUS, overdue: false, holdReviewOverdue: false });
     expect(calls()).toEqual([["purge_transactions", RETENTION_BATCH, false], ["purge_invitations", RETENTION_BATCH, false],
       ["pseudonymize_retired", RETENTION_BATCH, false], ["status"]]);
   });
 
-  it("enforcement enabled: R3 enforces; R4 and R6 stay dry runs until the hold register exists (Beta scope 4.3)", async () => {
+  it("enforcement enabled: R3 enforces; R4 and R6 stay dry runs until a reviewed change lifts it (Beta scope 4.3)", async () => {
     vi.stubEnv("CRON_SECRET", SECRET);
     vi.stubEnv("LUXIA_RETENTION_ENFORCE", "true");
     expect(R4_R6_ENFORCE_AVAILABLE).toBe(false);
@@ -94,11 +95,21 @@ describe("R3 retention job: authorization", () => {
 
   it("a record past its period plus 3 days is reported as the backlog alert, with counts and ages only", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    stubDatabase({ ...STATUS, R4: { eligible: 3, overdue: 2, oldestHours: 900 } });
+    stubDatabase({ ...STATUS, R4: { eligible: 3, overdue: 2, oldestHours: 900, held: 0 } });
     const report = await runRetention(false);
     expect(report.overdue).toBe(true);
     expect(error).toHaveBeenCalledWith("retention: records past their period plus 3 days",
       JSON.stringify({ R3: { overdue: 0, oldestHours: 0 }, R4: { overdue: 2, oldestHours: 900 }, R6: { overdue: 0, oldestHours: 0 } }));
+    error.mockRestore();
+  });
+
+  it("a hold past its review date stays in effect and raises the overdue-review alert, counts only (D8.2)", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    stubDatabase({ ...STATUS, R4: { ...STATUS.R4, held: 5 }, holds: { active: 2, overdueReview: 1 } });
+    const report = await runRetention(false);
+    expect(report.holdReviewOverdue).toBe(true);
+    expect(report.overdue).toBe(false); // what a hold keeps is not a backlog
+    expect(error).toHaveBeenCalledWith("retention: holds past their review date", JSON.stringify({ active: 2, overdueReview: 1 }));
     error.mockRestore();
   });
 

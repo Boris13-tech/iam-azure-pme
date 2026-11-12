@@ -10,7 +10,8 @@ const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "lu
   "luxia_provider_connection_guard", "luxia_provider_connection_effects", "luxia_provider_connection_lock_active", "luxia_session_connection_guard",
   "luxia_provider_secret_reference_guard", "luxia_session_redact_network_hashes", "luxia_retention_purge_transactions",
   "luxia_erasure_allowed", "luxia_organization_erase", "luxia_retention_purge_invitations", "luxia_retention_pseudonymize_retired",
-  "luxia_retention_status"];
+  "luxia_retention_status", "luxia_retention_hold_event_guard", "luxia_retention_hold_guard", "luxia_retention_held", "luxia_retention_hold_place",
+  "luxia_retention_hold_renew", "luxia_retention_hold_release"];
 // The only functions app_user may execute. Customer Self-Onboarding v1 adds five narrow SECURITY DEFINER
 // entry points that take hashes only; trigger guards stay owner-only. First Admin / Break-glass v1 adds
 // the canonical session resolver and the organization status lock helper; its B2 recovery-code guard is a
@@ -22,7 +23,9 @@ const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "lu
 // (the daily job), SECURITY DEFINER with fixed predicates and bounded batches. R7's organization erasure and its
 // guard gate are owner-only (an operator procedure), never executable by app_user, not definer. R4 and R6 add two
 // runtime entry points (the daily retention job), SECURITY DEFINER with fixed predicates and bounded batches. The
-// retention status (D8.1) is a runtime entry point too: SECURITY DEFINER, counts and ages only.
+// retention status (D8.1) is a runtime entry point too: SECURITY DEFINER, counts and ages only. The hold register
+// (D8.2) adds owner-only functions: two guard triggers (the register, its history), the hold check and the three operator
+// functions (place, renew, release), none definer, none executable by app_user.
 const runtime = ["luxia_sod_scope_contains", "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy",
   "luxia_organization_lock_active", "luxia_session_resolve", "luxia_provider_connection_lock_active", "luxia_retention_purge_transactions",
   "luxia_retention_purge_invitations", "luxia_retention_pseudonymize_retired", "luxia_retention_status"];
@@ -33,7 +36,8 @@ describe("LUXIA SQL function privilege architecture", () => {
       "20261011000000_customer_self_onboarding_v1", "20261011180000_organization_status_session_scope", "20261012090000_recovery_codes_b2",
       "20261013090000_audit_append_only", "20261014090000_provider_connection_lifecycle", "20261014110000_provider_secret_reference",
       "20261023120000_session_network_hash_redaction", "20261023130000_retention_purge_transactions",
-      "20261023140000_organization_erasure", "20261025120000_retention_invitations_pseudonymization", "20261112100000_retention_status"];
+      "20261023140000_organization_erasure", "20261025120000_retention_invitations_pseudonymization", "20261112100000_retention_status",
+      "20261112130000_retention_hold_register"];
     const names: string[] = [];
     for (const file of files) {
       const sql = readFileSync(`prisma/migrations/${file}/migration.sql`, "utf8");

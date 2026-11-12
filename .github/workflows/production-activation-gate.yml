@@ -371,6 +371,11 @@ jobs:
             REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON "_prisma_migrations" FROM app_user;
           END IF; END $$;
           REVOKE DELETE, TRUNCATE ON "AuthTransaction", "LocalAuthChallenge" FROM app_user;
+          -- D8.2: the hold register and its history are owner-only; only when the release has them.
+          DO $$ BEGIN IF to_regclass('public."RetentionHold"') IS NOT NULL THEN
+            REVOKE ALL ON "RetentionHold", "RetentionHoldEvent" FROM app_user;
+            REVOKE ALL ON SEQUENCE "RetentionHoldEvent_id_seq" FROM app_user;
+          END IF; END $$;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
