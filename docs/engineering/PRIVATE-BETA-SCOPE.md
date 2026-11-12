@@ -3,7 +3,7 @@
 | Item | State |
 |---|---|
 | Rule | Standard, section 17b: the Beta scope is written and approved by the operator before the gate. It names the pilots' profile, the capabilities and sign-in flows they use, and the legal, retention and hosting requirements that apply to them |
-| Approved | By the operator on 2026-10-18. Amended on 2026-10-23 by a decision the operator delegated: the first pilots use passkeys only; Microsoft Entra for a pilot's tenant moves after the Beta |
+| Approved | By the operator on 2026-10-18. Amended on 2026-10-23 by a decision the operator delegated: the first pilots use passkeys only; Microsoft Entra for a pilot's tenant moves after the Beta. Amended on 2026-11-12 by the operator: each retention mechanism must be running before the first pilot data it applies to reaches its period (section 3, Retention) |
 | Related | [Gate register](PRIVATE-BETA-GATE-REGISTER.md), [pilot agreement draft](../legal/PILOT-AGREEMENT-DRAFT.md) |
 
 ## 1. Pilots' profile
@@ -37,6 +37,6 @@
 | Area | Requirement before the first pilot |
 |---|---|
 | Legal | The pilot agreement, its data processing agreement and the privacy notice, reviewed by counsel. The entity that signs them exists |
-| Retention | The periods agreed with counsel are **enforced** for the data the pilot creates: purge, pseudonymization and deletion mechanisms built, reviewed and running (standard, section 17b, G8). Disclosing that they are not enforced does not meet this requirement |
+| Retention | The periods agreed with counsel are **enforced** for the data the pilot creates: purge, pseudonymization and deletion mechanisms built, reviewed and running (standard, section 17b, G8). Disclosing that they are not enforced does not meet this requirement. **Deadline per mechanism (operator, 2026-11-12):** each one runs in Production before the first pilot data it applies to reaches its period. With the proposed periods: R1, R2 and R3 at the start of the first pilot; R4 (invitations), R6 (people who left) and R8 (backups) by day 30 of the first pilot; R7 (closed organization) before a closed organization reaches 90 days; R5 (journal) before the journal holds one year of pilot data. Each mechanism reaches Production through its own release and gate. A deadline that would be missed stops the pilot before the data reaches its period. Counsel's final periods replace these deadlines |
 | Hosting | Hosting terms that allow commercial use. Production in the EU |
 | Operability | Every promise listed in section 14 of the pilot agreement is operable |

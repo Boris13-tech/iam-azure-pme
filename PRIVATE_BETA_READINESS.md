@@ -40,7 +40,7 @@
 | G5 | Gate evidence current | **PARTIAL** | Fresh evidence at the gate; the WORM evidence store and a protected private repository for gate tools (`BLOCKED_BY_BUDGET`) |
 | G6 | Minimum application monitoring active | **NOT DONE**. The 2026-10-24 incident went undetected for 34 hours | Item 6 |
 | G7 | Human alert path tested end to end | **PARTIAL** (backup freshness only) | One test per application alert |
-| G8 | Legal, retention and hosting blockers closed | **NOT DONE**. Retention mechanisms written as class A drafts, CI green: R1 (#107), R2 (#126), R3 (#127), R7 (#128). Not yet written: R4, R5, R6, R8 | Counsel and entity; R4, R5, R6 and R8 written; R1 to R8 reviewed, rehearsed and running; commercial hosting with a DPA |
+| G8 | Legal, retention and hosting blockers closed | **NOT DONE**. Retention mechanisms written as class A drafts, CI green: R1 (#107), R2 (#126), R3 (#127), R7 (#128). Not yet written: R4, R5, R6, R8 | Counsel and entity; commercial hosting with a DPA; R1 to R3 reviewed, rehearsed and running at the start of the first pilot; R4, R5, R6, R7 and R8 running before the first pilot data each applies to reaches its period (deadlines in the [Beta scope](docs/engineering/PRIVATE-BETA-SCOPE.md), section 3, operator amendment of 2026-11-12) |
 
 ## 3. Open pull requests (2026-10-23)
 
