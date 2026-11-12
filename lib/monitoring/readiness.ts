@@ -40,14 +40,17 @@ export function authorizationReady(env: Readonly<Record<string, string | undefin
 type Check = () => Promise<unknown>;
 /**
  * The database answers, through the role the application really uses, and that role is the restricted runtime role:
- * not a superuser, cannot bypass row-level security, and owns no table of the application's schema (an owner could turn
- * RLS off). A misconfigured DATABASE_URL with the owner's credential fails here (Codex, review of #189).
+ * not a superuser, cannot bypass row-level security, owns no relation and no schema outside the system schemas (an
+ * owner could turn RLS off; a schema's owner can drop what it holds). A misconfigured DATABASE_URL with the owner's
+ * credential fails here (Codex and Antigravity, reviews of #189).
  */
 const databaseCheck: Check = async () => {
   const rows = await rawPrisma.$queryRaw<Array<{ restricted: boolean }>>`
-    SELECT (NOT r.rolsuper AND NOT r.rolbypassrls AND NOT EXISTS (
-      SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = current_schema() AND c.relowner = r.oid)) AS restricted
+    SELECT (NOT r.rolsuper AND NOT r.rolbypassrls
+      AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relowner = r.oid AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')
+      AND NOT EXISTS (SELECT 1 FROM pg_namespace n
+        WHERE n.nspowner = r.oid AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')) AS restricted
     FROM pg_roles r WHERE r.rolname = current_user`;
   if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.restricted !== true) throw new Error("READINESS_DATABASE_ROLE");
 };

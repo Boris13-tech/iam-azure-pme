@@ -91,8 +91,11 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
       expect(await response.json(), JSON.stringify(rows)).toEqual({ ready: false, checks: { ...ALL_TRUE, database: false } });
     }
     const sql = (query.mock.calls.find((args) => !isSessionQuery(args))![0] as string[]).join("?");
-    expect(sql).toMatch(/NOT r\.rolsuper AND NOT r\.rolbypassrls AND NOT EXISTS/);
-    expect(sql).toMatch(/c\.relowner = r\.oid/);
+    expect(sql).toMatch(/NOT r\.rolsuper AND NOT r\.rolbypassrls\s+AND NOT EXISTS/);
+    // No relation and no schema owned outside the system schemas, in any schema, not only the current one (Antigravity).
+    expect(sql).toMatch(/WHERE c\.relowner = r\.oid AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    expect(sql).toMatch(/WHERE n\.nspowner = r\.oid AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    expect(sql).not.toContain("current_schema()");
     expect(sql).toMatch(/WHERE r\.rolname = current_user/);
   });
 

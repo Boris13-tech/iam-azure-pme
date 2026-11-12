@@ -64,6 +64,8 @@ describe("Production deploy workflow (GOV-001)", () => {
     }
     expect(step(deploy, "checks").run).toMatch(/curl [^\n]*-H @"\$header"[^\n]*\/api\/internal\/readiness/);
     expect(step(deploy, "checks").run).not.toMatch(/-H "x-luxia-monitoring-token/);
+    // Removed on every exit of the step, also when it is interrupted (Antigravity, review of #189).
+    expect(step(deploy, "checks").run).toContain(`> "$header"); trap 'rm -f "$header"' EXIT`);
   });
 
   it("the time budget keeps the rollback's window inside the job (Codex F3, review of #136)", () => {

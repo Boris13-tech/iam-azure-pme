@@ -158,7 +158,7 @@ jobs:
           # if the token-protected readiness also reports the authorization configuration, the database and the session
           # path ready. The token travels in a header file readable by this user only, never on a command line.
           header="${RUNNER_TEMP:-.}/readiness-header"
-          (umask 077; printf 'x-luxia-monitoring-token: %s\n' "${MONITORING_TOKEN:-}" > "$header")
+          (umask 077; printf 'x-luxia-monitoring-token: %s\n' "${MONITORING_TOKEN:-}" > "$header"); trap 'rm -f "$header"' EXIT
           check() {
             login=$(curl -s -o login.html -w '%{http_code}' --max-time 20 "$BASE/login") || login=000
             root=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "$BASE/") || root="000 -"
@@ -170,10 +170,9 @@ jobs:
               && [ "$ready" = "200" ] && jq -e '.ready == true and .checks.authorization == true and .checks.database == true and .checks.session == true' ready.json > /dev/null 2>&1
           }
           for attempt in 1 2 3; do
-            if check; then echo "after-checks passed, readiness included (attempt $attempt)"; rm -f "$header"; exit 0; fi
+            if check; then echo "after-checks passed, readiness included (attempt $attempt)"; exit 0; fi
             echo "attempt $attempt failed: login=$login root=$root api=$api readiness=$ready $(jq -c '.checks // empty' ready.json 2>/dev/null)"; sleep 20
           done
-          rm -f "$header"
           echo "::error::after-checks failed"; exit 1
 
       - name: Promote the previous deployment back if a check failed
