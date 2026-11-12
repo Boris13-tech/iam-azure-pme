@@ -8,13 +8,28 @@ import { describe, expect, it } from "vitest";
 // GIT_* variables, preloaded modules) is tested in break-glass.test.ts. Codex, consolidated review of the Release
 // Candidate: the erasure command recorded the working directory's HEAD, whatever code ran.
 const folder = "scripts/operators";
-const commands = readdirSync(folder).filter((name) => name.endsWith(".ts") && name !== "tool-version.ts")
-  .map((name) => ({ name, source: readFileSync(join(folder, name), "utf8").replace(/\r\n/g, "\n") }))
-  .filter(({ source }) => /toolVersion/.test(source));
+const all = readdirSync(folder).filter((name) => /\.(ts|js|cjs|mjs)$/.test(name) && name !== "tool-version.ts")
+  .map((name) => ({ name, source: readFileSync(join(folder, name), "utf8").replace(/\r\n/g, "\n") }));
+const commands = all.filter(({ source }) => /toolVersion/.test(source));
+
+// Every file of the folder is classified, so a new operator command cannot escape this test by recording no version
+// (Antigravity, review of #188). The plan-and-apply commands that change Production record the version; the others
+// say here why they do not.
+const VERSIONED = ["break-glass.ts", "organization-erasure.ts", "signup-codes.ts"];
+const NOT_VERSIONED: Record<string, string> = {
+  "archive-certification-clone.cjs": "archives a certification clone; no Production write",
+  "browser-evidence.ts": "transport of browser evidence only; no session, grant or Production write",
+  "production-bootstrap-registry.ts": "data module (reviewed registrations), not a command",
+  "production-resource-preflight.ts": "read-only inspection",
+  "resource-owner-bootstrap.ts": "library of the one-time resource bootstrap, not a command",
+  "run-production-resource-bootstrap.ts": "one-time historical bootstrap (PRODUCTION VERIFIED); repository follow-up: record its version before any reuse",
+};
 
 describe("operator commands record the version of the code they ran", () => {
-  it("the commands that record a tool version are the three known ones (a new one must be added here)", () => {
-    expect(commands.map(({ name }) => name).sort()).toEqual(["break-glass.ts", "organization-erasure.ts", "signup-codes.ts"]);
+  it("every file of scripts/operators is classified: versioned, or not with a reason (a new file must be added here)", () => {
+    expect(all.map(({ name }) => name).sort()).toEqual([...VERSIONED, ...Object.keys(NOT_VERSIONED)].sort());
+    expect(commands.map(({ name }) => name).sort()).toEqual(VERSIONED);
+    for (const name of Object.keys(NOT_VERSIONED)) expect(VERSIONED, name).not.toContain(name);
   });
 
   for (const { name, source } of commands) {
