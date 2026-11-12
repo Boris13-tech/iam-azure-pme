@@ -96,6 +96,9 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     // No relation and no schema owned, directly or through membership, in any non-system schema (Antigravity).
     expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, c\.relowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
     expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, n\.nspowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    // Nor a function (the guards are trigger functions: their owner could replace them) or a type (Antigravity, 0c4fdeb).
+    expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, p\.proowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
+    expect(sql).toMatch(/WHERE pg_has_role\(r\.oid, t\.typowner, 'MEMBER'\) AND n\.nspname NOT IN \('pg_catalog', 'information_schema'\) AND left\(n\.nspname, 3\) <> 'pg_'\)/);
     expect(sql).not.toContain("current_schema()");
     expect(sql).toMatch(/WHERE r\.rolname = current_user/);
   });

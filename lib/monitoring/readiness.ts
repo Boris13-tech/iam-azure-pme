@@ -41,8 +41,8 @@ type Check = () => Promise<unknown>;
 /**
  * The database answers, through the role the application really uses, and that role is the restricted runtime role:
  * neither it nor any role it is a member of (it could SET ROLE to one) is a superuser or bypasses row-level security,
- * or owns a relation or a schema outside the system schemas (an owner could turn RLS off; a schema's owner can drop
- * what it holds). A misconfigured DATABASE_URL with the owner's credential fails here (Codex and Antigravity, reviews
+ * or owns a relation, a schema, a function or a type outside the system schemas (an owner could turn RLS off; a
+ * schema's owner can drop what it holds; a function's owner can replace it, and the guards are trigger functions). A misconfigured DATABASE_URL with the owner's credential fails here (Codex and Antigravity, reviews
  * of #189). pg_has_role(…, 'MEMBER') covers the role itself and every role reached through membership.
  */
 const databaseCheck: Check = async () => {
@@ -51,7 +51,11 @@ const databaseCheck: Check = async () => {
       AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE pg_has_role(r.oid, c.relowner, 'MEMBER') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')
       AND NOT EXISTS (SELECT 1 FROM pg_namespace n
-        WHERE pg_has_role(r.oid, n.nspowner, 'MEMBER') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')) AS restricted
+        WHERE pg_has_role(r.oid, n.nspowner, 'MEMBER') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')
+      AND NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE pg_has_role(r.oid, p.proowner, 'MEMBER') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')
+      AND NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE pg_has_role(r.oid, t.typowner, 'MEMBER') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND left(n.nspname, 3) <> 'pg_')) AS restricted
     FROM pg_roles r WHERE r.rolname = current_user`;
   if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.restricted !== true) throw new Error("READINESS_DATABASE_ROLE");
 };
