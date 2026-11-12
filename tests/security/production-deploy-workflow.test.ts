@@ -85,7 +85,8 @@ describe("Production deploy workflow (GOV-001)", () => {
     try {
       writeFileSync(join(dir, "curl"), `#!/bin/bash\nfor a in "$@"; do [[ "$a" == https://* ]] && url="$a"; done\necho "$*" >> "${dir}/calls"\n${api}\n`);
       writeFileSync(join(dir, "gh"), `#!/bin/bash\n${gh}\n`);
-      writeFileSync(join(dir, "sleep"), "#!/bin/bash\nexit 0\n");
+      // A short real pause instead of the step's 10 s: loops still advance quickly, without spinning the CPU.
+      writeFileSync(join(dir, "sleep"), "#!/bin/bash\n/bin/sleep 0.05\n");
       for (const tool of ["curl", "gh", "sleep"]) chmodSync(join(dir, tool), 0o755);
       writeFileSync(join(dir, "step.sh"), script);
       const result = spawnSync("bash", [join(dir, "step.sh")], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}`,
@@ -114,7 +115,7 @@ describe("Production deploy workflow (GOV-001)", () => {
     const ok = run("approval", "exit 1", {}, `echo '[{"state":"approved","user":{"login":"op"},"environments":[{"name":"Production"}]}]'`);
     expect(ok.status).toBe(0);
     expect(ok.out).toContain("approved_by=op");
-  });
+  }, 30_000);
 
   it.runIf(hasShell)("deploy: a build that never finishes is cancelled, and the run fails", () => {
     const { status, calls, output, out } = run("deploy", `case "$url" in ${project("dpl_old")}
@@ -126,7 +127,7 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(calls).toContain("/deployments/dpl_new/cancel");
     expect(calls).toMatch(/--max-time 30/);
     expect(out).toContain("attempted=true");
-  });
+  }, 30_000);
 
   it.runIf(hasShell)("deploy: a lost creation answer still leaves 'attempted' recorded for the rollback", () => {
     const { status, out, calls } = run("deploy", `case "$url" in ${project("dpl_old")}
@@ -138,14 +139,14 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(out).not.toContain("deployment=");
     // The deployment carries the run and its attempt, so a rerun cannot mistake an earlier attempt's deployment for it.
     expect(calls).toMatch(/"luxiaRun": ?"77\.2"/);
-  });
+  }, 30_000);
 
   it.runIf(hasShell)("deploy: a deployment created in another project stops the run", () => {
     const { status, output } = run("deploy", `case "$url" in ${project("dpl_old")}
       *) echo '{"id":"dpl_new","projectId":"other"}' ;; esac`);
     expect(status).not.toBe(0);
     expect(output).toContain("not in the configured project");
-  });
+  }, 30_000);
 
   it.runIf(hasShell)("rollback: finds a deployment whose creation answer was lost, stops it, then confirms Production", () => {
     const { status, calls } = run("rollback", `case "$url" in ${project("dpl_old")}
@@ -254,8 +255,20 @@ describe("Production deploy workflow (GOV-001)", () => {
       *"/cancel"*) echo '{}' ;;
       *) echo '{"readyState":"BUILDING"}' ;; esac`, { DEPLOYMENT: "dpl_new" });
     expect(status).not.toBe(0);
-    expect(output).toContain("ROLLBACK UNRESOLVED: deployment dpl_new is still BUILDING");
+    expect(output).toContain("ROLLBACK UNRESOLVED: deployment dpl_new is still BUILDING (last state seen)");
     expect(Date.now() - started).toBeLessThan(30_000);
+  }, 30_000);
+
+  it.runIf(hasShell)("rollback: a failed state read keeps the deployment state actually seen (main CI of 24383c5)", () => {
+    // The deployment is read once (BUILDING), then every state read fails: the diagnostic names what was seen,
+    // as it does for Production (fc58715). On a loaded runner the last read had failed and the state was lost.
+    const { status, output } = run("rollback", `case "$url" in ${project("dpl_old")}
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo '{}' ;;
+      *"/cancel"*) echo '{}' ;;
+      *"/v13/deployments/"*) n="$(dirname "$0")/states"; if [[ -f "$n" ]]; then exit 28; fi; touch "$n"; echo '{"readyState":"BUILDING"}' ;; esac`, { DEPLOYMENT: "dpl_new" });
+    expect(status).not.toBe(0);
+    expect(output).toContain("ROLLBACK UNRESOLVED: deployment dpl_new is still BUILDING (last state seen)");
   }, 30_000);
 
   it.runIf(hasShell)("record: the reason cannot break the table, and the JSON record keeps it whole", () => {
@@ -268,7 +281,7 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(JSON.parse(record)).toMatchObject({ reason, approvedBy: "op", deployment: "dpl_new", checks: "failure", rollback: "success" });
     const refused = run("record", "exit 1", { APPROVED_BY: "" });
     expect(refused.summary).toContain("none: nothing was deployed");
-  });
+  }, 30_000);
 
   it.runIf(hasShell)("confirm: Production is checked after every run, and an unproven state makes the run red", () => {
     const healthy = `case "$url" in *"/login"*) echo '<title>LUXIA</title>' > login.html; printf 200 ;; *) printf 401 ;; esac`;
@@ -296,5 +309,5 @@ describe("Production deploy workflow (GOV-001)", () => {
       expect(status, JSON.stringify(env)).toBe(expected);
       if (expected) expect(output).toContain("MANUAL CHECK REQUIRED");
     }
-  });
+  }, 30_000);
 });
