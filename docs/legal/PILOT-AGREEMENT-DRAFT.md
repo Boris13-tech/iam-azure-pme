@@ -62,12 +62,12 @@ The Pilot is provided **without any availability, performance or support-time co
 
 ## 9. Retention, return and deletion
 
-1. **During the Pilot:** the periods of [DATA-RETENTION-AND-DELETION.md](DATA-RETENTION-AND-DELETION.md) apply. Default proposal: the journal and sign-in records are kept 1 year. **Some automatic deletions start only from day [30] of the Pilot**, namely the purge of finished invitations and the deletion of a closed organization. Until then the data concerned is kept, protected like the rest.
+1. **During the Pilot:** the periods of [DATA-RETENTION-AND-DELETION.md](DATA-RETENTION-AND-DELETION.md) apply. Default proposal: the journal and sign-in records are kept 1 year. **Automatic deletions run from the first day of the Pilot.** A record is deleted after its period, within **[7] days** for the daily deletions and within the following **month** for the journal and sign-in records, which are first deleted on the Pilot's first anniversary.
 2. **At the end of the Pilot:**
    - on request made within **[15] days**, LUXIA provides an export of the Customer's data in a machine-readable format within **[15] days**;
    - LUXIA then deletes the Customer's organization and its data within **[90] days**, and confirms it in writing;
-   - encrypted backups that still contain the data are deleted about **[46]** days after that deletion, an estimate that depends on the storage platform's processing (they cannot be deleted during their first 30 days, by design).
-3. Data that a law requires LUXIA to keep is kept only for that purpose and that time.
+   - encrypted backups that still contain the data are deleted about **[33]** days after that deletion (**[46]** days if the storage's recycle bin keeps 14 days), an estimate that depends on the storage platform's processing, for which it gives no deadline; LUXIA checks every week that no older backup remains (they cannot be deleted during their first 30 days, by design).
+3. Data that a law requires LUXIA to keep, or that the Customer instructs LUXIA to keep, is kept only for that purpose and that time, and is not deleted before that hold ends.
 
 ## 10. Confidentiality
 
@@ -100,8 +100,8 @@ LUXIA keeps all rights in LUXIA Identity. The Customer keeps all rights in its d
 | Deletion within 90 days and written confirmation (9.2) | **Designed** (R7) | Implemented and tested, or a tested manual operator procedure |
 | Breach notification within 48 hours (8.4) | Partly: backup alerting exists; application monitoring is in review | Monitoring active (G6), alert path tested (G7), runbook exercised |
 | Removal of network identifiers (DPA annex A) | In review (R1) | R1 merged and deployed |
-| Retention periods enforced (9.1) | **No**: purge and pseudonymization are designed (R3 to R6), not built | R3 to R6 built, reviewed and running (G8 requires enforcement; a disclosure does not replace it) |
-| Backups deleted within the agreed period (9.2) | **No**: immutability stops early deletion, but no lifecycle rule deletes expired versions. The rule is prepared (R8, runbook section 8) | R8 applied and verified (operator gate); the period in 9.2 set to the real worst case (46 days, or 33 with a 1-day recycle bin) |
+| Retention periods enforced (9.1) | **No**: purge and pseudonymization are designed (R3 to R6), not built | Before signing: R3, R4 and R6 built, reviewed and running, with their alerts tested, and the hold register built; R5 (journal, one year) Ready and Running by the dates of the [Beta scope](../engineering/PRIVATE-BETA-SCOPE.md), section 4 (G8 requires enforcement; a disclosure does not replace it) |
+| Backups deleted within the agreed period (9.2) | **No**: immutability stops early deletion, but no lifecycle rule deletes expired versions. The rule is prepared (R8, runbook section 8) | Before signing: R8 applied and verified (operator gate), the recycle-bin period chosen, and the weekly check in place (Beta scope, section 4.2); 9.2 states the estimate for that period |
 | A tested channel to the Customer's security contacts (8.4) | **No** product channel (E6) | The named contacts recorded, and a test notice sent and acknowledged |
 | Hosting terms that allow the Pilot | **No** (Vercel Hobby is non-commercial) | Vercel Pro: `BLOCKED_BY_BUDGET` |
 | Counsel review of this agreement | No | Free consultation, or a budget |
