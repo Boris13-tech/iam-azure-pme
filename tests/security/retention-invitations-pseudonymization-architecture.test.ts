@@ -91,7 +91,9 @@ describe("R4/R6 retention: migration architecture", () => {
       `UPDATE "Subject" s SET "name" = ${SUBJECT_PSEUDONYM}`,
       `UPDATE "LocalIdentity" l SET "principalName" = ${PRINCIPAL_PSEUDONYM}`,
     ]);
-    expect(pseudo).not.toMatch(/DELETE|INSERT|"CanonicalAdminAuditEvent"|"AuthenticationEvidence"|"Session"|"LocalAuthenticator"|"LocalRecoveryCode"/);
+    // The only other write is its own run record (counts only, owner-only table), as for R3 and R4 (D8.1).
+    expect(pseudo.match(/INSERT INTO "\w+"/g)).toEqual([`INSERT INTO "RetentionRun"`]);
+    expect(pseudo).not.toMatch(/DELETE|INSERT INTO "(?!RetentionRun")|"CanonicalAdminAuditEvent"|"AuthenticationEvidence"|"Session"|"LocalAuthenticator"|"LocalRecoveryCode"/);
     const selections = [...pseudo.matchAll(/SELECT s\."id" FROM "Subject" s\n([\s\S]+?)ORDER BY s\."lifecycleChangedAt", s\."id" LIMIT p_batch/g)].map((m) => squash(m[1]));
     expect(selections).toHaveLength(2);
     expect(selections[0]).toBe(selections[1]);

@@ -7,7 +7,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const queryRaw = vi.fn();
 vi.mock("@/lib/db/raw-prisma", () => ({ rawPrisma: { $queryRaw: (...args: unknown[]) => queryRaw(...args) } }));
 
-const { cronAuthorized, retentionEnforced, RETENTION_BATCH, RETENTION_MAX_ROUNDS, purgeExpiredTransactions } = await import("../../lib/retention/purge");
+const { cronAuthorized, retentionEnforced, RETENTION_BATCH, RETENTION_MAX_ROUNDS, purgeExpiredTransactions, runRetention, R4_R6_ENFORCE_AVAILABLE } = await import("../../lib/retention/purge");
+
+// The database functions of the daily run, told apart by their SQL text.
+const R4_COUNTS = { invitations: 4, enforced: false };
+const R6_COUNTS = { subjects: 1, displayNames: 1, principalNames: 1, enforced: false };
+const STATUS = { R3: { eligible: 3, overdue: 0, oldestHours: 0 }, R4: { eligible: 4, overdue: 0, oldestHours: 0 }, R6: { eligible: 1, overdue: 0, oldestHours: 0 } };
+const fn = (args: unknown[]) => /luxia_retention_(\w+)\(/.exec((args[0] as string[]).join("?"))?.[1] ?? "?";
+function stubDatabase(status = STATUS) {
+  queryRaw.mockImplementation((...args: unknown[]) => {
+    switch (fn(args)) {
+      case "purge_transactions": return Promise.resolve([{ counts: { localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: args[2] } }]);
+      case "purge_invitations": return Promise.resolve([{ counts: { ...R4_COUNTS, enforced: args[2] } }]);
+      case "pseudonymize_retired": return Promise.resolve([{ counts: { ...R6_COUNTS, enforced: args[2] } }]);
+      case "status": return Promise.resolve([{ status }]);
+      default: return Promise.reject(new Error("unexpected query"));
+    }
+  });
+}
+const calls = () => queryRaw.mock.calls.map((args) => [fn(args), ...args.slice(1)]);
 const { GET } = await import("../../app/api/internal/retention/route");
 const { middleware } = await import("../../middleware");
 
@@ -47,18 +65,41 @@ describe("R3 retention job: authorization", () => {
     expect(queryRaw).not.toHaveBeenCalled();
   });
 
-  it("with the secret, runs one bounded call (dry run by default) and returns counts only", async () => {
+  it("with the secret, runs R3, R4, R6 and the status (dry runs by default) and returns counts and ages only", async () => {
     vi.stubEnv("CRON_SECRET", SECRET);
-    queryRaw.mockResolvedValue([{ counts: { localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: false } }]);
+    stubDatabase();
     const response = await GET(new Request("https://example.test/api/internal/retention", { headers: { authorization: `Bearer ${SECRET}` } }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: false, rounds: 1, backlog: false });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
-    expect(queryRaw.mock.calls[0].slice(1)).toEqual([RETENTION_BATCH, false]);
+    expect(await response.json()).toEqual({
+      r3: { localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: false, rounds: 1, backlog: false },
+      r4: R4_COUNTS, r6: R6_COUNTS, status: STATUS, overdue: false });
+    expect(calls()).toEqual([["purge_transactions", RETENTION_BATCH, false], ["purge_invitations", RETENTION_BATCH, false],
+      ["pseudonymize_retired", RETENTION_BATCH, false], ["status"]]);
+  });
+
+  it("enforcement enabled: R3 enforces; R4 and R6 stay dry runs until the hold register exists (Beta scope 4.3)", async () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
     vi.stubEnv("LUXIA_RETENTION_ENFORCE", "true");
-    await GET(new Request("https://example.test/api/internal/retention", { headers: { authorization: `Bearer ${SECRET}` } }));
-    expect(queryRaw.mock.calls[1].slice(1)).toEqual([RETENTION_BATCH, true]);
+    expect(R4_R6_ENFORCE_AVAILABLE).toBe(false);
+    stubDatabase();
+    const response = await GET(new Request("https://example.test/api/internal/retention", { headers: { authorization: `Bearer ${SECRET}` } }));
+    expect(response.status).toBe(200);
+    const made = calls();
+    expect(made[0]).toEqual(["purge_transactions", RETENTION_BATCH, true]);
+    const r4r6 = made.filter(([name]) => name === "purge_invitations" || name === "pseudonymize_retired");
+    expect(r4r6).toHaveLength(2);
+    expect(r4r6.every((call) => call[2] === false)).toBe(true);
+  });
+
+  it("a record past its period plus 3 days is reported as the backlog alert, with counts and ages only", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    stubDatabase({ ...STATUS, R4: { eligible: 3, overdue: 2, oldestHours: 900 } });
+    const report = await runRetention(false);
+    expect(report.overdue).toBe(true);
+    expect(error).toHaveBeenCalledWith("retention: records past their period plus 3 days",
+      JSON.stringify({ R3: { overdue: 0, oldestHours: 0 }, R4: { overdue: 2, oldestHours: 900 }, R6: { overdue: 0, oldestHours: 0 } }));
+    error.mockRestore();
   });
 
   it("a day with more than one batch is drained: calls repeat while full, counts add up, and a remainder is a backlog", async () => {

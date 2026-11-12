@@ -49,3 +49,5 @@ REVOKE DELETE, TRUNCATE ON "ProviderSecretReference" FROM app_user;
 -- R4/R6: the daily retention job (same grants as the migration gives app_user in Production).
 GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO app_user;
 GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;
+-- D8.1: the retention status of the daily job (same grant as the migration gives app_user in Production).
+GRANT EXECUTE ON FUNCTION public.luxia_retention_status() TO app_user;

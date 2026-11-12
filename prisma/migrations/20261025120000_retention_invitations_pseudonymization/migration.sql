@@ -116,6 +116,8 @@ BEGIN
         AND "createdAt" < v_now - interval '30 days'
       LIMIT p_batch) i;
   END IF;
+  -- One run record per call, like R3 (owner-only table, counts only).
+  INSERT INTO "RetentionRun" ("enforced", "counts") VALUES (p_enforce, jsonb_build_object('mechanism', 'R4', 'invitations', v_invitations));
   RETURN jsonb_build_object('invitations', v_invitations, 'enforced', p_enforce);
 END $$;
 REVOKE ALL ON FUNCTION luxia_retention_purge_invitations(integer, boolean) FROM PUBLIC;
@@ -185,6 +187,9 @@ BEGIN
     WHERE a."subjectId" = ANY (v_ids)
       AND l."principalName" IS DISTINCT FROM 'ANCIEN-MEMBRE-' || encode(sha256(convert_to(l."id", 'UTF8')), 'hex');
   END IF;
+  -- One run record per call, like R3 (owner-only table, counts only).
+  INSERT INTO "RetentionRun" ("enforced", "counts") VALUES (p_enforce, jsonb_build_object('mechanism', 'R6',
+    'subjects', cardinality(v_ids), 'displayNames', v_names, 'principalNames', v_principals));
   RETURN jsonb_build_object('subjects', cardinality(v_ids), 'displayNames', v_names, 'principalNames', v_principals, 'enforced', p_enforce);
 END $$;
 REVOKE ALL ON FUNCTION luxia_retention_pseudonymize_retired(integer, boolean) FROM PUBLIC;
