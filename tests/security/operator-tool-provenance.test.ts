@@ -8,7 +8,11 @@ import { describe, expect, it } from "vitest";
 // GIT_* variables, preloaded modules) is tested in break-glass.test.ts. Codex, consolidated review of the Release
 // Candidate: the erasure command recorded the working directory's HEAD, whatever code ran.
 const folder = "scripts/operators";
-const all = readdirSync(folder).filter((name) => /\.(ts|js|cjs|mjs)$/.test(name) && name !== "tool-version.ts")
+// Every file, in every subfolder and whatever its extension (.mts, .cts, …), not only the known ones (Codex, review
+// of #188): names are paths relative to the folder.
+const walk = (dir: string, prefix = ""): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+  entry.isDirectory() ? walk(join(dir, entry.name), `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`]);
+const all = walk(folder).filter((name) => name !== "tool-version.ts")
   .map((name) => ({ name, source: readFileSync(join(folder, name), "utf8").replace(/\r\n/g, "\n") }));
 const commands = all.filter(({ source }) => /toolVersion/.test(source));
 
