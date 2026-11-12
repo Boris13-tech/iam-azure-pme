@@ -192,12 +192,16 @@ jobs:
           for one in $ids; do
             state=""
             while (( deadline - SECONDS > 3 )); do
-              state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r '.readyState // empty')" || state=""
+              # A failed read keeps the last state actually seen (as for Production); a terminal state ends the wait.
+              if read_state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r '.readyState // empty')" && [[ -n "$read_state" ]]; then state="$read_state"; fi
               [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] && break
               api -X PATCH "https://api.vercel.com/v12/deployments/$one/cancel?teamId=$TEAM" > /dev/null || true
               pause || break
             done
-            [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] || unresolved="deployment $one is still ${state:-unknown}"
+            if [[ "$state" != "READY" && "$state" != "ERROR" && "$state" != "CANCELED" ]]; then
+              if [[ -n "$state" ]]; then unresolved="deployment $one is still $state (last state seen)"
+              else unresolved="deployment $one is in an unknown state (never read)"; fi
+            fi
           done
           # 3. Promote the previous deployment; a refused or lost answer is retried once, Production state decides.
           current=""; confirmed=""
