@@ -98,6 +98,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolbypassrls OR rolsuper)) THEN
     RAISE EXCEPTION 'RETENTION_OWNER_REQUIRES_BYPASSRLS' USING ERRCODE = '42501';
   END IF;
+  -- Dry run only for the runtime role, as for R6, until the hold register exists and a reviewed migration lifts this:
+  -- a held organization must be skipped before anything is deleted (Beta scope, section 4.3; Codex, review of #138).
+  -- The owner in its own session may enforce: a definer call changes current_user, never session_user.
+  IF p_enforce AND session_user <> current_user THEN
+    RAISE EXCEPTION 'RETENTION_R4_ENFORCE_NOT_ACTIVATED' USING ERRCODE = '42501';
+  END IF;
   -- One run at a time.
   IF NOT pg_try_advisory_xact_lock(hashtextextended('luxia-retention-purge-invitations', 0)) THEN
     RAISE EXCEPTION 'RETENTION_ALREADY_RUNNING' USING ERRCODE = '55P03';

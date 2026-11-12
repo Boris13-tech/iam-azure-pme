@@ -22,8 +22,8 @@ let owner: PrismaClient;
 let orgs = 0;
 
 type Counts = Record<string, number | boolean>;
-const call = (fn: "luxia_retention_purge_invitations" | "luxia_retention_pseudonymize_retired", batch: number | null, // R6 enforces as the owner only, until #148; everything else as the runtime role.
-  enforce: boolean | null, db: PrismaClient = fn === "luxia_retention_pseudonymize_retired" && enforce === true ? owner : rawPrisma) =>
+const call = (fn: "luxia_retention_purge_invitations" | "luxia_retention_pseudonymize_retired", batch: number | null, // R4 and R6 enforce as the owner only, until the hold register; dry runs as the runtime role.
+  enforce: boolean | null, db: PrismaClient = enforce === true ? owner : rawPrisma) =>
   db.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT ${fn}(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
 const settle = (promise: Promise<unknown>) => promise.then(() => "ACCEPTED", (error: unknown) => String(error instanceof Error ? error.message : error));
 /** Runs enforced calls until one selects nothing: the shared test database may hold rows of earlier runs. */
@@ -245,7 +245,8 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     const old = await invitation(a, { created: 40, expires: 33 });
     let purged!: () => void;
     const running = new Promise<void>((resolve) => { purged = resolve; });
-    const first = rawPrisma.$transaction(async (tx) => {
+    // Enforcing is the owner's only, until the hold register (Codex, review of #138).
+    const first = owner.$transaction(async (tx) => {
       const [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
       purged();
       await tx.$queryRawUnsafe(`SELECT pg_sleep(2)::text`);
@@ -282,7 +283,7 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     const rows = [await invitation(a, { created: 40, expires: 33 }), await invitation(a, { created: 41, expires: 34 })];
     const ROLLBACK = new Error("caller rollback");
     let counts: Counts | undefined;
-    await expect(rawPrisma.$transaction(async (tx) => {
+    await expect(owner.$transaction(async (tx) => { // enforcing is the owner's only, until the hold register
       [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
       throw ROLLBACK;
     })).rejects.toBe(ROLLBACK);
@@ -306,13 +307,17 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     const fromA = await inContext(a.organizationId, a.tenantId), forged = await inContext(randomUUID(), randomUUID());
     expect(fromA).toEqual(forged);
     expect(fromA.invitations).toBeGreaterThanOrEqual(2);
-    // One enforced call from A's context, nothing after it: it alone removes A's and B's eligible rows.
-    const enforced = await rawPrisma.$transaction(async (tx) => {
+    // The runtime role cannot enforce R4, from any context, until the hold register exists (Codex, review of #138):
+    // refused, and every eligible row is still there.
+    const runtimeEnforce = await settle(rawPrisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT set_config('app.organization_id', ${a.organizationId}, true), set_config('app.tenant_id', ${a.tenantId}, true)`;
-      const [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
-      return counts;
-    });
-    expect(enforced).toEqual({ invitations: 2, enforced: true });
+      await tx.$queryRawUnsafe(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
+    }));
+    expect(runtimeEnforce).toContain("RETENTION_R4_ENFORCE_NOT_ACTIVATED");
+    expect(await settle(rawPrisma.$queryRawUnsafe(`SELECT luxia_retention_purge_invitations(5000, true)`))).toContain("RETENTION_R4_ENFORCE_NOT_ACTIVATED");
+    expect(await present([inA, inB, youngB])).toEqual([inA, inB, youngB].sort());
+    // The owner in its own session, the one path until holds exist: one call removes A's and B's eligible rows.
+    expect(await call("luxia_retention_purge_invitations", 5000, true)).toEqual({ invitations: 2, enforced: true });
     expect(await present([inA, inB, youngB])).toEqual([youngB]);
   });
 });

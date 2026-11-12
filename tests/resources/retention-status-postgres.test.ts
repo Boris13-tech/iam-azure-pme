@@ -1,7 +1,9 @@
 // D8.1 (Beta scope, section 4.2): the retention status gives, per mechanism, the eligible records, those past their
 // period plus 3 days (the backlog alert) and the age of the oldest; each call and each R4 or R6 run leaves a record in
 // the owner-only RetentionRun table. Real roles on PostgreSQL: the runtime role calls it, and never reads the records.
+import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
@@ -89,4 +91,38 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
     expect(Object.keys(last.counts).sort()).toEqual(["displayNames", "mechanism", "principalNames", "subjects"]);
     expect(await settle(rawPrisma.$queryRawUnsafe(`SELECT count(*) FROM "RetentionRun"`))).toMatch(/permission denied/);
   }, 60_000);
+
+  // Codex, review of #138: the rollback must leave Prisma's history consistent, so the normal deploy path restores it.
+  it("drill with Prisma's real history: rollback removes the function and its history line; migrate deploy brings both back", () => {
+    const psql = (url: string, args: string[]) => {
+      const target = new URL(url); target.search = "";
+      const result = spawnSync("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", target.toString(), ...args], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`psql failed: ${result.stderr ?? result.error}`);
+      return result.stdout.replace(/\r/g, "").trim();
+    };
+    const prisma = createRequire(import.meta.url).resolve("prisma/build/index.js");
+    const deploy = (url: string) => {
+      const result = spawnSync(process.execPath, [prisma, "migrate", "deploy"], { encoding: "utf8", env: { ...process.env, DATABASE_URL: url } });
+      if (result.status !== 0) throw new Error(`migrate deploy failed: ${result.stdout}${result.stderr}`);
+    };
+    const admin = process.env.DATABASE_MIGRATION_URL!;
+    const name = `luxia_d81_${suffix}`;
+    psql(admin, ["-c", `CREATE DATABASE ${name}`]);
+    const scratch = new URL(admin); scratch.pathname = `/${name}`;
+    const url = scratch.toString();
+    const state = () => psql(url, ["-c", `SELECT to_regprocedure('luxia_retention_status()') IS NOT NULL`,
+      "-c", `SELECT count(*) FROM "_prisma_migrations" WHERE "migration_name" = '20261112100000_retention_status' AND "finished_at" IS NOT NULL`]).split("\n");
+    try {
+      deploy(url);
+      expect(state()).toEqual(["t", "1"]);
+      expect(psql(url, ["-c", `SELECT (luxia_retention_status() ? 'R3')::text`])).toBe("true");
+      psql(url, ["-1", "-f", "docs/operations/RETENTION-STATUS-ROLLBACK.sql"]);
+      expect(state()).toEqual(["f", "0"]);
+      deploy(url);
+      expect(state()).toEqual(["t", "1"]);
+      expect(psql(url, ["-c", `SELECT (luxia_retention_status() ? 'R6')::text`])).toBe("true");
+    } finally {
+      spawnSync("psql", ["-X", "-q", (() => { const t = new URL(admin); t.search = ""; return t.toString(); })(), "-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`], { encoding: "utf8" });
+    }
+  }, 240_000);
 });
