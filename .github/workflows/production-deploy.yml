@@ -25,11 +25,9 @@ on:
 permissions:
   contents: read
 
-# One Production operation at a time, shared with production-activation-gate.yml: an activation cannot change the
-# schema between this deploy's schema check and its deployment (Codex, review of #191).
-concurrency:
-  group: production-operations
-  cancel-in-progress: false
+# One Production operation at a time, never queued: the verify job refuses while another activation or deploy is open,
+# and the deploy job holds the lock it shares with production-activation-gate.yml, so an activation cannot change the
+# schema between this deploy's schema check and its deployment (Codex, reviews of #191).
 
 jobs:
   verify:
@@ -43,6 +41,13 @@ jobs:
         with:
           sparse-checkout: scripts/ops
           persist-credentials: false
+
+      - name: No other Production operation is queued, waiting or in progress
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: bash scripts/ops/verify-no-other-operation.sh
 
       - name: The authorized release is this commit, on main, with a green CI run
         id: release
@@ -61,6 +66,11 @@ jobs:
     runs-on: ubuntu-24.04
     # A required reviewer on the environment. Nothing below runs before that approval, and the first step checks it.
     environment: Production
+    # Backstop for two dispatches in the same seconds; the first job already refuses while another operation is open, so
+    # no run waits here to be replaced by a later one (Codex and Antigravity, reviews of #191).
+    concurrency:
+      group: production-operations
+      cancel-in-progress: false
     # Budget: approval check 2, two checkouts 2 + 2, release again 2, schema 2, deploy 13, checks 3, rollback 11, record 1,
     # artifact 2 (minutes); the rollback always keeps its window.
     timeout-minutes: 40

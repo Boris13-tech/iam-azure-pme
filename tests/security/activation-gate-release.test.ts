@@ -14,11 +14,24 @@ const verified = gate.jobs["ci-verified"], activation = gate.jobs["database-acti
 const index = (job: Job, match: (s: Step) => boolean) => job.steps.findIndex(match);
 
 describe("activation gate: the authorized release, not main's tip", () => {
-  it("one Production operation at a time: the gate and the deploy share one concurrency group, never cancelled", () => {
-    const deploy = yaml.load(readFileSync(".github/workflows/production-deploy.yml", "utf8")) as { concurrency: unknown };
-    const own = yaml.load(text) as { concurrency: unknown };
-    expect(own.concurrency).toEqual({ group: "production-operations", "cancel-in-progress": false });
-    expect(deploy.concurrency).toEqual(own.concurrency);
+  it("one Production operation at a time, never queued: the first job refuses while another is open; the Production jobs share a lock", () => {
+    type Wf = { concurrency?: unknown; jobs: Record<string, Job & { concurrency?: unknown }> };
+    const deploy = yaml.load(readFileSync(".github/workflows/production-deploy.yml", "utf8").replace(/\r\n/g, "\n")) as Wf;
+    const own = yaml.load(text) as Wf;
+    // No workflow-level group: a whole run waiting in a group could be replaced by a later dispatch (Codex, review of #191).
+    expect(own.concurrency).toBeUndefined();
+    expect(deploy.concurrency).toBeUndefined();
+    const lock = { group: "production-operations", "cancel-in-progress": false };
+    expect(own.jobs["database-activation"].concurrency).toEqual(lock);
+    expect(deploy.jobs.deploy.concurrency).toEqual(lock);
+    // The check comes first in the job that runs before any approval, in both workflows, for every operation.
+    for (const [job, checkout] of [[own.jobs["ci-verified"], 0], [deploy.jobs.verify, 0]] as const) {
+      expect(job.steps[checkout].uses).toMatch(/^actions\/checkout@[0-9a-f]{40}$/);
+      const busy = job.steps[checkout + 1];
+      expect(busy.if).toBeUndefined();
+      expect(busy.env).toEqual({ GH_TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}", RUN_ID: "${{ github.run_id }}" });
+      expect(busy.run).toBe("bash scripts/ops/verify-no-other-operation.sh");
+    }
   });
 
   it("the posture check refuses a runtime role that can write the migration history", () => {

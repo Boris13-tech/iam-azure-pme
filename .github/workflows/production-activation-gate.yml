@@ -28,11 +28,8 @@ on:
 permissions:
   contents: read
 
-# One Production operation at a time, shared with production-deploy.yml: a deploy's schema check cannot be overtaken by
-# an activation running beside it (Codex, review of #191).
-concurrency:
-  group: production-operations
-  cancel-in-progress: false
+# One Production operation at a time, never queued: the first job refuses while another activation or deploy is open,
+# and the Production job holds the lock it shares with production-deploy.yml (Codex, reviews of #191).
 
 jobs:
   # Replaces the former `needs: test-and-build` of the commit-message triggers in ci.yml (removed): a Production
@@ -51,6 +48,19 @@ jobs:
       release_sha: ${{ steps.release.outputs.sha }}
       release_ci_run_url: ${{ steps.release.outputs.ci_run_url }}
     steps:
+      - name: Checkout the operation checks (this workflow's commit)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: scripts/ops
+          persist-credentials: false
+
+      - name: No other Production operation is queued, waiting or in progress
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: bash scripts/ops/verify-no-other-operation.sh
+
       - name: Dispatched from main, on a commit whose CI passed
         id: verify
         env:
@@ -82,13 +92,6 @@ jobs:
 
       # The workflow above is main's; what it applies is the release the operator authorized, never main's tip: a merge
       # into main after the authorization changes nothing in this operation.
-      - name: Checkout the release verifier (this workflow's commit)
-        if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          sparse-checkout: scripts/ops
-          persist-credentials: false
-
       - name: Activation only, the authorized release is one commit on main with a green CI run
         id: release
         if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
@@ -115,6 +118,11 @@ jobs:
     if: ${{ inputs.operation == '' || inputs.operation == 'activation' }}
     runs-on: ubuntu-latest
     environment: Production
+    # Backstop for two dispatches in the same seconds; the first job already refuses while another operation is open, so
+    # no run waits here to be replaced by a later one (Codex and Antigravity, reviews of #191).
+    concurrency:
+      group: production-operations
+      cancel-in-progress: false
     # actions: read for the release verifier (the CI run of the release), after the approval.
     permissions:
       contents: read
