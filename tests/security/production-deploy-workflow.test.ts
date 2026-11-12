@@ -16,6 +16,7 @@ const parsed = yaml.load(workflow) as { on: Record<string, unknown>; permissions
 const { verify, deploy, confirm } = parsed.jobs;
 const step = (job: Job, id: string) => job.steps.find((s) => s.id === id)!;
 const MONITORING = "m".repeat(40); // the readiness token of the tests' Production environment
+const VERCEL = "vercel-test-token-0123456789abcdef"; // the deploy token of the tests: it must never reach a command line
 
 describe("Production deploy workflow (GOV-001)", () => {
   it("starts only by hand, with the exact commit and a reason", () => {
@@ -51,6 +52,18 @@ describe("Production deploy workflow (GOV-001)", () => {
     // The readiness token: the deploy step only checks that it is configured; the checks step sends it.
     expect(holders("LUXIA_MONITORING_TOKEN")).toEqual(["deploy", "checks"]);
     expect(JSON.stringify(confirm)).not.toContain("secrets");
+  });
+
+  it("no token is ever an argument of a command: both Vercel helpers read a header file, removed when the step ends (Codex, review of #189)", () => {
+    for (const id of ["deploy", "rollback"]) {
+      const run = step(deploy, id).run!;
+      expect(run, id).not.toMatch(/Bearer \$VERCEL_TOKEN"/);
+      expect(run, id).toMatch(/\(umask 077; printf 'Authorization: Bearer %s\\n' "\$VERCEL_TOKEN" > "\$auth"\); trap 'rm -f "\$auth"' EXIT/);
+      expect(run.match(/curl /g)?.length, id).toBe(1); // the helper is the only curl of the step
+      expect(run, id).toMatch(/curl [^\n]*-H @"\$auth"/);
+    }
+    expect(step(deploy, "checks").run).toMatch(/curl [^\n]*-H @"\$header"[^\n]*\/api\/internal\/readiness/);
+    expect(step(deploy, "checks").run).not.toMatch(/-H "x-luxia-monitoring-token/);
   });
 
   it("the time budget keeps the rollback's window inside the job (Codex F3, review of #136)", () => {
@@ -96,7 +109,7 @@ describe("Production deploy workflow (GOV-001)", () => {
       for (const tool of ["curl", "gh", "sleep"]) chmodSync(join(dir, tool), 0o755);
       writeFileSync(join(dir, "step.sh"), script);
       const result = spawnSync("bash", [join(dir, "step.sh")], { cwd: dir, encoding: "utf8", timeout: deadlineMs, killSignal: "SIGKILL", env: { ...process.env, PATH: `${dir}:${process.env.PATH}`,
-        VERCEL_TOKEN: "t", MONITORING_TOKEN: MONITORING, TEAM: "team", PROJECT: "prj", REPO_ID: "1", SHA: "a".repeat(40), REASON: "test", REPO: "o/r", BASE: "https://example.invalid",
+        VERCEL_TOKEN: VERCEL, MONITORING_TOKEN: MONITORING, TEAM: "team", PROJECT: "prj", REPO_ID: "1", SHA: "a".repeat(40), REASON: "test", REPO: "o/r", BASE: "https://example.invalid",
         GITHUB_OUTPUT: join(dir, "out"), GITHUB_STEP_SUMMARY: join(dir, "summary"), GITHUB_RUN_ID: "77", GITHUB_RUN_ATTEMPT: "2", RUN_ID: "77", PREVIOUS: "dpl_old", DEPLOYMENT: "",
         ROLLBACK_BUDGET_SECONDS: "10", ...env } });
       if (result.error) throw new Error(`step ${id} did not finish within ${deadlineMs} ms: ${result.error.message}`);
@@ -136,6 +149,8 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(output).toContain("not ready after 10 minutes");
     expect(calls).toContain("/deployments/dpl_new/cancel");
     expect(calls).toMatch(/--max-time 30/);
+    expect(calls).toContain("-H @"); // the token is read from a file by curl
+    expect(calls).not.toContain(VERCEL); // and never appears among its arguments
     expect(out).toContain("attempted=true");
   }, 30_000);
 
@@ -250,6 +265,8 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(calls).toContain("meta-luxiaRun=77.2");
     expect(calls.indexOf("/deployments/dpl_lost/cancel")).toBeGreaterThan(-1);
     expect(calls.indexOf("/deployments/dpl_lost/cancel")).toBeLessThan(calls.indexOf("/promote/dpl_old"));
+    expect(calls).toContain("-H @");
+    expect(calls).not.toContain(VERCEL); // the rollback's token is never a command argument either
   }, 30_000);
 
   it.runIf(hasShell)("rollback: a deployment of an earlier attempt cannot stand in for this attempt's lost one (Codex F1, second pass)", () => {

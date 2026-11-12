@@ -103,7 +103,11 @@ jobs:
           # finished leaves no output at all, and the confirm job then asks for a manual check.
           echo "not_attempted=true" >> "$GITHUB_OUTPUT"
           for v in VERCEL_TOKEN TEAM PROJECT REPO_ID; do [[ -n "${!v}" ]] || { echo "::error::$v is not configured on the Production environment"; exit 1; }; done
-          api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          # The Vercel token travels in a header file readable by this user only, never in a command's arguments (Codex,
+          # review of #189); the file is removed when the step ends.
+          auth="${RUNNER_TEMP:-.}/vercel-authorization-deploy"
+          (umask 077; printf 'Authorization: Bearer %s\n' "$VERCEL_TOKEN" > "$auth"); trap 'rm -f "$auth"' EXIT
+          api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H @"$auth" -H "Content-Type: application/json" "$@"; }
           # Monitoring parameters, before anything is sent (Codex F2, consolidated review of the Release Candidate): the
           # after-checks need the readiness token, and the new deployment needs its authorization mode, readiness token
           # and cron secret in Vercel's Production environment. Names only: no value is read or printed.
@@ -190,10 +194,14 @@ jobs:
           # 'stop' is the end of the current phase (never later than the deadline): requests and pauses are cut to it.
           stop=$deadline
           remaining() { local end=$(( stop < deadline ? stop : deadline )); echo $(( end - SECONDS )); }
+          # The Vercel token travels in a header file readable by this user only, never in a command's arguments (Codex,
+          # review of #189); the file is removed when the step ends.
+          auth="${RUNNER_TEMP:-.}/vercel-authorization-rollback"
+          (umask 077; printf 'Authorization: Bearer %s\n' "$VERCEL_TOKEN" > "$auth"); trap 'rm -f "$auth"' EXIT
           api() {
             local left; left=$(remaining); (( left > 3 )) || return 124
             local limit=$(( left - 2 < 30 ? left - 2 : 30 ))
-            curl -sS --fail-with-body --connect-timeout "$(( limit < 10 ? limit : 10 ))" --max-time "$limit" -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"
+            curl -sS --fail-with-body --connect-timeout "$(( limit < 10 ? limit : 10 ))" --max-time "$limit" -H @"$auth" -H "Content-Type: application/json" "$@"
           }
           pause() { local left; left=$(remaining); (( left > 3 )) || return 1; sleep "$(( left - 3 < 10 ? left - 3 : 10 ))"; }
           production() { api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty'; }

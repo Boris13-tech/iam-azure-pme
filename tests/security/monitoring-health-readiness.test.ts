@@ -18,6 +18,8 @@ import {
 // The resolver's SQL goes through the same mocked client: tell the two queries apart by their text.
 const isSessionQuery = (args: unknown[]) => Array.isArray(args[0]) && (args[0] as string[]).join("?").includes("luxia_session_resolve");
 const ALL_TRUE = { authorization: true, database: true, session: true };
+// The database check's answer for the restricted runtime role (not superuser, no BYPASSRLS, owns no table).
+const RESTRICTED = [{ restricted: true }];
 
 const TOKEN = "t".repeat(48);
 const saved = process.env.LUXIA_MONITORING_TOKEN;
@@ -25,7 +27,7 @@ const call = (headers: Record<string, string> = {}) => readiness(new Request("ht
 const withToken = () => call({ [MONITORING_TOKEN_HEADER]: TOKEN });
 const unauthenticated = (path: string) => middleware(new NextRequest(`http://localhost:3000${path}`));
 
-beforeEach(() => { query.mockReset(); query.mockResolvedValue([{ "?column?": 1 }]); resetReadinessCache(); process.env.LUXIA_MONITORING_TOKEN = TOKEN; });
+beforeEach(() => { query.mockReset(); query.mockImplementation((...args: unknown[]) => Promise.resolve(isSessionQuery(args) ? [] : RESTRICTED)); resetReadinessCache(); process.env.LUXIA_MONITORING_TOKEN = TOKEN; });
 afterEach(() => { vi.useRealTimers(); if (saved === undefined) delete process.env.LUXIA_MONITORING_TOKEN; else process.env.LUXIA_MONITORING_TOKEN = saved; });
 
 describe("Monitoring slice 1: public liveness, protected readiness", () => {
@@ -78,6 +80,22 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     expect(text).not.toMatch(/refused|internal|5432|app_user/);
   });
 
+  it("database reached through a role that is not the restricted runtime role (owner, superuser, BYPASSRLS): not ready", async () => {
+    // The real query was run on PostgreSQL 17: app_user → true; the superuser owner → false; a non-superuser owner of one
+    // table → false (Codex, review of #189). Here: what the check does with each answer.
+    for (const rows of [[{ restricted: false }], [], [{ restricted: null }], [{ restricted: true }, { restricted: true }], [{}], "x"]) {
+      resetReadinessCache();
+      query.mockImplementation((...args: unknown[]) => Promise.resolve(isSessionQuery(args) ? [] : rows));
+      const response = await withToken();
+      expect(response.status, JSON.stringify(rows)).toBe(503);
+      expect(await response.json(), JSON.stringify(rows)).toEqual({ ready: false, checks: { ...ALL_TRUE, database: false } });
+    }
+    const sql = (query.mock.calls.find((args) => !isSessionQuery(args))![0] as string[]).join("?");
+    expect(sql).toMatch(/NOT r\.rolsuper AND NOT r\.rolbypassrls AND NOT EXISTS/);
+    expect(sql).toMatch(/c\.relowner = r\.oid/);
+    expect(sql).toMatch(/WHERE r\.rolname = current_user/);
+  });
+
   it("database unavailable everywhere (both queries fail): 503, and neither the database nor the session check passes", async () => {
     query.mockRejectedValue(new Error("ECONNREFUSED"));
     const response = await withToken();
@@ -103,9 +121,9 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     expect(await pending).toBe(false);
     expect(await databaseReady(undefined, start + READINESS_CACHE_MS)).toBe(false);
     expect(query).toHaveBeenCalledTimes(1);
-    answer([1]);
+    answer(RESTRICTED);
     await vi.advanceTimersByTimeAsync(0);
-    query.mockResolvedValue([1]);
+    query.mockResolvedValue(RESTRICTED);
     expect(await databaseReady(undefined, start + READINESS_CACHE_MS)).toBe(true);
     expect(query).toHaveBeenCalledTimes(2);
   });
@@ -118,7 +136,7 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
 
   it("the database sees one check per period, whatever the call rate (single flight, then cache)", async () => {
     let release!: () => void;
-    query.mockReturnValue(new Promise((resolve) => { release = () => resolve([1]); }));
+    query.mockReturnValue(new Promise((resolve) => { release = () => resolve(RESTRICTED); }));
     const start = 1_000_000;
     const burst = Array.from({ length: 25 }, () => databaseReady(undefined, start));
     release();
@@ -149,8 +167,15 @@ describe("Readiness for the Production deploy: authorization configuration, data
         expect(authorizationReady({ ...marker, AUTHZ_MODE: mode }), `${JSON.stringify(marker)} ${mode}`).toBe(false);
       }
     }
-    // An unmarked production process counts as Production for the mode (authorization-mode.ts): missing is refused.
+    // An unmarked production process counts as Production, with the same definition as the mode (isProductionProcess):
+    // missing and every non-native mode are refused there too (Codex, review of #189).
     expect(authorizationReady({ NODE_ENV: "production" })).toBe(false);
+    expect(authorizationReady({ NODE_ENV: "production", AUTHZ_MODE: "native" })).toBe(true);
+    for (const mode of ["legacy", "shadow", "native-shadow-legacy"]) {
+      expect(authorizationReady({ NODE_ENV: "production", AUTHZ_MODE: mode }), mode).toBe(false);
+      expect(authorizationReady({ NODE_ENV: "production", VERCEL_ENV: "", APP_ENV: "", AUTHZ_MODE: mode }), mode).toBe(false);
+    }
+    expect(authorizationReady({ NODE_ENV: "production", VERCEL_ENV: "preview", AUTHZ_MODE: "legacy" })).toBe(true);
     // Outside Production any resolved mode is ready (development, CI, previews keep the legacy fallback).
     expect(authorizationReady({ VERCEL_ENV: "preview", AUTHZ_MODE: "legacy" })).toBe(true);
     expect(authorizationReady({ NODE_ENV: "test" })).toBe(true);
@@ -165,7 +190,7 @@ describe("Readiness for the Production deploy: authorization configuration, data
 
   it("the session check goes through the real resolver, with a fresh random token each time, and needs no session back", async () => {
     const hashes: unknown[] = [];
-    query.mockImplementation((...args: unknown[]) => { if (isSessionQuery(args)) hashes.push(args[1]); return Promise.resolve(isSessionQuery(args) ? [] : [1]); });
+    query.mockImplementation((...args: unknown[]) => { if (isSessionQuery(args)) hashes.push(args[1]); return Promise.resolve(isSessionQuery(args) ? [] : RESTRICTED); });
     expect(await sessionReady(undefined, 1_000_000)).toBe(true);
     expect(await sessionReady(undefined, 1_000_000 + READINESS_CACHE_MS)).toBe(true);
     expect(hashes).toHaveLength(2);
@@ -175,7 +200,7 @@ describe("Readiness for the Production deploy: authorization configuration, data
 
   it("session path failing: a resolver that errors is not ready, and the whole answer is 503", async () => {
     query.mockImplementation((...args: unknown[]) => isSessionQuery(args)
-      ? Promise.reject(new Error('function luxia_session_resolve(text) does not exist')) : Promise.resolve([1]));
+      ? Promise.reject(new Error('function luxia_session_resolve(text) does not exist')) : Promise.resolve(RESTRICTED));
     const response = await withToken();
     expect(response.status).toBe(503);
     const text = await response.text();
@@ -186,13 +211,13 @@ describe("Readiness for the Production deploy: authorization configuration, data
   it("session path failing: a resolver that returns a live session for a random token is not ready", async () => {
     const live = { id: "s", organizationId: "o", tenantId: "t", subjectId: "u", identityAccountId: "a", scope: "FULL", revokedAt: null,
       expiresAt: new Date(Date.now() + 3_600_000), lastSeenAt: new Date() };
-    query.mockImplementation((...args: unknown[]) => Promise.resolve(isSessionQuery(args) ? [live] : [1]));
+    query.mockImplementation((...args: unknown[]) => Promise.resolve(isSessionQuery(args) ? [live] : RESTRICTED));
     expect(await sessionReady(undefined, 1_000_000)).toBe(false);
   });
 
   it("session path that does not answer in time is not ready (timeout)", async () => {
     vi.useFakeTimers();
-    query.mockImplementation((...args: unknown[]) => isSessionQuery(args) ? new Promise(() => {}) : Promise.resolve([1]));
+    query.mockImplementation((...args: unknown[]) => isSessionQuery(args) ? new Promise(() => {}) : Promise.resolve(RESTRICTED));
     const pending = readinessOf({ NODE_ENV: "test" }, 1_000_000);
     await vi.advanceTimersByTimeAsync(READINESS_TIMEOUT_MS + 1);
     expect(await pending).toEqual({ ready: false, checks: { ...ALL_TRUE, session: false } });

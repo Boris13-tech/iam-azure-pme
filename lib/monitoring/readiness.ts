@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { rawPrisma } from "../db/raw-prisma";
-import { resolveAuthorizationMode } from "../auth/authorization-mode";
+import { isProductionProcess, resolveAuthorizationMode } from "../auth/authorization-mode";
 import { SessionStore } from "../auth/session-store";
 
 // Minimum application monitoring, slice 1 (docs/operations/MINIMUM-APPLICATION-MONITORING-DESIGN.md, M-B), extended
@@ -27,19 +27,30 @@ export type ReadinessChecks = { authorization: boolean; database: boolean; sessi
 export type Readiness = { ready: boolean; checks: ReadinessChecks };
 
 /**
- * The authorization configuration the running process actually resolves. In Production (marked by Vercel or LUXIA),
- * only "native" is ready: the Private Beta runs in native mode, a missing or unknown AUTHZ_MODE refuses every session
- * (authorization-mode.ts), and the shadow modes write to a table whose policy refuses them (private finding,
- * 2026-10-30). Elsewhere any mode that resolves is ready.
+ * The authorization configuration the running process actually resolves. In Production (the same definition as the
+ * authorization mode: isProductionProcess), only "native" is ready: the Private Beta runs in native mode, a missing or
+ * unknown AUTHZ_MODE refuses every session (authorization-mode.ts), and the shadow modes are not used in Production.
+ * Elsewhere any mode that resolves is ready.
  */
 export function authorizationReady(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
   const mode = resolveAuthorizationMode(env);
-  const production = env.VERCEL_ENV === "production" || env.APP_ENV === "production";
-  return production ? mode === "native" : mode !== null;
+  return isProductionProcess(env) ? mode === "native" : mode !== null;
 }
 
 type Check = () => Promise<unknown>;
-const databaseCheck: Check = () => rawPrisma.$queryRaw`SELECT 1`;
+/**
+ * The database answers, through the role the application really uses, and that role is the restricted runtime role:
+ * not a superuser, cannot bypass row-level security, and owns no table of the application's schema (an owner could turn
+ * RLS off). A misconfigured DATABASE_URL with the owner's credential fails here (Codex, review of #189).
+ */
+const databaseCheck: Check = async () => {
+  const rows = await rawPrisma.$queryRaw<Array<{ restricted: boolean }>>`
+    SELECT (NOT r.rolsuper AND NOT r.rolbypassrls AND NOT EXISTS (
+      SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema() AND c.relowner = r.oid)) AS restricted
+    FROM pg_roles r WHERE r.rolname = current_user`;
+  if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.restricted !== true) throw new Error("READINESS_DATABASE_ROLE");
+};
 /**
  * The real session path, as the runtime role: the canonical resolver with a random token that no session can have. It
  * must answer, and answer nothing. A failing resolver (missing function, revoked grant, broken policy) fails the check.
