@@ -82,11 +82,23 @@ describe.runIf(enabled)("owner-only tables: no runtime privilege (PostgreSQL)", 
         "-c", `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user`]);
       for (const dir of readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort())
         psqlOk(url, ["-1", "-f", `prisma/migrations/${dir}/migration.sql`]);
-      // The gate's grant step, exactly as the workflow runs it (its database name replaced).
+      // Every table and sequence privilege app_user holds, as the migrations leave them.
+      const privileges = () => psqlOk(url, ["-c", `SELECT c.relname || ':' || p FROM pg_class c
+          CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
+          WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND has_table_privilege('app_user', c.oid, p)
+        UNION ALL SELECT c.relname || ':' || p FROM pg_class c CROSS JOIN unnest(ARRAY['USAGE','SELECT','UPDATE']) p
+          WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'S' AND has_sequence_privilege('app_user', c.oid, p) ORDER BY 1`]).split("\n");
+      const migrated = privileges();
+      expect(migrated.length).toBeGreaterThan(50);
+      // The gate's grant step as the workflow runs it: one transaction (--single-transaction), its database name replaced.
       const gate = read(".github/workflows/production-activation-gate.yml");
+      expect(gate).toContain(`psql -v ON_ERROR_STOP=1 --single-transaction "$PSQL_URL" <<'SQL'`);
       const block = /Bootstrap least-privilege runtime grants[\s\S]*?<<'SQL'\n([\s\S]*?)\n\s*SQL\n/.exec(gate)?.[1];
       expect(block, "gate SQL block").toBeTruthy();
       psqlOk(url, ["-1"], block!.replace(/^ {10}/gm, "").replace(/DATABASE neondb/g, `DATABASE ${name}`));
+      // The gate never widens what the migrations set (Codex, review of #190): no privilege appears that they did not give.
+      const gated = privileges();
+      expect(gated.filter((privilege) => !migrated.includes(privilege))).toEqual([]);
       const tables = JSON.parse(psqlOk(url, ["-c", `SELECT coalesce(json_agg(t), '[]') FROM (${OWNER_ONLY_QUERY}) t`])) as OwnerOnly[];
       expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(KNOWN));
       expect(tables.filter((t) => t.privileges.length > 0 || t.sequences.length > 0)).toEqual([]);
