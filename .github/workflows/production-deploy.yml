@@ -96,6 +96,7 @@ jobs:
         timeout-minutes: 13
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN }}
+          MONITORING_TOKEN: ${{ secrets.LUXIA_MONITORING_TOKEN }}
         run: |
           set -euo pipefail
           # Explicit evidence for the confirm job: this step started and has sent nothing yet. A step that never
@@ -103,6 +104,16 @@ jobs:
           echo "not_attempted=true" >> "$GITHUB_OUTPUT"
           for v in VERCEL_TOKEN TEAM PROJECT REPO_ID; do [[ -n "${!v}" ]] || { echo "::error::$v is not configured on the Production environment"; exit 1; }; done
           api() { curl -sS --fail-with-body --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" "$@"; }
+          # Monitoring parameters, before anything is sent (Codex F2, consolidated review of the Release Candidate): the
+          # after-checks need the readiness token, and the new deployment needs its authorization mode, readiness token
+          # and cron secret in Vercel's Production environment. Names only: no value is read or printed.
+          [[ "${#MONITORING_TOKEN}" -ge 32 ]] || { echo "::error::LUXIA_MONITORING_TOKEN is missing or shorter than 32 characters on the Production environment: nothing is deployed"; exit 1; }
+          envs="$(api "https://api.vercel.com/v10/projects/$PROJECT/env?teamId=$TEAM")" || { echo "::error::the Vercel project's environment variables cannot be read: nothing is deployed"; exit 1; }
+          for key in AUTHZ_MODE LUXIA_MONITORING_TOKEN CRON_SECRET; do
+            jq -e --arg key "$key" 'any(.envs[]?; .key == $key and (((.target // []) | if type == "array" then . else [.] end) | index("production")) != null)' <<< "$envs" > /dev/null \
+              || { echo "::error::$key is not set for Production in the Vercel project: nothing is deployed"; exit 1; }
+          done
+          unset envs
           previous="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
           [[ -n "$previous" ]] || { echo "::error::cannot read the current Production deployment"; exit 1; }
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
@@ -135,19 +146,30 @@ jobs:
       - name: Check Production from outside
         id: checks
         timeout-minutes: 3
+        env:
+          MONITORING_TOKEN: ${{ secrets.LUXIA_MONITORING_TOKEN }}
         run: |
           set -u
+          # Public pages are not enough (Codex F2, consolidated review of the Release Candidate): the deployment passes only
+          # if the token-protected readiness also reports the authorization configuration, the database and the session
+          # path ready. The token travels in a header file readable by this user only, never on a command line.
+          header="${RUNNER_TEMP:-.}/readiness-header"
+          (umask 077; printf 'x-luxia-monitoring-token: %s\n' "${MONITORING_TOKEN:-}" > "$header")
           check() {
             login=$(curl -s -o login.html -w '%{http_code}' --max-time 20 "$BASE/login") || login=000
             root=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "$BASE/") || root="000 -"
             api=$(curl -s -o api.json -w '%{http_code}' --max-time 20 "$BASE/api/canonical/sessions") || api=000
+            rm -f ready.json
+            ready=$(curl -s -o ready.json -w '%{http_code}' --max-time 15 -H @"$header" "$BASE/api/internal/readiness") || ready=000
             [ "$login" = "200" ] && grep -q '<title>LUXIA' login.html && [ "$root" = "307 $BASE/login" ] \
-              && [ "$api" = "401" ] && grep -q '"error":"Unauthorized"' api.json
+              && [ "$api" = "401" ] && grep -q '"error":"Unauthorized"' api.json \
+              && [ "$ready" = "200" ] && jq -e '.ready == true and .checks.authorization == true and .checks.database == true and .checks.session == true' ready.json > /dev/null 2>&1
           }
           for attempt in 1 2 3; do
-            if check; then echo "after-checks passed (attempt $attempt)"; exit 0; fi
-            echo "attempt $attempt failed: login=$login root=$root api=$api"; sleep 20
+            if check; then echo "after-checks passed, readiness included (attempt $attempt)"; rm -f "$header"; exit 0; fi
+            echo "attempt $attempt failed: login=$login root=$root api=$api readiness=$ready $(jq -c '.checks // empty' ready.json 2>/dev/null)"; sleep 20
           done
+          rm -f "$header"
           echo "::error::after-checks failed"; exit 1
 
       - name: Promote the previous deployment back if a check failed

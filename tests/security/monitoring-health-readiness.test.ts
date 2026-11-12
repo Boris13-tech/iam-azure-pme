@@ -11,8 +11,13 @@ import { GET as readiness, dynamic as readinessDynamic } from "../../app/api/int
 import { dynamic as healthDynamic } from "../../app/api/health/route";
 import { middleware } from "../../middleware";
 import {
-  MONITORING_TOKEN_HEADER, READINESS_CACHE_MS, READINESS_TIMEOUT_MS, databaseReady, monitoringTokenAccepted, resetReadinessCache,
+  MONITORING_TOKEN_HEADER, READINESS_CACHE_MS, READINESS_TIMEOUT_MS, authorizationReady, databaseReady, monitoringTokenAccepted,
+  readiness as readinessOf, resetReadinessCache, sessionReady,
 } from "../../lib/monitoring/readiness";
+
+// The resolver's SQL goes through the same mocked client: tell the two queries apart by their text.
+const isSessionQuery = (args: unknown[]) => Array.isArray(args[0]) && (args[0] as string[]).join("?").includes("luxia_session_resolve");
+const ALL_TRUE = { authorization: true, database: true, session: true };
 
 const TOKEN = "t".repeat(48);
 const saved = process.env.LUXIA_MONITORING_TOKEN;
@@ -59,18 +64,25 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     expect(monitoringTokenAccepted(TOKEN, TOKEN)).toBe(true);
   });
 
-  it("with the token: 200 ready when the database answers, 503 when it fails; the body is only {ready}", async () => {
+  it("with the token: 200 ready when all three checks hold, 503 when the database fails; the body is only booleans", async () => {
     let response = await withToken();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ready: true });
+    expect(await response.json()).toEqual({ ready: true, checks: ALL_TRUE });
     expect(response.headers.get("cache-control")).toBe("no-store");
     resetReadinessCache();
-    query.mockRejectedValue(new Error("connection refused to db.internal:5432 as app_user"));
+    query.mockImplementation((...args: unknown[]) => isSessionQuery(args) ? Promise.resolve([]) : Promise.reject(new Error("connection refused to db.internal:5432 as app_user")));
     response = await withToken();
     expect(response.status).toBe(503);
     const text = await response.text();
-    expect(JSON.parse(text)).toEqual({ ready: false });
+    expect(JSON.parse(text)).toEqual({ ready: false, checks: { ...ALL_TRUE, database: false } });
     expect(text).not.toMatch(/refused|internal|5432|app_user/);
+  });
+
+  it("database unavailable everywhere (both queries fail): 503, and neither the database nor the session check passes", async () => {
+    query.mockRejectedValue(new Error("ECONNREFUSED"));
+    const response = await withToken();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ready: false, checks: { authorization: true, database: false, session: false } });
   });
 
   it("a database that does not answer in time counts as not ready", async () => {
@@ -125,5 +137,75 @@ describe("Monitoring slice 1: public liveness, protected readiness", () => {
     for (const path of ["/api/health/x", "/api/healthz", "/api/internal/readiness/x", "/api/internal/other", "/api/canonical/subjects"]) {
       expect((await unauthenticated(path)).status, path).toBe(401);
     }
+  });
+});
+
+// Codex F2, consolidated review of the Release Candidate: readiness covers what a signed-in user needs.
+describe("Readiness for the Production deploy: authorization configuration, database, session path", () => {
+  it("authorization: in Production only native is ready; a missing, unknown or non-native mode is not", () => {
+    for (const marker of [{ VERCEL_ENV: "production" }, { APP_ENV: "production" }]) {
+      expect(authorizationReady({ ...marker, AUTHZ_MODE: "native" }), JSON.stringify(marker)).toBe(true);
+      for (const mode of [undefined, "", "Native", "native ", "legacy", "shadow", "native-shadow-legacy", "anything"]) {
+        expect(authorizationReady({ ...marker, AUTHZ_MODE: mode }), `${JSON.stringify(marker)} ${mode}`).toBe(false);
+      }
+    }
+    // An unmarked production process counts as Production for the mode (authorization-mode.ts): missing is refused.
+    expect(authorizationReady({ NODE_ENV: "production" })).toBe(false);
+    // Outside Production any resolved mode is ready (development, CI, previews keep the legacy fallback).
+    expect(authorizationReady({ VERCEL_ENV: "preview", AUTHZ_MODE: "legacy" })).toBe(true);
+    expect(authorizationReady({ NODE_ENV: "test" })).toBe(true);
+  });
+
+  it("authorization misconfigured: not ready even when the database and the session path are fine", async () => {
+    const report = await readinessOf({ VERCEL_ENV: "production", AUTHZ_MODE: "legacy" });
+    expect(report).toEqual({ ready: false, checks: { authorization: false, database: true, session: true } });
+    resetReadinessCache();
+    expect(await readinessOf({ VERCEL_ENV: "production", AUTHZ_MODE: "native" })).toEqual({ ready: true, checks: ALL_TRUE });
+  });
+
+  it("the session check goes through the real resolver, with a fresh random token each time, and needs no session back", async () => {
+    const hashes: unknown[] = [];
+    query.mockImplementation((...args: unknown[]) => { if (isSessionQuery(args)) hashes.push(args[1]); return Promise.resolve(isSessionQuery(args) ? [] : [1]); });
+    expect(await sessionReady(undefined, 1_000_000)).toBe(true);
+    expect(await sessionReady(undefined, 1_000_000 + READINESS_CACHE_MS)).toBe(true);
+    expect(hashes).toHaveLength(2);
+    for (const hash of hashes) expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(hashes[0]).not.toBe(hashes[1]);
+  });
+
+  it("session path failing: a resolver that errors is not ready, and the whole answer is 503", async () => {
+    query.mockImplementation((...args: unknown[]) => isSessionQuery(args)
+      ? Promise.reject(new Error('function luxia_session_resolve(text) does not exist')) : Promise.resolve([1]));
+    const response = await withToken();
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ ready: false, checks: { ...ALL_TRUE, session: false } });
+    expect(text).not.toMatch(/luxia_session_resolve|does not exist/);
+  });
+
+  it("session path failing: a resolver that returns a live session for a random token is not ready", async () => {
+    const live = { id: "s", organizationId: "o", tenantId: "t", subjectId: "u", identityAccountId: "a", scope: "FULL", revokedAt: null,
+      expiresAt: new Date(Date.now() + 3_600_000), lastSeenAt: new Date() };
+    query.mockImplementation((...args: unknown[]) => Promise.resolve(isSessionQuery(args) ? [live] : [1]));
+    expect(await sessionReady(undefined, 1_000_000)).toBe(false);
+  });
+
+  it("session path that does not answer in time is not ready (timeout)", async () => {
+    vi.useFakeTimers();
+    query.mockImplementation((...args: unknown[]) => isSessionQuery(args) ? new Promise(() => {}) : Promise.resolve([1]));
+    const pending = readinessOf({ NODE_ENV: "test" }, 1_000_000);
+    await vi.advanceTimersByTimeAsync(READINESS_TIMEOUT_MS + 1);
+    expect(await pending).toEqual({ ready: false, checks: { ...ALL_TRUE, session: false } });
+  });
+
+  it("token absent or invalid: 401 like any unauthenticated path, and no check runs", async () => {
+    for (const headers of [{}, { [MONITORING_TOKEN_HEADER]: "x".repeat(48) }] as Array<Record<string, string>>) {
+      const response = await call(headers);
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "Unauthorized" });
+    }
+    delete process.env.LUXIA_MONITORING_TOKEN;
+    expect((await withToken()).status).toBe(401);
+    expect(query).not.toHaveBeenCalled();
   });
 });
