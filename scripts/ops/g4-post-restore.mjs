@@ -13,6 +13,9 @@
 // Counts and verdicts only: no row content is read or printed.
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+// What counts as a fault lives in its own module, so a test can drive each decision to its failing answer instead of
+// reading it in this source (Codex F5, review of #195).
+import { EXPECTED_TRIGGERS, cleanEnvironment, oneTarget, publicAddress, sameServer, triggerFaults, validate } from "./g4-post-restore-checks.mjs";
 
 const fail = (message) => { console.error(`REFUSED: ${message}`); process.exit(1); };
 const arg = (name) => { const at = process.argv.indexOf(`--${name}`); return at >= 0 ? process.argv[at + 1] : undefined; };
@@ -24,38 +27,19 @@ if (!Number.isFinite(backupAge) || backupAge < 0) fail("--backup-age-minutes <n>
 const started = arg("started");
 if (!started || Number.isNaN(Date.parse(started))) fail("--started <ISO> is required: T0, the moment the drill began, which gives the RTO");
 
-/**
- * The only parameters either URL may carry. Anything else is refused: `host`, `hostaddr`, `options` and `service` can
- * send a connection somewhere other than the host in the URL, and an unknown parameter cannot be judged safe.
- */
-const ALLOWED_PARAMETERS = new Set(["sslmode", "schema", "connect_timeout", "connection_limit", "pool_timeout"]);
-/** A restore copy names itself one: the drill creates it, so it can be named so, and no other database qualifies. */
-const DISPOSABLE_NAME = /^luxia_restore[a-z0-9_]*$/;
-
-/** One validated connection string, used by every tool, or a refusal. */
-function validated(name, value) {
-  if (!value) fail(`set ${name}`);
-  let url;
-  try { url = new URL(value); } catch { return fail(`${name} is not a URL`); }
-  if (!["postgres:", "postgresql:"].includes(url.protocol)) fail(`${name} is not a postgres URL (${url.protocol})`);
-  if (!["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname)) fail(`${name} points at ${url.hostname}: the drill target must be a disposable copy on this machine`);
-  for (const parameter of url.searchParams.keys()) {
-    if (!ALLOWED_PARAMETERS.has(parameter)) fail(`${name} carries the parameter ${parameter}, which could send the connection elsewhere`);
-  }
-  const database = url.pathname.replace(/^\//, "");
-  if (!/^[A-Za-z0-9_]+$/.test(database)) fail(`${name} has no plain database name`);
-  if (!DISPOSABLE_NAME.test(database)) fail(`${name} names the database ${database}: the drill target must be named luxia_restore… so that no other database can be reached`);
-  return { url: url.toString(), database };
-}
-const owner = validated("LUXIA_RESTORE_TARGET_URL", process.env.LUXIA_RESTORE_TARGET_URL);
-const app = validated("LUXIA_RESTORE_APP_URL", process.env.LUXIA_RESTORE_APP_URL);
-if (owner.database !== app.database) fail("the two URLs name different databases");
+const owner = validate("LUXIA_RESTORE_TARGET_URL", process.env.LUXIA_RESTORE_TARGET_URL, fail);
+const app = validate("LUXIA_RESTORE_APP_URL", process.env.LUXIA_RESTORE_APP_URL, fail);
+// One database on one server: comparing the database name alone let the owner checks run on the restored copy while
+// the runtime-role checks ran on a different, clean instance of the same name (Codex F2, review of #195).
+const differentTargets = oneTarget(owner, app);
+if (differentTargets) fail(differentTargets);
 
 /**
  * The environment every tool runs with: the parent's, minus every libpq variable. PGHOSTADDR, PGHOST, PGSERVICE and
- * the rest would otherwise decide the connection whatever the URL says (Codex F1, review of #195).
+ * the rest would otherwise decide the connection whatever the URL says. The match is case-insensitive, because the
+ * Windows runtime reads environment variables without regard to case (Antigravity finding 4, review of #195).
  */
-const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^PG/.test(key)));
+const CLEAN_ENV = cleanEnvironment(process.env);
 
 const psql = (connection, sql) => {
   const result = spawnSync("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", connection, "-c", sql], { encoding: "utf8", env: CLEAN_ENV });
@@ -68,8 +52,23 @@ const checks = [];
 const check = (name, ok, detail) => { checks.push({ name, ok, detail }); console.log(`${ok ? "PASS" : "FAIL"} ${name}: ${detail}`); return ok; };
 
 // The connection really in use, read back from the server: the report states what was reached, not what was asked for.
-const reached = readOnly(owner.url, `SELECT current_database() || ' as ' || current_user || ' on ' || coalesce(inet_server_addr()::text, 'socket')`);
-check("the connection reached the disposable copy", reached.startsWith(`${owner.database} as `), reached);
+// The server's own address is asserted, not merely recorded: a local port forward to another database whose name
+// matched would otherwise have passed (Antigravity finding 1, review of #195).
+const identity = (connection) => readOnly(connection, `SELECT current_database() || ' on ' || coalesce(inet_server_addr()::text, 'socket') || ':' || coalesce(inet_server_port()::text, 'none')`);
+const ownerIdentity = identity(owner.url);
+const appIdentity = identity(app.url);
+const reached = `${ownerIdentity} as ${readOnly(owner.url, "SELECT current_user")}`;
+// What the server answers is its own address for this connection, so a copy in a container answers the container's
+// private address, not 127.0.0.1; the check refuses a globally routable one, which is what a managed database behind
+// a local tunnel would show. A server on another machine inside the same private network cannot be told apart this
+// way: that limit is stated in the report.
+const routable = publicAddress(ownerIdentity);
+check("the connection reached the disposable copy, not a database beyond this network",
+  ownerIdentity.startsWith(`${owner.database} on `) && routable === null, routable ?? reached);
+// Both connections must answer the same server, whatever the two URLs say, or the checks below would describe two
+// databases: the invariants are read as the owner, the runtime role's rights as app_user.
+const elsewhere = sameServer(ownerIdentity, appIdentity);
+check("both connections reached the same copy", elsewhere === null, elsewhere ?? appIdentity);
 
 // Step 9: the release's migrations, as the Production gate applies them, through the same validated URL.
 const migrations = () => readOnly(owner.url, `SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`);
@@ -130,34 +129,23 @@ const historyWritable = readOnly(app.url, `SELECT (EXISTS (SELECT 1 FROM unnest(
   WHERE has_table_privilege(current_user, 'public._prisma_migrations', p)))::text`);
 check("migration history read-only for the runtime role", historyWritable === "false", `writable=${historyWritable}`);
 
-// The guard triggers by name, with the function each must run and its enabled state: "some triggers exist" would pass
-// with a guard dropped or merely disabled (Codex F4). 'D' is disabled; O, A and R all fire.
-const EXPECTED_TRIGGERS = {
-  audit_append_only: "luxia_audit_append_only",
-  audit_append_only_truncate: "luxia_audit_append_only",
-  evidence_append_only: "luxia_audit_append_only",
-  evidence_append_only_truncate: "luxia_audit_append_only",
-  invitation_guard: "luxia_invitation_guard",
-  organization_slug_immutable: "luxia_organization_slug_guard",
-  organization_status_guard: "luxia_organization_status_guard",
-  provider_connection_guard: "luxia_provider_connection_guard",
-  provider_secret_reference_guard: "luxia_provider_secret_reference_guard",
-  session_guard: "luxia_session_guard",
-  signup_code_guard: "luxia_signup_code_guard",
-};
-const triggers = Object.fromEntries(readOnly(owner.url, `SELECT coalesce(string_agg(t.tgname || '=' || p.proname || ':' || t.tgenabled::text, chr(10) ORDER BY t.tgname), '')
-  FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid WHERE NOT t.tgisinternal`).split("\n").filter(Boolean).map((line) => line.split("=")));
-const triggerFaults = Object.entries(EXPECTED_TRIGGERS).flatMap(([name, fn]) => {
-  const found = triggers[name];
-  if (!found) return [`${name} is missing`];
-  const [actual, enabled] = found.split(":");
-  if (actual !== fn) return [`${name} runs ${actual}, not ${fn}`];
-  return enabled === "D" ? [`${name} is disabled`] : [];
-});
-const disabled = Object.entries(triggers).filter(([, value]) => value.endsWith(":D")).map(([name]) => `${name} is disabled`);
-const faults = [...new Set([...triggerFaults, ...disabled])];
-check("the guard triggers are present, on their own functions, and enabled", faults.length === 0,
-  faults.join("; ") || `${Object.keys(EXPECTED_TRIGGERS).length} expected, ${Object.keys(triggers).length} present, none disabled`);
+// Each guard trigger with the table it is attached to, the function it runs, its timing, its level and the operations
+// it covers, and the state the catalog reports. The name and the function alone proved nothing: an enabled trigger of
+// the same name on another table satisfied the check while the protected table had no guard, and a guard left
+// replica-only does not fire for anything an application does (Codex F1 and F3, review of #195). The contract and the
+// verdict are in g4-post-restore-checks.mjs, where tests drive them to each failing answer.
+const triggerLines = readOnly(owner.url, `SELECT coalesce(string_agg(line, chr(10) ORDER BY line), '') FROM (
+  SELECT t.tgname || '|' || c.relname || ' ' || p.proname
+    || CASE WHEN (t.tgtype & 2) <> 0 THEN ' BEFORE' ELSE ' AFTER' END
+    || CASE WHEN (t.tgtype & 1) <> 0 THEN ' ROW ' ELSE ' STATEMENT ' END
+    || array_to_string(ARRAY(SELECT e FROM (VALUES (4, 'INSERT'), (8, 'DELETE'), (16, 'UPDATE'), (32, 'TRUNCATE')) v(b, e)
+         WHERE (t.tgtype & v.b) <> 0 ORDER BY e), ',')
+    || '|' || t.tgenabled::text AS line
+  FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_proc p ON p.oid = t.tgfoid
+  WHERE NOT t.tgisinternal AND c.relnamespace = 'public'::regnamespace) lines`).split("\n").filter(Boolean);
+const faults = triggerFaults(triggerLines);
+check("the guard triggers are on their own tables and operations, and fire for ordinary writes", faults.length === 0,
+  faults.join("; ") || `${Object.keys(EXPECTED_TRIGGERS).length} expected, ${triggerLines.length} present, none disabled or replica-only`);
 
 // The daily job's own entry points, on real restored data: R3's dry run deletes nothing and the status only counts,
 // but each records its own run in the copy's RetentionRun table (owner-only, counts only), so neither can sit in a
@@ -186,6 +174,8 @@ const report = {
   tables: Object.keys(rows).length,
   checks,
   wroteToTheCopy: ["RetentionRun: one row for the R3 dry run, one for the status call"],
+  limits: ["The server address is checked against the ranges no database beyond this network can have; a PostgreSQL "
+    + "server on another machine inside the same private network would not be distinguished from a local copy."],
   passed: checks.every((entry) => entry.ok),
 };
 const path = arg("report") ?? "g4-post-restore-report.json";

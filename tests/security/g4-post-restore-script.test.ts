@@ -12,11 +12,14 @@ import { afterAll, describe, expect, it } from "vitest";
 const dir = mkdtempSync(join(tmpdir(), "g4-post-"));
 const calls = join(dir, "calls.log");
 const env = join(dir, "env.log");
-// A psql that records every call and the libpq variables it was given, and refuses nothing: a refusal must come from
-// the script, never from the database.
+// A psql that records every call and the whole environment it was given, and refuses nothing: a refusal must come from
+// the script, never from the database. `env` is named by absolute path, because these runs put only this directory on
+// PATH: a bare `env | grep` could not be found, its failure was swallowed by `|| true`, and the empty log then "proved"
+// that no libpq variable had been passed (Codex F4, review of #195). The probe variable makes the recorder's own
+// silence impossible to mistake for a clean environment.
 writeFileSync(join(dir, "psql"), `#!/bin/sh
 echo "$*" >> "${calls.replace(/\\/g, "/")}"
-env | grep '^PG' >> "${env.replace(/\\/g, "/")}" || true
+/usr/bin/env >> "${env.replace(/\\/g, "/")}" 2>/dev/null || true
 echo stub
 `);
 chmodSync(join(dir, "psql"), 0o755);
@@ -32,13 +35,17 @@ const LOCAL_APP = "postgresql://app_user:p@127.0.0.1:15560/luxia_restore_rc";
 const OK_ARGS = ["--release", "rc-private-beta-1", "--backup-age-minutes", "42", "--started", new Date().toISOString()];
 const source = readFileSync("scripts/ops/g4-post-restore.mjs", "utf8");
 
+/** A variable the stand-in must report back, so an empty recording is read as a broken recorder, not as a clean run. */
+const PROBE = "LUXIA_G4_STUB_PROBE";
+
 function run(args: string[], overrides: Record<string, string | undefined> = {}) {
   writeFileSync(calls, "");
   writeFileSync(env, "");
   const result = spawnSync(process.execPath, ["scripts/ops/g4-post-restore.mjs", ...args], { encoding: "utf8",
-    env: { ...process.env, LUXIA_RESTORE_TARGET_URL: LOCAL, LUXIA_RESTORE_APP_URL: LOCAL_APP, PATH: dir, ...overrides } });
+    env: { ...process.env, LUXIA_RESTORE_TARGET_URL: LOCAL, LUXIA_RESTORE_APP_URL: LOCAL_APP, PATH: dir, [PROBE]: "recorded", ...overrides } });
+  const recorded = readFileSync(env, "utf8").replace(/\r/g, "").split("\n").filter(Boolean);
   return { code: result.status, out: `${result.stdout}${result.stderr}`.replace(/\r/g, ""),
-    calls: readFileSync(calls, "utf8"), pgEnv: readFileSync(env, "utf8") };
+    calls: readFileSync(calls, "utf8"), recorded, pgEnv: recorded.filter((entry) => /^PG/i.test(entry)).join("\n") };
 }
 
 describe("G4 post-restore script: it can reach nothing but a disposable local copy", () => {
@@ -93,12 +100,14 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
   });
 
   it.runIf(stubReachable)("clears every inherited libpq variable, so none can decide the target", () => {
-    const { pgEnv, calls: made } = run(OK_ARGS, { PGHOSTADDR: "10.0.0.5", PGHOST: "db.example.com", PGPORT: "5432",
-      PGUSER: "postgres", PGPASSWORD: "x", PGDATABASE: "neondb", PGSERVICE: "production", PGOPTIONS: "-c x=y" });
+    const { pgEnv, recorded, calls: made } = run(OK_ARGS, { PGHOSTADDR: "10.0.0.5", PGHOST: "db.example.com", PGPORT: "5432",
+      PGUSER: "postgres", PGPASSWORD: "x", PGDATABASE: "neondb", PGSERVICE: "production", PGOPTIONS: "-c x=y", pghostaddr: "10.0.0.6" });
     expect(made).not.toBe("");          // it did call psql
-    expect(pgEnv.trim()).toBe("");       // and psql saw no PG* variable at all
+    // The recorder works: a variable that is not libpq's came through. Without this, an empty log would prove nothing.
+    expect(recorded).toContain(`${PROBE}=recorded`);
+    expect(pgEnv).toBe("");              // and psql saw no PG variable at all, in any case
     // Both tools are given the same cleaned environment, and the same validated URL.
-    expect(source).toContain("const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^PG/.test(key)));");
+    expect(source).toContain("const CLEAN_ENV = cleanEnvironment(process.env);");
     expect(source).toContain("{ encoding: \"utf8\", env: CLEAN_ENV }");
     expect(source).toContain("env: { ...CLEAN_ENV, DATABASE_URL: owner.url }");
   });
@@ -159,11 +168,18 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     // And the expected owner-only tables must still be owner-only, so none can drift out of the candidate set.
     expect(source).toContain('const EXPECTED_OWNER_ONLY = ["OrganizationErasure", "RateLimitBucket", "RateLimitConfig", "RetentionRun", "SignupCode"];');
     expect(source).toContain("the owner-only tables are all still owner-only");
-    // Triggers: by name, with the function each runs and its enabled state, not a count.
+    // Triggers: the catalog is read with the table, the function, the timing, the level, the operations and the state,
+    // and the verdict comes from the checks module, whose own tests drive it to each failing answer.
     expect(source).not.toMatch(/Number\(triggers\) > 0/);
-    const expected = /const EXPECTED_TRIGGERS = \{([\s\S]*?)\};/.exec(source)?.[1] ?? "";
-    expect([...expected.matchAll(/^\s+(\w+): "(luxia_\w+)",$/gm)].length).toBeGreaterThanOrEqual(11);
-    expect(source).toContain("is disabled");
-    expect(source).toContain("t.tgname || '=' || p.proname || ':' || t.tgenabled");
+    expect(source).toContain("JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_proc p ON p.oid = t.tgfoid");
+    expect(source).toContain("t.tgname || '|' || c.relname || ' ' || p.proname");
+    expect(source).toContain("(4, 'INSERT'), (8, 'DELETE'), (16, 'UPDATE'), (32, 'TRUNCATE')");
+    expect(source).toContain("t.tgenabled::text");
+    expect(source).toContain("const faults = triggerFaults(triggerLines);");
+    // The server's address is judged, not only recorded, and both connections must answer the same copy.
+    expect(source).toContain("const routable = publicAddress(ownerIdentity);");
+    expect(source).toContain("routable === null");
+    expect(source).toContain("const elsewhere = sameServer(ownerIdentity, appIdentity);");
+    expect(source).toContain("const differentTargets = oneTarget(owner, app);");
   });
 });
