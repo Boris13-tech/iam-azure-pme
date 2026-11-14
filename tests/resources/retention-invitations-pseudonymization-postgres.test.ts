@@ -340,10 +340,14 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
       await owner.canonicalAdminAuditEvent.create({ data: { ...scope(org), actorSubjectId: org.admin, targetSubjectId: subject.id, operation: "SUBJECT.UPDATE",
         changeId: `r6:${randomUUID()}`, result: "SUCCESS", metadata: { nameChanged: false, lifecycleFrom: "ACTIVE", lifecycleTo: "RETIRED" } } });
     }
-    if (opts.retiredDaysAgo != null)
-      await owner.subject.update({ where: { id: subject.id }, data: { lifecycleState: "RETIRED", lifecycleChangedAt: new Date(Date.now() - opts.retiredDaysAgo * DAY) } });
-    if (opts.activeSinceDays != null)
-      await owner.subject.update({ where: { id: subject.id }, data: { lifecycleChangedAt: new Date(Date.now() - opts.activeSinceDays * DAY) } });
+    // The lifecycle date is the database's since #148: aged here as a superuser would, triggers off for that statement.
+    const age = (days: number, state: "RETIRED" | null) => owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+      await tx.$executeRawUnsafe(`UPDATE "Subject" SET ${state ? `"lifecycleState" = '${state}', "lifecycleVersion" = "lifecycleVersion" + 1, ` : ""}
+        "lifecycleChangedAt" = (now() AT TIME ZONE 'UTC') - $2::float8 * interval '1 day' WHERE "id" = $1`, subject.id, days);
+    });
+    if (opts.retiredDaysAgo != null) await age(opts.retiredDaysAgo, "RETIRED");
+    if (opts.activeSinceDays != null) await age(opts.activeSinceDays, null);
     return { subjectId: subject.id, localAccountId: local.id, localIdentityId: identity.id, entraAccountId: entra.id };
   }
   /** The rows of one person in the tables R6 could reach. */
