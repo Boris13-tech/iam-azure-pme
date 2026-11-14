@@ -30,7 +30,12 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
   const retired = async (daysAgo: number, pseudonymized = false) => {
     const subject = await owner.subject.create({ data: { ...scope, type: "HUMAN", name: `Leaver ${randomUUID().slice(0, 6)}`, lifecycleState: "RETIRED" } });
     const name = pseudonymized ? `Ancien membre ${sha(subject.id).slice(0, 8)}` : subject.name;
-    await owner.$executeRawUnsafe(`UPDATE "Subject" SET "lifecycleChangedAt" = $1, "name" = $2 WHERE "id" = $3`, new Date(Date.now() - daysAgo * DAY), name, subject.id);
+    // The lifecycle date is the database's since #148: aged here as a superuser would, triggers off for this statement.
+    await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+      await tx.$executeRawUnsafe(`UPDATE "Subject" SET "lifecycleChangedAt" = (now() AT TIME ZONE 'UTC') - $2::float8 * interval '1 day', "name" = $3 WHERE "id" = $1`,
+        subject.id, daysAgo, name);
+    });
   };
 
   beforeAll(async () => {

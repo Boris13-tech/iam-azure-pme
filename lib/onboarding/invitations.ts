@@ -141,7 +141,8 @@ export async function completeAcceptance(input: { token: unknown; principalName:
       const subject = await tx.subject.findFirst({ where: { ...scope, id: row.subjectId } });
       if (!subject || subject.lifecycleState !== "PROVISIONING") throw new InvitationError("INVITATION_INVALID", 403);
       assertSubjectLifecycleTransition("PROVISIONING", "ACTIVE");
-      await tx.subject.update({ where: { id: subject.id }, data: { lifecycleState: "ACTIVE", lifecycleVersion: { increment: 1 }, lifecycleChangedAt: now } });
+      // PROVISIONING to ACTIVE; the database stamps the lifecycle date and version (#148).
+      await tx.subject.update({ where: { id: subject.id }, data: { lifecycleState: "ACTIVE" } });
       const connectionId = await localConnection(tx, scope);
       if (!connectionId) throw new InvitationError("INVITATION_INVALID", 403);
       await createPasskeyIdentity(tx, scope, { subjectId: subject.id, connectionId, principalName, passkey, rpId: origin.rpId, origin: origin.origin, actorSubjectId: subject.id });

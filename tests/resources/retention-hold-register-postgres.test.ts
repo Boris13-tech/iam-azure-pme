@@ -65,11 +65,17 @@ async function invitation(org: Org, created: number, finished: number) {
   return row.id;
 }
 /** A person retired `days` ago, with a local sign-in name: what R6 pseudonymizes. */
+// The lifecycle date is the database's since #148: a fixture that needs a person retired in the past sets it as a
+// superuser would, with the triggers off for that statement only (the same way the invitation fixtures age a row).
 async function retired(org: Org, days: number) {
   const subject = await owner.subject.create({ data: { ...scope(org), type: "HUMAN", name: `Leaver ${randomUUID().slice(0, 6)}`, lifecycleState: "ACTIVE" } });
   const account = await owner.identityAccount.create({ data: { ...scope(org), subjectId: subject.id, providerConnectionId: org.local, externalObjectId: randomUUID() } });
   await owner.localIdentity.create({ data: { ...scope(org), identityAccountId: account.id, principalName: `leaver-${randomUUID().slice(0, 8)}` } });
-  await owner.subject.update({ where: { id: subject.id }, data: { lifecycleState: "RETIRED", lifecycleChangedAt: new Date(Date.now() - days * DAY) } });
+  await owner.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+    await tx.$executeRawUnsafe(`UPDATE "Subject" SET "lifecycleState" = 'RETIRED', "lifecycleVersion" = "lifecycleVersion" + 1,
+      "lifecycleChangedAt" = (now() AT TIME ZONE 'UTC') - $2::float8 * interval '1 day' WHERE "id" = $1`, subject.id, days);
+  });
   return subject.id;
 }
 const invitationsLeft = async (ids: string[]) => (await owner.invitation.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((r) => r.id).sort();

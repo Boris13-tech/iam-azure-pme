@@ -11,7 +11,7 @@ const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "lu
   "luxia_provider_secret_reference_guard", "luxia_session_redact_network_hashes", "luxia_retention_purge_transactions",
   "luxia_erasure_allowed", "luxia_organization_erase", "luxia_retention_purge_invitations", "luxia_retention_pseudonymize_retired",
   "luxia_retention_status", "luxia_retention_hold_event_guard", "luxia_retention_hold_guard", "luxia_retention_held", "luxia_retention_hold_place",
-  "luxia_retention_hold_renew", "luxia_retention_hold_release"];
+  "luxia_retention_hold_renew", "luxia_retention_hold_release", "luxia_subject_lifecycle_guard"];
 // The only functions app_user may execute. Customer Self-Onboarding v1 adds five narrow SECURITY DEFINER
 // entry points that take hashes only; trigger guards stay owner-only. First Admin / Break-glass v1 adds
 // the canonical session resolver and the organization status lock helper; its B2 recovery-code guard is a
@@ -25,7 +25,8 @@ const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "lu
 // runtime entry points (the daily retention job), SECURITY DEFINER with fixed predicates and bounded batches. The
 // retention status (D8.1) is a runtime entry point too: SECURITY DEFINER, counts and ages only. The hold register
 // (D8.2) adds owner-only functions: two guard triggers (the register, its history), the hold check and the three operator
-// functions (place, renew, release), none definer, none executable by app_user.
+// functions (place, renew, release), none definer, none executable by app_user. The subject lifecycle guard (#148) is
+// a trigger: owner-only, not definer, never executable by app_user.
 const runtime = ["luxia_sod_scope_contains", "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy",
   "luxia_organization_lock_active", "luxia_session_resolve", "luxia_provider_connection_lock_active", "luxia_retention_purge_transactions",
   "luxia_retention_purge_invitations", "luxia_retention_pseudonymize_retired", "luxia_retention_status"];
@@ -37,7 +38,7 @@ describe("LUXIA SQL function privilege architecture", () => {
       "20261013090000_audit_append_only", "20261014090000_provider_connection_lifecycle", "20261014110000_provider_secret_reference",
       "20261023120000_session_network_hash_redaction", "20261023130000_retention_purge_transactions",
       "20261023140000_organization_erasure", "20261025120000_retention_invitations_pseudonymization", "20261112100000_retention_status",
-      "20261112130000_retention_hold_register"];
+      "20261112130000_retention_hold_register", "20261114090000_subject_lifecycle_guard"];
     const names: string[] = [];
     for (const file of files) {
       const sql = readFileSync(`prisma/migrations/${file}/migration.sql`, "utf8");
@@ -88,8 +89,8 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LU
         'organization_status_guard','organization_status_effects','session_guard','recovery_code_guard',
         'audit_append_only','audit_append_only_truncate','evidence_append_only','evidence_append_only_truncate',
         'provider_connection_guard','provider_connection_effects','session_guard_provider_connection',
-        'provider_secret_reference_guard') ORDER BY t.tgname`;
-    expect(triggers).toHaveLength(19);
+        'provider_secret_reference_guard','subject_lifecycle_guard') ORDER BY t.tgname`;
+    expect(triggers).toHaveLength(20);
     expect(triggers.filter(row => row.proname === 'luxia_audit_append_only')).toHaveLength(4);
     expect(triggers.filter(row => row.proname === 'luxia_review_immutable_guard')).toHaveLength(2);
     expect(triggers.filter(row => row.proname === 'luxia_sod_assignment_guard')).toHaveLength(1);
@@ -99,7 +100,8 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LU
       ["session_guard", "luxia_session_guard"], ["recovery_code_guard", "luxia_recovery_code_guard"],
       ["provider_connection_guard", "luxia_provider_connection_guard"], ["provider_connection_effects", "luxia_provider_connection_effects"],
       ["session_guard_provider_connection", "luxia_session_connection_guard"],
-      ["provider_secret_reference_guard", "luxia_provider_secret_reference_guard"]])
+      ["provider_secret_reference_guard", "luxia_provider_secret_reference_guard"],
+      ["subject_lifecycle_guard", "luxia_subject_lifecycle_guard"]])
       expect(triggers.find(row => row.tgname === trigger)?.proname, trigger).toBe(fn);
     // New runtime entry points are SECURITY DEFINER with a pinned search_path; so is the one trigger-only
     // definer listed above; nothing else is definer.
