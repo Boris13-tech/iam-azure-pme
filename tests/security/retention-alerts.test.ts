@@ -116,6 +116,34 @@ describe("D8.3: retention alerts", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // Codex, review of #193: building a signal reads the clock and the random source. A failure there used to escape and
+  // turn a finished run, whose data work was already committed, into a 500 - even with monitoring disabled.
+  it("a signal that cannot even be built never fails the run, with or without a DSN", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = { getRandomValues: () => { throw new Error("no entropy"); }, randomUUID: globalThis.crypto.randomUUID.bind(globalThis.crypto), subtle: globalThis.crypto.subtle };
+    vi.stubGlobal("crypto", broken);
+    for (const dsn of [DSN, undefined]) {
+      if (dsn) process.env.LUXIA_ERROR_DSN = dsn; else delete process.env.LUXIA_ERROR_DSN;
+      database({ ...STATUS, R4: { eligible: 1, overdue: 1, oldestHours: 99, held: 0 }, holds: { active: 1, overdueReview: 1 } });
+      const finished = await call();
+      expect(finished.status, `finished, dsn=${!!dsn}`).toBe(200);
+      expect((await finished.json()).overdue).toBe(true);
+      expect(await reportRetentionOutcome({ overdue: true, holdReviewOverdue: true })).toEqual({ checkIn: false, backlog: false, holdReview: false });
+      queryRaw.mockRejectedValue(new Error("RETENTION_ALREADY_RUNNING"));
+      const failed = await call();
+      expect(failed.status, `failed, dsn=${!!dsn}`).toBe(500);
+      expect(await failed.json()).toEqual({ error: "RETENTION_FAILED" });
+      expect(await reportRetentionFailure("RETENTION_ALREADY_RUNNING")).toEqual({ error: false, checkIn: false });
+      database();
+      for (const drill of RETENTION_ALERT_DRILLS) {
+        const response = await call(`?drill=${drill}`);
+        expect(response.status, `drill ${drill}, dsn=${!!dsn}`).toBe(200);
+        expect(await response.json()).toEqual({ drill, sent: false });
+      }
+    }
+    log.mockRestore();
+  });
+
   it("drills (G7): each alert can be tested once without running a purge, only with the cron secret", async () => {
     database();
     expect(RETENTION_ALERT_DRILLS).toEqual(["failed-run", "backlog", "silence"]);

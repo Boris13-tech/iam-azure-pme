@@ -87,11 +87,16 @@ async function send(header: Record<string, string>, type: "event" | "check_in", 
   }
 }
 
-/** Sends one error event. Never throws, never waits longer than the timeout, no-op without a DSN. */
+/**
+ * Sends one error event. Never throws, never waits longer than the timeout, no-op without a DSN: a caller's own work is
+ * already done when it reports, so nothing here may turn it into a failure (Codex, review of #193).
+ */
 export async function reportError(error: unknown, component: ErrorComponent, routePath?: string): Promise<boolean> {
-  let event: ReturnType<typeof buildEvent>;
-  try { event = buildEvent(error, component, routePath); } catch { return false; }
-  return send({ event_id: event.event_id }, "event", event);
+  try {
+    if (!envelopeTarget()) return false;
+    const event = buildEvent(error, component, routePath);
+    return await send({ event_id: event.event_id }, "event", event);
+  } catch { return false; }
 }
 
 /**
@@ -127,6 +132,11 @@ export function buildCheckIn(monitor: CheckInMonitor, status: "ok" | "error") {
 
 /** Sends one check-in. Never throws, never waits longer than the timeout, no-op without a DSN. */
 export async function reportCheckIn(monitor: CheckInMonitor, status: "ok" | "error"): Promise<boolean> {
-  if (!Object.hasOwn(CHECK_IN_MONITORS, monitor) || (status !== "ok" && status !== "error")) return false;
-  return send({}, "check_in", buildCheckIn(monitor, status));
+  try {
+    if (!Object.hasOwn(CHECK_IN_MONITORS, monitor) || (status !== "ok" && status !== "error")) return false;
+    // Building the check-in is inside the boundary too: it reads the clock and the random source, and a failure there
+    // must not reach the caller (Codex, review of #193).
+    if (!envelopeTarget()) return false;
+    return await send({}, "check_in", buildCheckIn(monitor, status));
+  } catch { return false; }
 }

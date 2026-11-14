@@ -6,20 +6,24 @@ import type { RetentionReport } from "@/lib/retention/purge";
 // plus 3 days. A hold past its review date raises its own alert (section 4.3). Without LUXIA_ERROR_DSN nothing is sent;
 // the job's own log lines stay either way. Each call is bounded by the reporter's timeout and never throws.
 const ROUTE = "/api/internal/retention";
+/** The job's work is done when it reports: no alert may turn a finished run into a failure (Codex, review of #193). */
+const quiet = async <T>(work: () => Promise<T>, whenItFails: T): Promise<T> => { try { return await work(); } catch { return whenItFails; } };
 
 /** After a run that finished: the check-in the watcher expects every day, then what the run found. */
 export async function reportRetentionOutcome(report: Pick<RetentionReport, "overdue" | "holdReviewOverdue">) {
-  const checkIn = await reportCheckIn("retention-daily", "ok");
-  const backlog = report.overdue ? await reportError(new Error("RETENTION_BACKLOG"), "retention", ROUTE) : false;
-  const holdReview = report.holdReviewOverdue ? await reportError(new Error("RETENTION_HOLD_REVIEW_OVERDUE"), "retention", ROUTE) : false;
-  return { checkIn, backlog, holdReview };
+  return quiet(async () => ({
+    checkIn: await reportCheckIn("retention-daily", "ok"),
+    backlog: report.overdue ? await reportError(new Error("RETENTION_BACKLOG"), "retention", ROUTE) : false,
+    holdReview: report.holdReviewOverdue ? await reportError(new Error("RETENTION_HOLD_REVIEW_OVERDUE"), "retention", ROUTE) : false,
+  }), { checkIn: false, backlog: false, holdReview: false });
 }
 
 /** After a run that failed: the error with its code when it is a known one, and a failed check-in. */
 export async function reportRetentionFailure(code: string | undefined) {
-  const error = await reportError(new Error(code && KNOWN_ERROR_CODES.has(code) ? code : "RETENTION_FAILED"), "retention", ROUTE);
-  const checkIn = await reportCheckIn("retention-daily", "error");
-  return { error, checkIn };
+  return quiet(async () => ({
+    error: await reportError(new Error(code && KNOWN_ERROR_CODES.has(code) ? code : "RETENTION_FAILED"), "retention", ROUTE),
+    checkIn: await reportCheckIn("retention-daily", "error"),
+  }), { error: false, checkIn: false });
 }
 
 export const RETENTION_ALERT_DRILLS = ["failed-run", "backlog", "silence"] as const;
@@ -32,7 +36,10 @@ export const isRetentionAlertDrill = (value: string): value is RetentionAlertDri
  * expects one every minute, so the watcher's missed-check-in alert fires within minutes; delete that monitor afterwards.
  */
 export async function retentionAlertDrill(kind: RetentionAlertDrill) {
-  if (kind === "failed-run") return { drill: kind, sent: await reportError(new Error("RETENTION_ALERT_DRILL_FAILED_RUN"), "retention", ROUTE) };
-  if (kind === "backlog") return { drill: kind, sent: await reportError(new Error("RETENTION_ALERT_DRILL_BACKLOG"), "retention", ROUTE) };
-  return { drill: kind, sent: await reportCheckIn("retention-daily-drill", "ok") };
+  const sent = await quiet(async () => {
+    if (kind === "failed-run") return reportError(new Error("RETENTION_ALERT_DRILL_FAILED_RUN"), "retention", ROUTE);
+    if (kind === "backlog") return reportError(new Error("RETENTION_ALERT_DRILL_BACKLOG"), "retention", ROUTE);
+    return reportCheckIn("retention-daily-drill", "ok");
+  }, false);
+  return { drill: kind, sent };
 }
