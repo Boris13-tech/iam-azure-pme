@@ -15,20 +15,30 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: production-identity-bootstrap
-  cancel-in-progress: false
+# No concurrency group (a group keeps one pending run that a later dispatch or re-run replaces): like the activation and
+# the deploy, this job refuses to act while another Production operation is open (Codex, reviews of #191).
 
 jobs:
   canonical-identity-bootstrap:
     runs-on: ubuntu-latest
     environment: Production
+    # actions: read for the check that no other Production operation is open.
+    permissions:
+      contents: read
+      actions: read
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
     steps:
       - name: Checkout requested revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Still no other Production operation, checked again inside this job (also on a re-run of this job alone)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: bash scripts/ops/verify-no-other-operation.sh
 
       - name: Validate connection posture and requested mode
         shell: bash

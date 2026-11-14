@@ -52,6 +52,11 @@ REVOKE DELETE, TRUNCATE ON "ProviderSecretReference" FROM app_user;
 -- Resource scopes, SoD and access reviews: the migrations grant less than the broad grant (Codex, review of #190).
 REVOKE UPDATE, DELETE, TRUNCATE ON "ResourceScope", "ResourceScopeMember" FROM app_user;
 REVOKE DELETE, TRUNCATE ON "SoDPolicy", "SoDRule", "AccessReviewCampaign", "AccessReviewItem" FROM app_user;
+-- Prisma's migration history decides whether code may be deployed: the runtime role reads it, never writes it
+-- (Codex, review of #191). The table exists once Prisma has run.
+DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON "_prisma_migrations" FROM app_user;
+END IF; END $$;
 -- R4/R6: the daily retention job (same grants as the migration gives app_user in Production).
 GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO app_user;
 GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;
