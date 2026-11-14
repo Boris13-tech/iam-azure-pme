@@ -99,6 +99,23 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     expect(asFile.out).toMatch(/REFUSED: LUXIA_RESTORE_TARGET_URL is not (a URL|a postgres URL)/);
   });
 
+  // Antigravity, fourth review of #195: the stop before writing was shown live once, then pinned only by source order.
+  // The stand-in answers every query with "stub", so the server reports no address and the target is not established:
+  // the run must stop there, through the real process, having sent nothing but read-only queries.
+  it.runIf(stubReachable)("a target that is not established stops the run before any migration or write", () => {
+    const { code, out, calls: made } = run(OK_ARGS);
+    expect(code).toBe(1);
+    expect(out).toContain("REFUSED: the target is not established");
+    expect(out).toContain("nothing was migrated or written");
+    expect(out).not.toContain("migrate deploy");
+    // One call per "-X" (the first argument the script gives psql); a call's SQL spans several lines.
+    const statements = made.replace(/\r/g, "").split(/^(?=-X )/m).filter((call) => call.trim());
+    expect(statements.length).toBeGreaterThan(0);                       // it did reach the stand-in
+    for (const statement of statements) expect(statement, statement).toContain("BEGIN READ ONLY");
+    expect(made).not.toContain("luxia_retention_purge_transactions");
+    expect(made).not.toContain("luxia_retention_status");
+  });
+
   it.runIf(stubReachable)("clears every inherited libpq variable, so none can decide the target", () => {
     const { pgEnv, recorded, calls: made } = run(OK_ARGS, { PGHOSTADDR: "10.0.0.5", PGHOST: "db.example.com", PGPORT: "5432",
       PGUSER: "postgres", PGPASSWORD: "x", PGDATABASE: "neondb", PGSERVICE: "production", PGOPTIONS: "-c x=y", pghostaddr: "10.0.0.6" });
