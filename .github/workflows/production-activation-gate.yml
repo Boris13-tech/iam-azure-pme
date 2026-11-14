@@ -482,14 +482,17 @@ jobs:
                   WHERE has_table_privilege(current_user, 'public._prisma_migrations', p)) AS writable
               `;
               if (history[0]?.writable !== false) throw new Error("Runtime role can write the migration history");
-              // D8.4 (issue #150): the privilege to run a destructive retention job is not on the role that serves
-              // web requests. Read from the catalog, so any path that granted it is caught.
-              const retention = await db.$queryRaw<Array<{ granted: string }>>`
-                SELECT coalesce(string_agg(p.proname, ', ' ORDER BY p.proname), '') AS granted FROM pg_proc p
+              // D8.4 (issue #150): the privilege to run a destructive retention job is not reachable from the role
+              // that serves web requests. Every role app_user can become counts, itself included: a membership
+              // permits SET ROLE even when it is not inherited, so asking only about app_user's own effective
+              // privilege would miss that path (Codex F1, review of #196).
+              const retention = await db.$queryRaw<Array<{ reachable: string }>>`
+                SELECT coalesce(string_agg(DISTINCT p.proname || ' as ' || r.rolname, ', '), '') AS reachable
+                FROM pg_proc p CROSS JOIN pg_roles r
                 WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'luxia_retention%'
-                  AND has_function_privilege('app_user', p.oid, 'EXECUTE')
+                  AND pg_has_role('app_user', r.oid, 'MEMBER') AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
               `;
-              if (retention[0]?.granted !== "") throw new Error(`Runtime role can execute retention functions: ${retention[0]?.granted}`);
+              if (retention[0]?.reachable !== "") throw new Error(`Runtime role can reach retention functions: ${retention[0]?.reachable}`);
 
               console.log("Runtime role PASS: app_user / NOSUPERUSER / NOBYPASSRLS / resolve_session EXECUTE");
               console.log(`RLS PASS: ${requiredRlsTables.length} tenant-scoped tables enabled and forced`);

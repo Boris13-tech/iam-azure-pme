@@ -77,6 +77,43 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
     expect(await outcome(retention.$queryRawUnsafe(`SELECT luxia_retention_purge_transactions(10, true)`))).toBe("OK");
   });
 
+  // Codex F1, review of #196: asking only about app_user's own effective privilege misses a role it can become.
+  // A membership permits SET ROLE even when it is not inherited, so the gate's posture query asks about every
+  // reachable role. Run here exactly as the gate runs it, against a database where that path really exists.
+  const POSTURE = `
+    SELECT coalesce(string_agg(DISTINCT p.proname || ' as ' || r.rolname, ', '), '') AS reachable
+    FROM pg_proc p CROSS JOIN pg_roles r
+    WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'luxia_retention%'
+      AND pg_has_role('app_user', r.oid, 'MEMBER') AND has_function_privilege(r.oid, p.oid, 'EXECUTE')`;
+
+  it("the gate's posture query sees a retention function app_user can only reach by SET ROLE", async () => {
+    const reachable = async () => (await owner.$queryRawUnsafe<Array<{ reachable: string }>>(POSTURE))[0].reachable;
+    expect(await reachable()).toBe("");
+    // The narrower question, the one the first version of the check asked, stays empty throughout: that is the hole.
+    const asAppUserOnly = async () => (await owner.$queryRaw<Array<{ granted: string }>>`
+      SELECT coalesce(string_agg(p.proname, ', ' ORDER BY p.proname), '') AS granted FROM pg_proc p
+      WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'luxia_retention%'
+        AND has_function_privilege('app_user', p.oid, 'EXECUTE')`)[0].granted;
+    // The membership is made non-inherited, which is where the two questions part: has_function_privilege follows
+    // inheritance, so it answers "no" while SET ROLE still carries app_user into the role and its privileges.
+    await owner.$executeRawUnsafe(`ALTER ROLE app_user NOINHERIT`);
+    await owner.$executeRawUnsafe(`GRANT luxia_retention TO app_user`);
+    try {
+      const seen = await reachable();
+      expect(seen).toContain("luxia_retention_purge_transactions as luxia_retention");
+      expect(seen).toContain("luxia_retention_status as luxia_retention");
+      expect(await asAppUserOnly()).toBe("");
+      // And the path is real, not only a catalog entry: app_user reaches the function through SET ROLE.
+      expect(await outcome(rawPrisma.$queryRawUnsafe(`SET ROLE luxia_retention`))).toBe("OK");
+      expect(await outcome(rawPrisma.$queryRawUnsafe(`SELECT luxia_retention_status()`))).toBe("OK");
+    } finally {
+      await rawPrisma.$executeRawUnsafe(`RESET ROLE`);
+      await owner.$executeRawUnsafe(`REVOKE luxia_retention FROM app_user`);
+      await owner.$executeRawUnsafe(`ALTER ROLE app_user INHERIT`);
+    }
+    expect(await reachable()).toBe("");
+  });
+
   it("the role cannot grant itself anything, nor reach another role's rights", async () => {
     for (const sql of [`GRANT SELECT ON "Subject" TO luxia_retention`, `ALTER ROLE luxia_retention BYPASSRLS`,
       `SET ROLE app_user`, `CREATE TABLE luxia_retention_probe (id int)`])

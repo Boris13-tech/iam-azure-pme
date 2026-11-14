@@ -13,11 +13,37 @@
 -- Lifting the dry run of R4 and R6 is a separate reviewed change, which this one and the lifecycle guard (#148) unblock.
 SET lock_timeout = '5s';
 
-DO $$ BEGIN
+DO $$
+DECLARE
+  v_problems text;
+BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention') THEN
     -- NOINHERIT: it never gains a privilege by being granted another role. No LOGIN: the password is the operator's,
-    -- set outside any migration, so no credential is ever written here.
+    -- set outside any migration, so no credential is ever written here. The operator also enables LOGIN, which a
+    -- password alone does not (Codex F3, review of #196).
     CREATE ROLE luxia_retention NOLOGIN NOINHERIT;
+  END IF;
+  -- A role of this name may already exist, from an earlier attempt or from someone else's hand, and the grants below
+  -- would then be added to whatever it already carries. It is validated either way, and the migration fails closed:
+  -- an attribute, a membership or an owned object would make it more than the narrow worker this relies on. NOINHERIT
+  -- does not help here, because a membership still permits SET ROLE (Codex F2, review of #196).
+  SELECT string_agg(problem, ', ' ORDER BY problem) INTO v_problems FROM (
+    SELECT 'superuser' AS problem FROM pg_roles WHERE rolname = 'luxia_retention' AND rolsuper
+    UNION ALL SELECT 'bypassrls' FROM pg_roles WHERE rolname = 'luxia_retention' AND rolbypassrls
+    UNION ALL SELECT 'createrole' FROM pg_roles WHERE rolname = 'luxia_retention' AND rolcreaterole
+    UNION ALL SELECT 'createdb' FROM pg_roles WHERE rolname = 'luxia_retention' AND rolcreatedb
+    UNION ALL SELECT 'replication' FROM pg_roles WHERE rolname = 'luxia_retention' AND rolreplication
+    UNION ALL SELECT 'member of ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+      WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention')
+    UNION ALL SELECT 'owns the relation ' || c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relowner = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention') AND left(n.nspname, 3) <> 'pg_' AND n.nspname <> 'information_schema'
+    UNION ALL SELECT 'owns the function ' || p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE p.proowner = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention') AND left(n.nspname, 3) <> 'pg_' AND n.nspname <> 'information_schema'
+    UNION ALL SELECT 'owns the schema ' || n.nspname FROM pg_namespace n
+      WHERE n.nspowner = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention') AND left(n.nspname, 3) <> 'pg_'
+  ) p;
+  IF v_problems IS NOT NULL THEN
+    RAISE EXCEPTION 'RETENTION_ROLE_UNSAFE' USING ERRCODE = '42501', DETAIL = v_problems;
   END IF;
 END $$;
 

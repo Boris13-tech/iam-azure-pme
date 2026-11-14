@@ -54,10 +54,22 @@ describe("D8.4: the retention job's own role", () => {
     expect(block).not.toMatch(/CREATE ROLE luxia_retention|ALTER ROLE luxia_retention/);
   });
 
-  it("the gate's posture check refuses a Production where app_user can execute a retention function", () => {
+  it("the gate's posture check covers every role app_user can become, not only its own privileges", () => {
     expect(gate).toContain("WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'luxia_retention%'");
-    expect(gate).toContain("has_function_privilege('app_user', p.oid, 'EXECUTE')");
-    expect(gate).toContain("Runtime role can execute retention functions:");
+    // A membership permits SET ROLE even without inheritance, so the check asks about every reachable role, app_user
+    // itself included (Codex F1, review of #196).
+    expect(gate).toContain("pg_has_role('app_user', r.oid, 'MEMBER') AND has_function_privilege(r.oid, p.oid, 'EXECUTE')");
+    expect(gate).toContain("Runtime role can reach retention functions:");
+    expect(gate).not.toContain("has_function_privilege('app_user', p.oid, 'EXECUTE')");
+  });
+
+  it("the migration fails closed on a role of that name that is more than the narrow worker", () => {
+    expect(migration).toContain("RAISE EXCEPTION 'RETENTION_ROLE_UNSAFE'");
+    for (const problem of ["'superuser'", "'bypassrls'", "'createrole'", "'createdb'", "'replication'",
+      "'member of ' || r.rolname", "'owns the relation '", "'owns the function '", "'owns the schema '"])
+      expect(migration, problem).toContain(problem);
+    // Validated whether it was just created or already there: the check sits after the conditional creation.
+    expect(migration.indexOf("RETENTION_ROLE_UNSAFE")).toBeGreaterThan(migration.indexOf("CREATE ROLE luxia_retention"));
   });
 
   it("CI mirrors it: the role has a test password, and app_user is granted no retention function", () => {

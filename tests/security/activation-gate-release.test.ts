@@ -104,6 +104,6 @@ describe("activation gate: the authorized release, not main's tip", () => {
     for (const fn of ["luxia_retention_purge_invitations(integer,boolean)", "luxia_retention_pseudonymize_retired(integer,boolean)", "luxia_retention_status()"])
       expect(text, fn).toContain(`DO $$ BEGIN IF to_regprocedure('public.${fn}') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention') THEN`);
     expect(text).toContain("Runtime role holds privileges on owner-only tables");
-    expect(text).toContain("Runtime role can execute retention functions:");
+    expect(text).toContain("Runtime role can reach retention functions:");
   });
 });
