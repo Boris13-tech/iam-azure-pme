@@ -118,7 +118,7 @@ describe("D8.3: retention alerts", () => {
 
   // Codex, review of #193 (N1): the route goes through the alerts' own boundary, which would mask a reporter that
   // started throwing again. This asserts the reporters' own contract, directly, under each construction fault.
-  it("the reporters themselves never throw when the clock or the random source fails, with or without a DSN", async () => {
+  it("the reporters themselves never throw when Date.now() or the random source fails, with or without a DSN", async () => {
     const report = async (dsn: string | undefined) => {
       if (dsn) process.env.LUXIA_ERROR_DSN = dsn; else delete process.env.LUXIA_ERROR_DSN;
       return {
@@ -135,8 +135,10 @@ describe("D8.3: retention alerts", () => {
     expect(await report(undefined)).toEqual({ error: false, checkInOk: false, checkInError: false });
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals(); vi.stubGlobal("fetch", fetchMock);
-    // A failing clock: only the error event stamps a timestamp, so it cannot be sent; a check-in does not read the
-    // clock and keeps working, which is what the silence alert needs. Neither throws, which is the contract.
+    // A failing Date.now(): only the error event stamps its timestamp from it, so it cannot be sent, while a check-in
+    // does not read Date.now() and still goes out, which is what the silence alert needs. Both envelopes do stamp a
+    // sent_at from new Date(), so a broken Date constructor would stop a check-in too (Codex, review of #193).
+    // Neither throws, which is the contract.
     vi.spyOn(Date, "now").mockImplementation(() => { throw new Error("no clock"); });
     expect(await report(DSN)).toEqual({ error: false, checkInOk: true, checkInError: true });
     fetchMock.mockClear();
