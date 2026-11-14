@@ -9,6 +9,7 @@ import { readdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+import { rollbacksAfter } from "../helpers/migration-rollbacks";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const NEW = "20261112130000_retention_hold_register";
@@ -359,10 +360,19 @@ describe.runIf(enabled)("D8.2: hold register (PostgreSQL)", () => {
     try {
       deploy(url);
       expect(state()).toEqual(["t", "2"]);
-      // The status rollback is refused while the hold register is applied after it.
+      // The status rollback is refused while a newer migration, the hold register among them, is applied.
       const refused = psql(url, ["-1", "-f", STATUS_ROLLBACK]);
       expect(refused.status).not.toBe(0);
       expect(refused.stderr).toMatch(/ROLLBACK_NOT_LATEST_MIGRATION/);
+      // The hold register's own rollback is refused the same way while a migration newer than it is applied, so every
+      // newer one comes off first, newest first; this keeps the drill correct as later migrations are added.
+      const newer = rollbacksAfter(NEW);
+      if (newer.length > 0) {
+        const tooEarly = psql(url, ["-1", "-f", ROLLBACK]);
+        expect(tooEarly.status).not.toBe(0);
+        expect(tooEarly.stderr).toMatch(/ROLLBACK_NOT_LATEST_MIGRATION/);
+        for (const script of newer) psqlOk(url, ["-1", "-f", script]);
+      }
       psqlOk(url, ["-1", "-f", ROLLBACK]);
       expect(state()).toEqual(["f", "1"]);
       psqlOk(url, ["-1", "-f", STATUS_ROLLBACK]);

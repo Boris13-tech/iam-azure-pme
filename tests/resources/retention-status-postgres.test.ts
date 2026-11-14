@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+import { rollbacksAfter } from "../helpers/migration-rollbacks";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const suffix = randomUUID().slice(0, 8);
@@ -122,8 +123,9 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
       deploy(url);
       expect(state()).toEqual(["t", "1"]);
       expect(psql(url, ["-c", `SELECT (luxia_retention_status() ? 'R3')::text`])).toBe("true");
-      // Only the last migration rolls back: the hold register (D8.2) first, then the status.
-      psql(url, ["-1", "-f", "docs/operations/RETENTION-HOLD-REGISTER-ROLLBACK.sql"]);
+      // Only the last applied migration rolls back: every migration newer than the status comes back off first,
+      // newest first, which keeps this drill correct as later migrations are added.
+      for (const script of rollbacksAfter("20261112100000_retention_status")) psql(url, ["-1", "-f", script]);
       psql(url, ["-1", "-f", "docs/operations/RETENTION-STATUS-ROLLBACK.sql"]);
       expect(state()).toEqual(["f", "0"]);
       deploy(url);
