@@ -148,6 +148,10 @@ describe.runIf(enabled)("#148: the database owns the lifecycle dates of Subject 
         }
       }
     }
+    // A NULL state is refused by the guard itself, not only by the column's NOT NULL (Antigravity, review of #194).
+    const nulled = await subject("ACTIVE");
+    expect(await codeOf(asRuntime(`UPDATE "Subject" SET "lifecycleState" = NULL WHERE "id" = $1`, nulled.id))).toBe("SUBJECT_LIFECYCLE_TRANSITION_INVALID");
+    expect((await read(nulled.id)).lifecycleState).toBe("ACTIVE");
     // RETIRED is terminal: no state leaves it, so a pseudonymized person is never moved back into an active state.
     expect(SUBJECT_LIFECYCLE_STATES.filter((to) => to !== "RETIRED" && canTransitionSubject("RETIRED", to))).toEqual([]);
   }, 300_000);

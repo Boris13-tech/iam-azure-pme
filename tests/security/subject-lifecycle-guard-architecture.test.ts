@@ -22,7 +22,7 @@ describe("#148: the database's transition table is the application's", () => {
   it("every state is an arm of the CASE, so no state falls through to NULL unguarded", () => {
     expect(Object.keys(sqlTransitions()).sort()).toEqual([...SUBJECT_LIFECYCLE_STATES].sort());
     // A state added to the application without an arm would make v_allowed NULL: the guard refuses, it never allows.
-    expect(migration).toContain("IF v_allowed IS NULL OR NOT (NEW.\"lifecycleState\"::text = ANY (v_allowed)) THEN");
+    expect(migration).toContain("IF NEW.\"lifecycleState\" IS NULL OR v_allowed IS NULL OR NOT (NEW.\"lifecycleState\"::text = ANY (v_allowed)) THEN");
   });
 
   it("each arm lists exactly the transitions the application allows, and RETIRED is terminal in both", () => {

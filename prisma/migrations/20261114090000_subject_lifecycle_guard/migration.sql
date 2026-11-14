@@ -41,9 +41,13 @@ BEGIN
       WHEN 'RECOVERY_REQUIRED' THEN ARRAY['ACTIVE', 'SUSPENDED', 'DISABLED', 'RETIRED']
       WHEN 'RETIRED'           THEN ARRAY[]::TEXT[]
     END;
-    IF v_allowed IS NULL OR NOT (NEW."lifecycleState"::text = ANY (v_allowed)) THEN
+    -- A NULL target would make the comparison NULL, which an IF does not enter, so it is refused first: the column's
+    -- NOT NULL would reject the row anyway, but the guard says why (Antigravity, review of #194).
+    IF NEW."lifecycleState" IS NULL OR v_allowed IS NULL OR NOT (NEW."lifecycleState"::text = ANY (v_allowed)) THEN
+      -- coalesce: a NULL target would make the whole DETAIL NULL, and PostgreSQL would then replace this refusal with
+      -- "RAISE statement option cannot be null", hiding the code the runbooks name.
       RAISE EXCEPTION 'SUBJECT_LIFECYCLE_TRANSITION_INVALID' USING ERRCODE = '23514',
-        DETAIL = OLD."lifecycleState"::text || ' -> ' || NEW."lifecycleState"::text;
+        DETAIL = OLD."lifecycleState"::text || ' -> ' || coalesce(NEW."lifecycleState"::text, 'null');
     END IF;
     -- The moment the statement ran, from the database's clock, never the caller's: R6's 30-day window rests on it.
     NEW."lifecycleChangedAt" := v_now;
