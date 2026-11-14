@@ -25,8 +25,11 @@ const FUNCTIONS = [
 describe("D8.4: the retention job's own role", () => {
   it("the migration creates the role without a login, grants it the four functions and takes them from app_user", () => {
     expect(migration).toContain("CREATE ROLE luxia_retention NOLOGIN NOINHERIT;");
-    // No password anywhere: it is the operator's, set outside any migration.
-    expect(migration).not.toMatch(/PASSWORD/i);
+    // No password in the code: it is the operator's, set outside any migration. Read with comments stripped, since
+    // the migration's own comments say so in words.
+    const code = migration.replace(/--[^\n]*/g, "");
+    expect(code).not.toMatch(/PASSWORD/i);
+    expect(code).not.toMatch(/LOGIN(?! NOINHERIT)/);
     expect(migration).toContain("GRANT USAGE ON SCHEMA public TO luxia_retention;");
     expect(migration).toContain("GRANT CONNECT ON DATABASE %I TO luxia_retention");
     for (const fn of FUNCTIONS) {
@@ -34,8 +37,8 @@ describe("D8.4: the retention job's own role", () => {
       expect(migration, fn).toContain(`REVOKE EXECUTE ON FUNCTION ${fn} FROM app_user;`);
     }
     // Nothing else is granted to it: no table, no sequence, no other function.
-    const granted = [...migration.matchAll(/GRANT ([A-Z, ]+) ON (FUNCTION|SCHEMA|DATABASE|TABLE|SEQUENCE|ALL [A-Z]+)/g)].map((m) => `${m[1].trim()} ${m[2]}`);
-    expect([...new Set(granted)].sort()).toEqual(["EXECUTE ON FUNCTION", "USAGE ON SCHEMA"]);
+    const granted = [...code.matchAll(/GRANT ([A-Z, ]+) ON (FUNCTION|SCHEMA|DATABASE|TABLE|SEQUENCE|ALL [A-Z]+)/g)].map((m) => `${m[1].trim()} ${m[2]}`);
+    expect([...new Set(granted)].sort()).toEqual(["CONNECT DATABASE", "EXECUTE FUNCTION", "USAGE SCHEMA"]);
   });
 
   it("the activation gate grants them to that role in Production, and to app_user never", () => {

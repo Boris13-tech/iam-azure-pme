@@ -8,6 +8,7 @@ import { readdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+import { retentionTestClient } from "../helpers/retention-client";
 import { SessionStore } from "../../lib/auth/session-store";
 import { entraSignInEvidence } from "../../lib/auth/sign-in-evidence";
 import { softwarePasskey } from "../helpers/software-passkey";
@@ -19,11 +20,15 @@ const suffix = randomUUID().slice(0, 8);
 const DAY = 86_400_000;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 let owner: PrismaClient;
+/** The job's own role: since D8.4 the only one that may execute the retention functions. */
+const retention = retentionTestClient();
 let orgs = 0;
 
 type Counts = Record<string, number | boolean>;
-const call = (fn: "luxia_retention_purge_invitations" | "luxia_retention_pseudonymize_retired", batch: number | null, // R4 and R6 enforce as the owner only, until the hold register; dry runs as the runtime role.
-  enforce: boolean | null, db: PrismaClient = enforce === true ? owner : rawPrisma) =>
+// R4 and R6 enforce as the owner in its own session only; a dry run goes through the job's own role, which since D8.4
+// (issue #150) is the only role that may execute them at all.
+const call = (fn: "luxia_retention_purge_invitations" | "luxia_retention_pseudonymize_retired", batch: number | null,
+  enforce: boolean | null, db: PrismaClient = enforce === true ? owner : retention) =>
   db.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT ${fn}(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
 const settle = (promise: Promise<unknown>) => promise.then(() => "ACCEPTED", (error: unknown) => String(error instanceof Error ? error.message : error));
 /** Runs enforced calls until one selects nothing: the shared test database may hold rows of earlier runs. */
@@ -108,7 +113,7 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     a = await organization();
     b = await organization();
   }, 120_000);
-  afterAll(async () => { await rawPrisma.$disconnect(); await owner?.$disconnect(); });
+  afterAll(async () => { await rawPrisma.$disconnect(); await retention.$disconnect(); await owner?.$disconnect(); });
 
   it("a revocation cannot be backdated into the purge window: the database stamps its own time (audit of #138)", async () => {
     // Created 31 days ago, expired 24 days ago: finished for 24 days, so NOT eligible.
@@ -298,7 +303,8 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     expect(args).toBe("p_batch integer, p_enforce boolean");
     const inA = await invitation(a, { created: 40, expires: 33 }), inB = await invitation(b, { created: 40, expires: 33 });
     const youngB = await invitation(b, { created: 36, expires: 29 });
-    const inContext = (organizationId: string, tenantId: string) => rawPrisma.$transaction(async (tx) => {
+    // The job's own role since D8.4; a tenant context is set all the same, to show it steers nothing.
+    const inContext = (organizationId: string, tenantId: string) => retention.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT set_config('app.organization_id', ${organizationId}, true), set_config('app.tenant_id', ${tenantId}, true)`;
       const [{ counts }] = await tx.$queryRawUnsafe<Array<{ counts: Counts }>>(`SELECT luxia_retention_purge_invitations(5000, false) AS counts`);
       return counts;
@@ -307,14 +313,16 @@ describe.runIf(enabled)("R4: purge of finished invitations (PostgreSQL)", () => 
     const fromA = await inContext(a.organizationId, a.tenantId), forged = await inContext(randomUUID(), randomUUID());
     expect(fromA).toEqual(forged);
     expect(fromA.invitations).toBeGreaterThanOrEqual(2);
-    // The runtime role cannot enforce R4, from any context, until the hold register exists (Codex, review of #138):
-    // refused, and every eligible row is still there.
+    // Since D8.4 (issue #150) app_user cannot even execute the function, from any context: refused before its body.
     const runtimeEnforce = await settle(rawPrisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT set_config('app.organization_id', ${a.organizationId}, true), set_config('app.tenant_id', ${a.tenantId}, true)`;
       await tx.$queryRawUnsafe(`SELECT luxia_retention_purge_invitations(5000, true) AS counts`);
     }));
-    expect(runtimeEnforce).toContain("RETENTION_R4_ENFORCE_NOT_ACTIVATED");
-    expect(await settle(rawPrisma.$queryRawUnsafe(`SELECT luxia_retention_purge_invitations(5000, true)`))).toContain("RETENTION_R4_ENFORCE_NOT_ACTIVATED");
+    expect(runtimeEnforce).toMatch(/permission denied/);
+    expect(await settle(rawPrisma.$queryRawUnsafe(`SELECT luxia_retention_purge_invitations(5000, true)`))).toMatch(/permission denied/);
+    // The job's own role may execute it, and is refused an enforcing call just as app_user was: enforcing stays the
+    // owner's in its own session (Codex, review of #138).
+    expect(await settle(retention.$queryRawUnsafe(`SELECT luxia_retention_purge_invitations(5000, true)`))).toContain("RETENTION_R4_ENFORCE_NOT_ACTIVATED");
     expect(await present([inA, inB, youngB])).toEqual([inA, inB, youngB].sort());
     // The owner in its own session, the one path until holds exist: one call removes A's and B's eligible rows.
     expect(await call("luxia_retention_purge_invitations", 5000, true)).toEqual({ invitations: 2, enforced: true });
@@ -363,7 +371,7 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
     a = await organization();
     b = await organization();
   }, 120_000);
-  afterAll(async () => { await rawPrisma.$disconnect(); await owner?.$disconnect(); });
+  afterAll(async () => { await rawPrisma.$disconnect(); await retention.$disconnect(); await owner?.$disconnect(); });
 
   it("each column stands alone: a person half done is found, and only what is left is written and counted", async () => {
     await drain("luxia_retention_pseudonymize_retired", "subjects");
@@ -438,11 +446,13 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
     expect(result).toMatch(/RETENTION_ALREADY_RUNNING/);
   }, 120_000);
 
-  it("the runtime role may run R6 as a dry run only: an enforcing call is refused and changes nothing", async () => {
+  it("the job's role may run R6 as a dry run only, and app_user not at all: nothing changes either way", async () => {
     const before = await tableDigest("Subject");
-    expect(await settle(call("luxia_retention_pseudonymize_retired", 5000, true, rawPrisma))).toMatch(/RETENTION_R6_ENFORCE_NOT_ACTIVATED/);
+    // app_user holds no EXECUTE since D8.4 (issue #150); the job's role does, and is still refused an enforcing call.
+    expect(await settle(call("luxia_retention_pseudonymize_retired", 5000, true, rawPrisma))).toMatch(/permission denied/);
+    expect(await settle(call("luxia_retention_pseudonymize_retired", 5000, true, retention))).toMatch(/RETENTION_R6_ENFORCE_NOT_ACTIVATED/);
     expect(await tableDigest("Subject")).toBe(before);
-    expect(await call("luxia_retention_pseudonymize_retired", 1, false, rawPrisma)).toMatchObject({ enforced: false });
+    expect(await call("luxia_retention_pseudonymize_retired", 1, false, retention)).toMatchObject({ enforced: false });
     expect(await tableDigest("Subject")).toBe(before);
   });
 
@@ -493,17 +503,20 @@ describe.runIf(enabled)("R6: pseudonymization of people retired for more than 30
     }
   }, 240_000);
 
-  it("the runtime role may execute the two entry points and nothing more; anonymous roles and PUBLIC may not", async () => {
-    const rows = await owner.$queryRaw<Array<{ proname: string; runtime: boolean; public_execute: boolean; definer: boolean }>>`
-      SELECT p.proname, has_function_privilege('app_user', p.oid, 'EXECUTE') AS runtime, p.prosecdef AS definer,
+  it("the job's role may execute the two entry points and nothing more; app_user, anonymous roles and PUBLIC may not", async () => {
+    // Since D8.4 (issue #150) the two entry points belong to luxia_retention, the job's own role, and app_user holds
+    // neither; the guard remains owner-only and is not a definer function.
+    const rows = await owner.$queryRaw<Array<{ proname: string; runtime: boolean; worker: boolean; public_execute: boolean; definer: boolean }>>`
+      SELECT p.proname, has_function_privilege('app_user', p.oid, 'EXECUTE') AS runtime,
+        has_function_privilege('luxia_retention', p.oid, 'EXECUTE') AS worker, p.prosecdef AS definer,
         EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) x WHERE x.grantee = 0 AND x.privilege_type = 'EXECUTE') AS public_execute
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'public' AND p.proname IN ('luxia_retention_purge_invitations', 'luxia_retention_pseudonymize_retired', 'luxia_invitation_guard')
       ORDER BY p.proname`;
     expect(rows).toEqual([
-      { proname: "luxia_invitation_guard", runtime: false, definer: false, public_execute: false },
-      { proname: "luxia_retention_pseudonymize_retired", runtime: true, definer: true, public_execute: false },
-      { proname: "luxia_retention_purge_invitations", runtime: true, definer: true, public_execute: false },
+      { proname: "luxia_invitation_guard", runtime: false, worker: false, definer: false, public_execute: false },
+      { proname: "luxia_retention_pseudonymize_retired", runtime: false, worker: true, definer: true, public_execute: false },
+      { proname: "luxia_retention_purge_invitations", runtime: false, worker: true, definer: true, public_execute: false },
     ]);
     const [privileges] = await owner.$queryRaw<Array<{ del: boolean; trunc: boolean }>>`
       SELECT has_table_privilege('app_user', '"Invitation"', 'DELETE') AS del, has_table_privilege('app_user', '"Invitation"', 'TRUNCATE') AS trunc`;

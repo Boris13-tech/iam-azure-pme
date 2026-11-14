@@ -132,8 +132,15 @@ describe("R4/R6 retention: migration architecture", () => {
       "GRANT EXECUTE ON FUNCTION luxia_retention_pseudonymize_retired(integer, boolean) TO app_user;",
     ]);
     expect(migration).not.toMatch(/REVOKE (?!ALL ON FUNCTION luxia_retention_)/);
-    expect(bootstrap).toContain("GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO app_user;");
-    expect(bootstrap).toContain("GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;");
+    // Since D8.4 (issue #150) the two entry points belong to the job's own role: the migration grants them and takes
+    // them from app_user, and the CI bootstrap gives that role its test password instead of granting app_user anything.
+    expect(bootstrap).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.luxia_retention_\w+\([^)]*\) TO app_user/);
+    expect(bootstrap).toContain("CREATE ROLE luxia_retention LOGIN PASSWORD 'retention_password'");
+    const worker = read("prisma/migrations/20261114120000_retention_worker_role/migration.sql");
+    for (const fn of ["luxia_retention_purge_invitations(integer, boolean)", "luxia_retention_pseudonymize_retired(integer, boolean)"]) {
+      expect(worker, fn).toContain(`GRANT EXECUTE ON FUNCTION ${fn} TO luxia_retention;`);
+      expect(worker, fn).toContain(`REVOKE EXECUTE ON FUNCTION ${fn} FROM app_user;`);
+    }
     // app_user still has no DELETE on Invitation in CI (same as Production since self-onboarding v1).
     expect(bootstrap).toContain('GRANT SELECT, INSERT, UPDATE ON "OrganizationDomain", "Invitation" TO app_user;');
   });
