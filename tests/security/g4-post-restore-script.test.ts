@@ -6,7 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 const dir = mkdtempSync(join(tmpdir(), "g4-post-"));
@@ -14,12 +14,13 @@ const calls = join(dir, "calls.log");
 const env = join(dir, "env.log");
 // A psql that records every call and the libpq variables it was given, and refuses nothing: a refusal must come from
 // the script, never from the database.
-writeFileSync(join(dir, "psql"), `#!/usr/bin/env bash
+writeFileSync(join(dir, "psql"), `#!/bin/sh
 echo "$*" >> "${calls.replace(/\\/g, "/")}"
 env | grep '^PG' >> "${env.replace(/\\/g, "/")}" || true
 echo stub
 `);
 chmodSync(join(dir, "psql"), 0o755);
+// The shebang is /bin/sh, not /usr/bin/env: the runs below see this directory alone, so env could not find bash.
 // A spawned command is resolved without a shell, so a file named `psql` with a shebang is reachable on Linux, where
 // CI runs, but not on Windows. Where it is unreachable, "it called no database" would hold for the wrong reason, so
 // the checks that need the stub are skipped there, and CI asserts that it is reachable.
