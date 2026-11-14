@@ -99,6 +99,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Tenant isolation: cat
         if (type.endsWith("[]")) return `'{}'`;
         if (/^(text|character|uuid)/.test(type)) return type === "uuid" ? `gen_random_uuid()` : `'${randomUUID()}'`;
         if (/^timestamp/.test(type)) return "now()";
+        if (type === "date") return "CURRENT_DATE";
         if (/int|numeric/.test(type)) return "1";
         if (type === "boolean") return "false";
         if (/^jsonb?$/.test(type)) return `'{}'`;

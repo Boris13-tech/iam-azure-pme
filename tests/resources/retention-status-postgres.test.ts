@@ -14,7 +14,7 @@ const DAY = 86_400_000;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 let owner: PrismaClient;
 
-type Mechanism = { eligible: number; overdue: number; oldestHours: number };
+type Mechanism = { eligible: number; overdue: number; oldestHours: number; held?: number };
 type Status = { R3: Mechanism; R4: Mechanism; R6: Mechanism };
 const status = async (db: PrismaClient = rawPrisma) =>
   (await db.$queryRawUnsafe<Array<{ status: Status }>>("SELECT luxia_retention_status() AS status"))[0].status;
@@ -50,7 +50,8 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
     const before = await records("status");
     const now = await status();
     for (const mechanism of ["R3", "R4", "R6"] as const) {
-      expect(Object.keys(now[mechanism]).sort(), mechanism).toEqual(["eligible", "oldestHours", "overdue"]);
+      // R4 and R6 also report what holds keep (D8.2); R3 has no hold.
+      expect(Object.keys(now[mechanism]).sort(), mechanism).toEqual(mechanism === "R3" ? ["eligible", "oldestHours", "overdue"] : ["eligible", "held", "oldestHours", "overdue"]);
       for (const value of Object.values(now[mechanism])) expect(Number.isInteger(value) && value >= 0, mechanism).toBe(true);
     }
     expect(await records("status")).toBe(before + 1);
@@ -88,7 +89,7 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
     expect(await records("R6")).toBe(r6 + 1);
     const [last] = await owner.$queryRawUnsafe<Array<{ counts: Record<string, unknown> }>>(
       `SELECT "counts" FROM "RetentionRun" WHERE "counts"->>'mechanism' = 'R6' ORDER BY "id" DESC LIMIT 1`);
-    expect(Object.keys(last.counts).sort()).toEqual(["displayNames", "mechanism", "principalNames", "subjects"]);
+    expect(Object.keys(last.counts).sort()).toEqual(["displayNames", "held", "mechanism", "principalNames", "subjects"]);
     expect(await settle(rawPrisma.$queryRawUnsafe(`SELECT count(*) FROM "RetentionRun"`))).toMatch(/permission denied/);
   }, 60_000);
 
@@ -116,6 +117,8 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
       deploy(url);
       expect(state()).toEqual(["t", "1"]);
       expect(psql(url, ["-c", `SELECT (luxia_retention_status() ? 'R3')::text`])).toBe("true");
+      // Only the last migration rolls back: the hold register (D8.2) first, then the status.
+      psql(url, ["-1", "-f", "docs/operations/RETENTION-HOLD-REGISTER-ROLLBACK.sql"]);
       psql(url, ["-1", "-f", "docs/operations/RETENTION-STATUS-ROLLBACK.sql"]);
       expect(state()).toEqual(["f", "0"]);
       deploy(url);

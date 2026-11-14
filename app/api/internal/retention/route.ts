@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { cronAuthorized, runRetention } from "@/lib/retention/purge";
 
-// Daily retention run: R3 purge of expired sign-in challenges and Microsoft sign-in transactions; R4 and R6 (dry runs
-// until the hold register exists); then the status of every mechanism (counts and ages only). Without the cron secret
+// Daily retention run: R3 purge of expired sign-in challenges and Microsoft sign-in transactions; R4 and R6 (dry runs,
+// held organizations skipped); then the status of every mechanism and of the holds (counts and ages only). Without the cron secret
 // the answer is exactly what the middleware gives any unauthenticated /api path.
 export const dynamic = "force-dynamic";
 
