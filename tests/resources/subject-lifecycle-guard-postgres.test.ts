@@ -96,7 +96,10 @@ describe.runIf(enabled)("#148: the database owns the lifecycle dates of Subject 
     }, { timeout: 30_000 });
     // Stamped at least the slept time after the transaction began, and no later than the statement that read it back.
     expect(times.afterTransactionStart).toBeGreaterThan(1.5);
-    expect(times.beforeStatementTime).toBeGreaterThanOrEqual(0);
+    // The column is TIMESTAMP(3), so the stamp is rounded to the millisecond and can land just ahead of the clock the
+    // next statement reads: one millisecond of tolerance, which still catches a stamp taken at the transaction's start
+    // two seconds earlier, which the assertion above measures (Codex, review of #194).
+    expect(times.beforeStatementTime).toBeGreaterThan(-0.001);
     expect(times.beforeStatementTime).toBeLessThan(5);
     // And the person is not eligible for R6, whose cutoff is 30 days.
     const [{ counts }] = await owner.$queryRawUnsafe<Array<{ counts: { subjects: number } }>>(`SELECT luxia_retention_pseudonymize_retired(5000, false) AS counts`);
