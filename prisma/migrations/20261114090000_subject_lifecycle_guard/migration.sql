@@ -19,8 +19,10 @@ SET lock_timeout = '5s';
 
 CREATE FUNCTION luxia_subject_lifecycle_guard() RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 DECLARE
-  -- The same expression and type as the retention guards and purges: one clock, the database's.
-  v_now TIMESTAMP(3) := (now() AT TIME ZONE 'UTC');
+  -- clock_timestamp(), not now(): now() is the transaction's start time, so a caller holding a transaction open for
+  -- more than 30 days would have its retirement stamped with that old time and become eligible for R6 at once, which
+  -- is the very hole this guard closes (Codex, review of #194). The type stays TIMESTAMP(3), the column's.
+  v_now TIMESTAMP(3) := (clock_timestamp() AT TIME ZONE 'UTC');
   v_allowed TEXT[];
 BEGIN
   IF TG_OP = 'INSERT' THEN
@@ -43,7 +45,7 @@ BEGIN
       RAISE EXCEPTION 'SUBJECT_LIFECYCLE_TRANSITION_INVALID' USING ERRCODE = '23514',
         DETAIL = OLD."lifecycleState"::text || ' -> ' || NEW."lifecycleState"::text;
     END IF;
-    -- The moment the state changed is the database's, never the caller's: this is what R6's 30-day window rests on.
+    -- The moment the statement ran, from the database's clock, never the caller's: R6's 30-day window rests on it.
     NEW."lifecycleChangedAt" := v_now;
     NEW."lifecycleVersion" := OLD."lifecycleVersion" + 1;
     RETURN NEW;

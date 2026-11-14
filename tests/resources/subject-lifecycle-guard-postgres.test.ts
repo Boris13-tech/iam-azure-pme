@@ -80,6 +80,29 @@ describe.runIf(enabled)("#148: the database owns the lifecycle dates of Subject 
     expect(counts.subjects).toBe(0);
   }, 60_000);
 
+  // Codex, review of #194: now() is the transaction's start time, so a caller holding a transaction open could have a
+  // fresh retirement stamped with an old time and become eligible for R6 at once. The stamp is the statement's time.
+  it("the age of the caller's transaction does not age the transition: the stamp is the statement's time", async () => {
+    const person = await subject("ACTIVE");
+    const [times] = await rawPrisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.organization_id', ${scope.organizationId}, true), set_config('app.tenant_id', ${scope.tenantId}, true)`;
+      // The transaction's clock is fixed here; two seconds of it pass before the transition, as a long-lived caller's would.
+      await tx.$executeRawUnsafe(`SELECT pg_sleep(2)`); // pg_sleep returns void: $executeRaw, not $queryRaw
+      await tx.$executeRawUnsafe(`UPDATE "Subject" SET "lifecycleState" = 'RETIRED' WHERE "id" = $1`, person.id);
+      return tx.$queryRawUnsafe<Array<{ afterTransactionStart: number; beforeStatementTime: number }>>(`
+        SELECT extract(epoch FROM (s."lifecycleChangedAt" - (now() AT TIME ZONE 'UTC')))::float8 AS "afterTransactionStart",
+               extract(epoch FROM ((clock_timestamp() AT TIME ZONE 'UTC') - s."lifecycleChangedAt"))::float8 AS "beforeStatementTime"
+        FROM "Subject" s WHERE s."id" = $1`, person.id);
+    }, { timeout: 30_000 });
+    // Stamped at least the slept time after the transaction began, and no later than the statement that read it back.
+    expect(times.afterTransactionStart).toBeGreaterThan(1.5);
+    expect(times.beforeStatementTime).toBeGreaterThanOrEqual(0);
+    expect(times.beforeStatementTime).toBeLessThan(5);
+    // And the person is not eligible for R6, whose cutoff is 30 days.
+    const [{ counts }] = await owner.$queryRawUnsafe<Array<{ counts: { subjects: number } }>>(`SELECT luxia_retention_pseudonymize_retired(5000, false) AS counts`);
+    expect(counts.subjects).toBe(0);
+  }, 120_000);
+
   it("a change of the date without a state change is refused, for the runtime role and for the owner", async () => {
     const person = await subject("RETIRED");
     const before = await read(person.id);

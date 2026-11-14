@@ -72,7 +72,9 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
     const after = await status();
     expect(after.R3.eligible - before.R3.eligible).toBe(3);
     expect(after.R3.overdue - before.R3.overdue).toBe(2);
-    expect(after.R3.oldestHours).toBeGreaterThanOrEqual(3650 * 24);
+    // One hour of margin, as the R6 assertion below already has: the function floors the hours, so a row aged by
+    // a whole number of days reads one hour short (Antigravity NB-03, review of #192).
+    expect(after.R3.oldestHours).toBeGreaterThanOrEqual(3650 * 24 - 1);
   }, 60_000);
 
   it("R6: a person retired for more than 30 days, not yet pseudonymized, is eligible; overdue after 33 days", async () => {

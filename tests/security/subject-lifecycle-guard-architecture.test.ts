@@ -39,8 +39,14 @@ describe("#148: the database's transition table is the application's", () => {
     const guard = /CREATE FUNCTION luxia_subject_lifecycle_guard[\s\S]*?\nEND \$\$;/.exec(migration)![0];
     for (const text of [`NEW."lifecycleChangedAt" := v_now;`, `NEW."lifecycleVersion" := 1;`, `NEW."lifecycleVersion" := OLD."lifecycleVersion" + 1;`,
       "SUBJECT_LIFECYCLE_DATE_IMMUTABLE", "SUBJECT_LIFECYCLE_VERSION_IMMUTABLE", "SUBJECT_LIFECYCLE_TRANSITION_INVALID",
-      `v_now TIMESTAMP(3) := (now() AT TIME ZONE 'UTC')`]) expect(guard, text).toContain(text);
-    // A trigger, not a definer function, and never granted: it runs with the table owner's rights by nature.
+      `v_now TIMESTAMP(3) := (clock_timestamp() AT TIME ZONE 'UTC')`]) expect(guard, text).toContain(text);
+    // The stamp is the statement's time, not the transaction's: now() would let an old transaction age a fresh
+    // retirement and make it eligible for R6 at once (Codex, review of #194). Read on the code, comments aside.
+    const code = guard.split("\n").map((line) => line.replace(/--.*$/, "")).join("\n");
+    expect(code).not.toMatch(/\bnow\(\)/);
+    expect(code).toMatch(/clock_timestamp\(\) AT TIME ZONE 'UTC'/);
+    // Not a definer function: it runs with the privileges of whoever writes the row, and only ever changes NEW, so it
+    // needs none of its own. It is never granted either, so no one can call it outside the trigger.
     expect(guard).not.toMatch(/SECURITY DEFINER/);
     expect(migration).toContain("REVOKE ALL ON FUNCTION luxia_subject_lifecycle_guard() FROM PUBLIC;");
     expect(migration).not.toMatch(/GRANT /);
