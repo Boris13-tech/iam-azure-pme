@@ -2,6 +2,7 @@
 // On real roles: app_user, which serves every web request, can execute none of the four retention functions;
 // luxia_retention can execute exactly those four and nothing else; and it is no more able to enforce R4 or R6 than
 // app_user was, since enforcing stays the owner's in its own session.
+import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
@@ -112,6 +113,48 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
       await owner.$executeRawUnsafe(`ALTER ROLE app_user INHERIT`);
     }
     expect(await reachable()).toBe("");
+  });
+
+  // Codex F1, second review of #196: the validation enumerated attributes, memberships and ownership, so a role of
+  // that name already holding a privilege on an object passed it and kept that privilege. Run the migration's own
+  // validation block against this database, which is the state the migration leaves behind, then against seeded
+  // excess privileges.
+  it("the migration's validation refuses a role of that name holding anything beyond what it grants", async () => {
+    const migration = readFileSync("prisma/migrations/20261114120000_retention_worker_role/migration.sql", "utf8");
+    const from = migration.indexOf("DO $$");
+    const validation = migration.slice(from, migration.indexOf("END $$;", from) + "END $$;".length);
+    expect(validation).toContain("RETENTION_ROLE_UNSAFE");
+    const validate = () => outcome(owner.$executeRawUnsafe(validation));
+    // Applied where it has already run: what the role holds is exactly what this migration gave it.
+    expect(await validate()).toBe("OK");
+    const database = (await owner.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`)[0].name;
+    const seeds: Array<[string, string, string]> = [
+      [`GRANT TRUNCATE ON "RetentionRun" TO luxia_retention`, `REVOKE TRUNCATE ON "RetentionRun" FROM luxia_retention`, "TRUNCATE on the relation RetentionRun"],
+      [`GRANT SELECT ON "Subject" TO luxia_retention`, `REVOKE SELECT ON "Subject" FROM luxia_retention`, "SELECT on the relation Subject"],
+      [`GRANT CREATE ON SCHEMA public TO luxia_retention`, `REVOKE CREATE ON SCHEMA public FROM luxia_retention`, "CREATE on the schema public"],
+      [`GRANT TEMP ON DATABASE "${database}" TO luxia_retention`, `REVOKE TEMP ON DATABASE "${database}" FROM luxia_retention`, "TEMPORARY on the database"],
+      [`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO luxia_retention`,
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM luxia_retention`, "is given SELECT on objects created later"],
+    ];
+    // The attribute and membership branches, on the live role. Both are cluster-wide, so each is undone in a finally;
+    // the resources suite runs its files one at a time, so no other suite sees the role in that state.
+    seeds.push(
+      ["ALTER ROLE luxia_retention BYPASSRLS", "ALTER ROLE luxia_retention NOBYPASSRLS", "bypassrls"],
+      ["ALTER ROLE luxia_retention CREATEROLE", "ALTER ROLE luxia_retention NOCREATEROLE", "createrole"],
+      ["GRANT pg_read_all_data TO luxia_retention", "REVOKE pg_read_all_data FROM luxia_retention", "member of pg_read_all_data"],
+    );
+    for (const [seed, undo, expected] of seeds) {
+      await owner.$executeRawUnsafe(seed);
+      try {
+        // The code is what the assertion rests on; the detail is read back separately so the reason is named too.
+        expect(await validate(), seed).toBe("RETENTION_ROLE_UNSAFE");
+        const detail = await owner.$executeRawUnsafe(validation).catch((error: { message?: string }) => String(error.message));
+        expect(String(detail), seed).toContain(expected);
+      } finally {
+        await owner.$executeRawUnsafe(undo);
+      }
+    }
+    expect(await validate()).toBe("OK");
   });
 
   it("the role cannot grant itself anything, nor reach another role's rights", async () => {

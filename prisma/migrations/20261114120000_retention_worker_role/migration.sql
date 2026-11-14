@@ -41,6 +41,34 @@ BEGIN
       WHERE p.proowner = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention') AND left(n.nspname, 3) <> 'pg_' AND n.nspname <> 'information_schema'
     UNION ALL SELECT 'owns the schema ' || n.nspname FROM pg_namespace n
       WHERE n.nspowner = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention') AND left(n.nspname, 3) <> 'pg_'
+    -- A privilege it was granted directly is just as much a capability as an attribute or an ownership, and no
+    -- attribute names it: a pre-existing role holding TRUNCATE on RetentionRun would have passed every check above
+    -- and kept that privilege, which forced row-level security does not constrain (Codex F1, second review of #196).
+    -- What it may already hold is exactly what this migration itself grants, and nothing else, so applying it to a
+    -- database where it has already run is not a problem and anything wider is.
+    UNION ALL SELECT 'holds ' || a.privilege_type || ' on the relation ' || c.relname FROM pg_class c
+      CROSS JOIN aclexplode(c.relacl) a JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention')
+        AND left(n.nspname, 3) <> 'pg_' AND n.nspname <> 'information_schema'
+    UNION ALL SELECT 'holds ' || a.privilege_type || ' on the function ' || p.proname FROM pg_proc p
+      CROSS JOIN aclexplode(p.proacl) a JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention')
+        AND left(n.nspname, 3) <> 'pg_' AND n.nspname <> 'information_schema'
+        AND NOT (a.privilege_type = 'EXECUTE' AND n.nspname = 'public' AND p.proname IN (
+          'luxia_retention_purge_transactions', 'luxia_retention_purge_invitations',
+          'luxia_retention_pseudonymize_retired', 'luxia_retention_status'))
+    UNION ALL SELECT 'holds ' || a.privilege_type || ' on the schema ' || n.nspname FROM pg_namespace n
+      CROSS JOIN aclexplode(n.nspacl) a
+      WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention') AND left(n.nspname, 3) <> 'pg_'
+        AND NOT (a.privilege_type = 'USAGE' AND n.nspname = 'public')
+    UNION ALL SELECT 'holds ' || a.privilege_type || ' on the database ' || d.datname FROM pg_database d
+      CROSS JOIN aclexplode(d.datacl) a
+      WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention')
+        AND NOT (a.privilege_type = 'CONNECT' AND d.datname = current_database())
+    -- And a default privilege would give it the next object created, without granting it anything today.
+    UNION ALL SELECT 'is given ' || a.privilege_type || ' on objects created later' FROM pg_default_acl da
+      CROSS JOIN aclexplode(da.defaclacl) a
+      WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention')
   ) p;
   IF v_problems IS NOT NULL THEN
     RAISE EXCEPTION 'RETENTION_ROLE_UNSAFE' USING ERRCODE = '42501', DETAIL = v_problems;

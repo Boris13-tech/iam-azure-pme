@@ -70,6 +70,13 @@ describe("D8.4: the retention job's own role", () => {
       expect(migration, problem).toContain(problem);
     // Validated whether it was just created or already there: the check sits after the conditional creation.
     expect(migration.indexOf("RETENTION_ROLE_UNSAFE")).toBeGreaterThan(migration.indexOf("CREATE ROLE luxia_retention"));
+    // A privilege already granted to it is a capability no attribute names, so the ACLs are read too, and what it may
+    // already hold is exactly what this migration grants (Codex F1, second review of #196).
+    for (const acl of ["aclexplode(c.relacl)", "aclexplode(p.proacl)", "aclexplode(n.nspacl)", "aclexplode(d.datacl)", "aclexplode(da.defaclacl)"])
+      expect(migration, acl).toContain(acl);
+    expect(migration).toContain("is given ' || a.privilege_type || ' on objects created later");
+    expect(migration).toContain("NOT (a.privilege_type = 'CONNECT' AND d.datname = current_database())");
+    expect(migration).toContain("NOT (a.privilege_type = 'USAGE' AND n.nspname = 'public')");
   });
 
   it("CI mirrors it: the role has a test password, and app_user is granted no retention function", () => {
