@@ -142,6 +142,12 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
       ["ALTER ROLE luxia_retention BYPASSRLS", "ALTER ROLE luxia_retention NOBYPASSRLS", "bypassrls"],
       ["ALTER ROLE luxia_retention CREATEROLE", "ALTER ROLE luxia_retention NOCREATEROLE", "createrole"],
       ["GRANT pg_read_all_data TO luxia_retention", "REVOKE pg_read_all_data FROM luxia_retention", "member of pg_read_all_data"],
+      // Third review: a column privilege, the grant option on an allowed privilege, a setting on the role, and a member.
+      [`GRANT SELECT ("id") ON "Subject" TO luxia_retention`, `REVOKE SELECT ("id") ON "Subject" FROM luxia_retention`, "SELECT on the column Subject.id"],
+      ["GRANT EXECUTE ON FUNCTION luxia_retention_status() TO luxia_retention WITH GRANT OPTION",
+        "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION luxia_retention_status() FROM luxia_retention", "may grant EXECUTE to others"],
+      ["ALTER ROLE luxia_retention SET statement_timeout = '1h'", "ALTER ROLE luxia_retention RESET statement_timeout", "carries the setting statement_timeout"],
+      ["GRANT luxia_retention TO app_user", "REVOKE luxia_retention FROM app_user", "has the member app_user"],
     );
     for (const [seed, undo, expected] of seeds) {
       await owner.$executeRawUnsafe(seed);
