@@ -336,15 +336,23 @@ jobs:
           GRANT EXECUTE ON FUNCTION public.resolve_session(TEXT) TO app_user;
           GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
           GRANT EXECUTE ON FUNCTION public.luxia_organization_lock_active(TEXT) TO app_user;
-          GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO app_user;
-          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_purge_invitations(integer,boolean)') IS NOT NULL THEN
-            GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO app_user;
+          -- D8.4 (issue #150): the retention functions belong to the job's own role, never to the role that serves
+          -- web requests. The role is created by migration 20261114120000; its password is the operator's, set in Neon.
+          DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention') THEN
+            GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO luxia_retention;
+            REVOKE EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) FROM app_user;
           END IF; END $$;
-          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_pseudonymize_retired(integer,boolean)') IS NOT NULL THEN
-            GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;
+          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_purge_invitations(integer,boolean)') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention') THEN
+            GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO luxia_retention;
+            REVOKE EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) FROM app_user;
           END IF; END $$;
-          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_status()') IS NOT NULL THEN
-            GRANT EXECUTE ON FUNCTION public.luxia_retention_status() TO app_user;
+          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_pseudonymize_retired(integer,boolean)') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention') THEN
+            GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO luxia_retention;
+            REVOKE EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) FROM app_user;
+          END IF; END $$;
+          DO $$ BEGIN IF to_regprocedure('public.luxia_retention_status()') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention') THEN
+            GRANT EXECUTE ON FUNCTION public.luxia_retention_status() TO luxia_retention;
+            REVOKE EXECUTE ON FUNCTION public.luxia_retention_status() FROM app_user;
           END IF; END $$;
           -- (The three retention functions above came after rc-private-beta-1: granted only when the release has them.)
           -- Re-apply the narrower grants of later migrations, which the broad grant above would widen again
@@ -474,6 +482,14 @@ jobs:
                   WHERE has_table_privilege(current_user, 'public._prisma_migrations', p)) AS writable
               `;
               if (history[0]?.writable !== false) throw new Error("Runtime role can write the migration history");
+              // D8.4 (issue #150): the privilege to run a destructive retention job is not on the role that serves
+              // web requests. Read from the catalog, so any path that granted it is caught.
+              const retention = await db.$queryRaw<Array<{ granted: string }>>`
+                SELECT coalesce(string_agg(p.proname, ', ' ORDER BY p.proname), '') AS granted FROM pg_proc p
+                WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'luxia_retention%'
+                  AND has_function_privilege('app_user', p.oid, 'EXECUTE')
+              `;
+              if (retention[0]?.granted !== "") throw new Error(`Runtime role can execute retention functions: ${retention[0]?.granted}`);
 
               console.log("Runtime role PASS: app_user / NOSUPERUSER / NOBYPASSRLS / resolve_session EXECUTE");
               console.log(`RLS PASS: ${requiredRlsTables.length} tenant-scoped tables enabled and forced`);

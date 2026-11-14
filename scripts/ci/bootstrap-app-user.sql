@@ -27,7 +27,6 @@ GRANT EXECUTE ON FUNCTION public.luxia_session_resolve(TEXT) TO app_user;
 -- Sovereign providers F2: same grant as the migration gives app_user in Production.
 GRANT EXECUTE ON FUNCTION public.luxia_provider_connection_lock_active(TEXT,TEXT) TO app_user;
 -- R3: the daily retention job (same grant as the migration gives app_user in Production).
-GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO app_user;
 GRANT CONNECT ON DATABASE luxia_db TO app_user;
 GRANT USAGE ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
@@ -57,11 +56,20 @@ REVOKE DELETE, TRUNCATE ON "SoDPolicy", "SoDRule", "AccessReviewCampaign", "Acce
 DO $$ BEGIN IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON "_prisma_migrations" FROM app_user;
 END IF; END $$;
--- R4/R6: the daily retention job (same grants as the migration gives app_user in Production).
-GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_invitations(INTEGER,BOOLEAN) TO app_user;
-GRANT EXECUTE ON FUNCTION public.luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN) TO app_user;
--- D8.1: the retention status of the daily job (same grant as the migration gives app_user in Production).
-GRANT EXECUTE ON FUNCTION public.luxia_retention_status() TO app_user;
+-- D8.4 (issue #150): the retention job has its own role. The migration creates it NOLOGIN and grants it the four
+-- functions, and revokes them from app_user; CI gives it a password so the suites can connect as it, which the
+-- operator does in Neon for Production instead. app_user holds no EXECUTE on any retention function.
+DO
+$retention$
+BEGIN
+   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'luxia_retention') THEN
+      CREATE ROLE luxia_retention LOGIN PASSWORD 'retention_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+   ELSE
+      ALTER ROLE luxia_retention LOGIN PASSWORD 'retention_password';
+   END IF;
+END
+$retention$;
+GRANT CONNECT ON DATABASE luxia_db TO luxia_retention;
 -- D8.2: the hold register and its history are owner-only (same as the migration gives app_user in Production);
 -- only when the release has them (the gate may apply a release from before D8.2).
 DO $$ BEGIN IF to_regclass('public."RetentionHold"') IS NOT NULL THEN

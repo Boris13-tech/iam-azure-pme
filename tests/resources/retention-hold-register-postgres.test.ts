@@ -10,6 +10,9 @@ import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { rollbacksAfter } from "../helpers/migration-rollbacks";
+// D8.4 (issue #150): the retention functions are executable by luxia_retention only, so the calls below connect as
+// that role, as the daily job does; app_user is refused before a function body, which the suites assert too.
+import { retentionTestClient } from "../helpers/retention-client";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const NEW = "20261112130000_retention_hold_register";
@@ -19,6 +22,8 @@ const suffix = randomUUID().slice(0, 8);
 const DAY = 86_400_000;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 let owner: PrismaClient;
+/** The job's own role: the only one that may execute the retention functions (D8.4). */
+const retention = retentionTestClient();
 let orgs = 0;
 
 const codeOf = (promise: Promise<unknown>) => promise.then(() => "OK", (error: { message?: string }) => /[A-Z][A-Z0-9_]{5,}/.exec(String(error.message))?.[0] ?? String(error.message));
@@ -101,14 +106,14 @@ async function drain(fn: "luxia_retention_purge_invitations" | "luxia_retention_
 }
 type Mechanism = { eligible: number; overdue: number; oldestHours: number; held?: number };
 type Status = { R3: Mechanism; R4: Mechanism; R6: Mechanism; holds: { active: number; overdueReview: number } };
-const status = async () => (await rawPrisma.$queryRawUnsafe<Array<{ status: Status }>>("SELECT luxia_retention_status() AS status"))[0].status;
+const status = async () => (await retention.$queryRawUnsafe<Array<{ status: Status }>>("SELECT luxia_retention_status() AS status"))[0].status;
 
 describe.runIf(enabled)("D8.2: hold register (PostgreSQL)", () => {
   beforeAll(async () => {
     requireTestDatabase();
     owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
   }, 120_000);
-  afterAll(async () => { await rawPrisma.$disconnect(); await owner?.$disconnect(); });
+  afterAll(async () => { await rawPrisma.$disconnect(); await retention.$disconnect(); await owner?.$disconnect(); });
 
   it("the runtime role has no access: register, history, hold check and operator functions", async () => {
     const org = await organization();

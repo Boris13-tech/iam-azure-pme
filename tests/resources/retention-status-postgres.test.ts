@@ -8,16 +8,21 @@ import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
 import { rollbacksAfter } from "../helpers/migration-rollbacks";
+// D8.4 (issue #150): the retention functions are executable by luxia_retention only, so the calls below connect as
+// that role, as the daily job does; app_user is refused before a function body, which the suites assert too.
+import { retentionTestClient } from "../helpers/retention-client";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const suffix = randomUUID().slice(0, 8);
 const DAY = 86_400_000;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 let owner: PrismaClient;
+/** The job's own role: the only one that may execute the retention functions (D8.4). */
+const retention = retentionTestClient();
 
 type Mechanism = { eligible: number; overdue: number; oldestHours: number; held?: number };
 type Status = { R3: Mechanism; R4: Mechanism; R6: Mechanism };
-const status = async (db: PrismaClient = rawPrisma) =>
+const status = async (db: PrismaClient = retention) =>
   (await db.$queryRawUnsafe<Array<{ status: Status }>>("SELECT luxia_retention_status() AS status"))[0].status;
 const records = async (mechanism: string) =>
   (await owner.$queryRawUnsafe<Array<{ n: number }>>(`SELECT count(*)::int AS n FROM "RetentionRun" WHERE "counts"->>'mechanism' = $1`, mechanism))[0].n;
@@ -50,9 +55,9 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
     accountId = account.id;
     await owner.localIdentity.create({ data: { ...scope, identityAccountId: accountId, principalName: `d81-${suffix}` } });
   }, 120_000);
-  afterAll(async () => { await rawPrisma.$disconnect(); await owner?.$disconnect(); });
+  afterAll(async () => { await rawPrisma.$disconnect(); await retention.$disconnect(); await owner?.$disconnect(); });
 
-  it("the runtime role gets counts and ages for R3, R4 and R6, and the call is recorded", async () => {
+  it("the retention role gets counts and ages for R3, R4 and R6, and the call is recorded", async () => {
     const before = await records("status");
     const now = await status();
     for (const mechanism of ["R3", "R4", "R6"] as const) {
@@ -91,8 +96,8 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
 
   it("R4 and R6 runs leave a run record each, counts only; the runtime role cannot read the records", async () => {
     const r4 = await records("R4"), r6 = await records("R6");
-    await rawPrisma.$queryRawUnsafe("SELECT luxia_retention_purge_invitations(10, false)");
-    await rawPrisma.$queryRawUnsafe("SELECT luxia_retention_pseudonymize_retired(10, false)");
+    await retention.$queryRawUnsafe("SELECT luxia_retention_purge_invitations(10, false)");
+    await retention.$queryRawUnsafe("SELECT luxia_retention_pseudonymize_retired(10, false)");
     expect(await records("R4")).toBe(r4 + 1);
     expect(await records("R6")).toBe(r6 + 1);
     const [last] = await owner.$queryRawUnsafe<Array<{ counts: Record<string, unknown> }>>(

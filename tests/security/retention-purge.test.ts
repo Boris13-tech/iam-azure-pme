@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // R3: the daily retention job. The endpoint accepts only the platform cron secret; the middleware lets
 // that exact path through; the database function has fixed predicates and bounded batches.
 const queryRaw = vi.fn();
-vi.mock("@/lib/db/raw-prisma", () => ({ rawPrisma: { $queryRaw: (...args: unknown[]) => queryRaw(...args) } }));
+// The job connects as its own role (D8.4): this stands in for that client, not for the application's.
+vi.mock("@/lib/db/retention-prisma", () => ({ RETENTION_CONNECTION_VARIABLE: "LUXIA_RETENTION_DATABASE_URL",
+  retentionPrisma: () => ({ $queryRaw: (...args: unknown[]) => queryRaw(...args) }) }));
 
 const { cronAuthorized, retentionEnforced, RETENTION_BATCH, RETENTION_MAX_ROUNDS, purgeExpiredTransactions, runRetention, R4_R6_ENFORCE_AVAILABLE } = await import("../../lib/retention/purge");
 

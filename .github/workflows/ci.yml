@@ -104,6 +104,9 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public
+      # D8.4 (issue #150): the retention functions are executable by this role only; the CI bootstrap gives it its
+      # password, as the operator does in Neon for Production.
+      LUXIA_RETENTION_DATABASE_URL: postgresql://luxia_retention:retention_password@localhost:5432/luxia_db?schema=public
       DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       # CI exercises the authorization mode Production runs (P5); tests of the other modes set it themselves.
@@ -204,6 +207,9 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_db?schema=public
+      # D8.4 (issue #150): the retention functions are executable by this role only; the CI bootstrap gives it its
+      # password, as the operator does in Neon for Production.
+      LUXIA_RETENTION_DATABASE_URL: postgresql://luxia_retention:retention_password@localhost:5432/luxia_db?schema=public
       DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_db?schema=public
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       LUXIA_RESOURCE_RLS: 'true'
@@ -273,5 +279,6 @@ jobs:
         npm run test:security
       env:
         DATABASE_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored?schema=public
+        LUXIA_RETENTION_DATABASE_URL: postgresql://luxia_retention:retention_password@localhost:5432/luxia_restored?schema=public
         DATABASE_MIGRATION_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored?schema=public
 

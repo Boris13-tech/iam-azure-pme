@@ -7,6 +7,9 @@ import { readdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+// D8.4 (issue #150): the retention functions are executable by luxia_retention only, so the calls below connect as
+// that role, as the daily job does; app_user is refused before a function body, which the suites assert too.
+import { retentionTestClient } from "../helpers/retention-client";
 import { purgeExpiredTransactions, RETENTION_BATCH } from "../../lib/retention/purge";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
@@ -16,6 +19,8 @@ const suffix = randomUUID().slice(0, 8);
 const DAY = 86_400_000;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 let owner: PrismaClient;
+/** The job's own role: the only one that may execute the retention functions (D8.4). */
+const retention = retentionTestClient();
 
 function psql(url: string, args: string[]) {
   const target = new URL(url); target.search = "";
@@ -52,24 +57,24 @@ describe.runIf(enabled)("R3: purge of expired challenges and transactions (Postg
     accountId = account.id;
     await owner.localIdentity.create({ data: { ...scope, identityAccountId: accountId, principalName: `r3-${suffix}` } });
   }, 120_000);
-  afterAll(async () => { await rawPrisma.$disconnect(); await owner?.$disconnect(); });
+  afterAll(async () => { await rawPrisma.$disconnect(); await retention.$disconnect(); await owner?.$disconnect(); });
 
   it("the runtime role runs it: dry run first, then only rows expired for more than 7 days go", async () => {
     const old = { challenges: [await challenge(8), await challenge(30)], transactions: [await transaction(8), await transaction(30)] };
     const kept = { challenges: [await challenge(6), await challenge(-1)], transactions: [await transaction(6), await transaction(-1)] };
     const all = { challenges: [...old.challenges, ...kept.challenges], transactions: [...old.transactions, ...kept.transactions] };
 
-    const dry = await purgeExpiredTransactions(false, rawPrisma);
+    const dry = await purgeExpiredTransactions(false, retention);
     expect(dry.enforced).toBe(false);
     expect(dry.localAuthChallenges).toBeGreaterThanOrEqual(2);
     expect(dry.authTransactions).toBeGreaterThanOrEqual(2);
     expect(await exists(all)).toEqual({ challenges: [...all.challenges].sort(), transactions: [...all.transactions].sort() });
 
-    const run = await purgeExpiredTransactions(true, rawPrisma);
+    const run = await purgeExpiredTransactions(true, retention);
     expect(run.enforced).toBe(true);
     expect(run.localAuthChallenges).toBeGreaterThanOrEqual(2);
     expect(await exists(all)).toEqual({ challenges: [...kept.challenges].sort(), transactions: [...kept.transactions].sort() });
-    expect((await purgeExpiredTransactions(true, rawPrisma)).localAuthChallenges).toBe(0);
+    expect((await purgeExpiredTransactions(true, retention)).localAuthChallenges).toBe(0);
   });
 
   it("more than one batch expired in a day: one daily run drains it in several bounded calls", async () => {
@@ -77,7 +82,7 @@ describe.runIf(enabled)("R3: purge of expired challenges and transactions (Postg
     await owner.authTransaction.createMany({ data: ids.map((id) => ({ id, stateHash: sha(id), nonce: "n", codeVerifier: "v",
       expectedOrganizationId: scope.organizationId, expectedTenantId: scope.tenantId, expectedProviderConnectionId: "p",
       expiresAt: new Date(Date.now() - 9 * DAY) })) });
-    const run = await purgeExpiredTransactions(true, rawPrisma);
+    const run = await purgeExpiredTransactions(true, retention);
     expect(run.rounds).toBeGreaterThanOrEqual(2);
     expect(run.backlog).toBe(false);
     expect(run.authTransactions).toBeGreaterThanOrEqual(ids.length);
@@ -88,18 +93,18 @@ describe.runIf(enabled)("R3: purge of expired challenges and transactions (Postg
     const locked = await transaction(10);
     await owner.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "AuthTransaction" WHERE "id" = ${locked} FOR UPDATE`;
-      const run = await purgeExpiredTransactions(true, rawPrisma);
+      const run = await purgeExpiredTransactions(true, retention);
       expect(run.backlog).toBe(true);
       expect(await owner.authTransaction.count({ where: { id: locked } })).toBe(1);
     }, { timeout: 60_000 });
-    const after = await purgeExpiredTransactions(true, rawPrisma);
+    const after = await purgeExpiredTransactions(true, retention);
     expect(after.backlog).toBe(false);
     expect(await owner.authTransaction.count({ where: { id: locked } })).toBe(0);
   }, 120_000);
 
   it("the history of past runs is bounded by the batch too, in the dry run and when enforcing", async () => {
     const call = (batch: number, enforce: boolean) =>
-      rawPrisma.$queryRawUnsafe<Array<{ counts: Record<string, number> }>>(`SELECT luxia_retention_purge_transactions(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
+      retention.$queryRawUnsafe<Array<{ counts: Record<string, number> }>>(`SELECT luxia_retention_purge_transactions(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
     for (let i = 0; i < 3; i++) await owner.$executeRawUnsafe(`INSERT INTO "RetentionRun" ("ranAt", "enforced", "counts") VALUES (now() - interval '401 days', true, '{}')`);
     expect(await call(1, false)).toMatchObject({ retentionRuns: 1 });
     expect(await call(1, true)).toMatchObject({ retentionRuns: 1 });
@@ -111,7 +116,7 @@ describe.runIf(enabled)("R3: purge of expired challenges and transactions (Postg
   it("each call is bounded by its batch, and arguments out of range are refused", async () => {
     const old = { challenges: [await challenge(9), await challenge(9)], transactions: [await transaction(9), await transaction(9)] };
     const call = (batch: number, enforce: boolean | null) =>
-      rawPrisma.$queryRawUnsafe<Array<{ counts: Record<string, number> }>>(`SELECT luxia_retention_purge_transactions(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
+      retention.$queryRawUnsafe<Array<{ counts: Record<string, number> }>>(`SELECT luxia_retention_purge_transactions(${batch}, ${enforce}) AS counts`).then((rows) => rows[0].counts);
     expect(await call(1, true)).toMatchObject({ localAuthChallenges: 1, authTransactions: 1 });
     const left = await exists(old);
     expect(left.challenges).toHaveLength(1);

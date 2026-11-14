@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const queryRaw = vi.fn();
-vi.mock("@/lib/db/raw-prisma", () => ({ rawPrisma: { $queryRaw: (...args: unknown[]) => queryRaw(...args) } }));
+// The job connects as its own role (D8.4): this stands in for that client, not for the application's.
+vi.mock("@/lib/db/retention-prisma", () => ({ RETENTION_CONNECTION_VARIABLE: "LUXIA_RETENTION_DATABASE_URL",
+  retentionPrisma: () => ({ $queryRaw: (...args: unknown[]) => queryRaw(...args) }) }));
 
 const { CHECK_IN_MONITORS, KNOWN_ERROR_CODES, buildCheckIn, reportCheckIn, reportError } = await import("../../lib/monitoring/error-reporter");
 const { RETENTION_ALERT_DRILLS, reportRetentionFailure, reportRetentionOutcome } = await import("../../lib/retention/alerts");

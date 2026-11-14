@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { rawPrisma } from "@/lib/db/raw-prisma";
+import { retentionPrisma } from "@/lib/db/retention-prisma";
 
 // R3 daily job (docs/architecture/RETENTION-AND-MINIMIZATION-DESIGN.md). The platform's cron calls the
 // endpoint with "Authorization: Bearer <CRON_SECRET>". Without a configured secret of at least 32
@@ -26,7 +26,7 @@ export type RetentionCounts = CallCounts & { rounds: number; backlog: boolean };
  * Bounded calls through the database function (each records its own counts), repeated while a call comes back full.
  * A dry run deletes nothing, so it makes one call: a full count there means a backlog. Counts are summed.
  */
-export async function purgeExpiredTransactions(enforce = retentionEnforced(), db = rawPrisma,
+export async function purgeExpiredTransactions(enforce = retentionEnforced(), db = retentionPrisma(),
   limits = { rounds: RETENTION_MAX_ROUNDS, budgetMs: RETENTION_TIME_BUDGET_MS }): Promise<RetentionCounts> {
   const started = Date.now();
   const total: RetentionCounts = { localAuthChallenges: 0, authTransactions: 0, retentionRuns: 0, enforced: enforce, rounds: 0, backlog: false };
@@ -82,7 +82,7 @@ export type RetentionReport = {
  * alert (Beta scope, section 4.1). A hold past its review date stays in effect and raises the overdue-review alert
  * (section 4.3). Their delivery to the operator is wired with the error reporter (D8.3).
  */
-export async function runRetention(enforce = retentionEnforced(), db = rawPrisma): Promise<RetentionReport> {
+export async function runRetention(enforce = retentionEnforced(), db = retentionPrisma()): Promise<RetentionReport> {
   const r3 = await purgeExpiredTransactions(enforce, db);
   const enforceR4R6 = enforce && R4_R6_ENFORCE_AVAILABLE;
   const [r4] = await db.$queryRaw<Array<{ counts: RetentionReport["r4"] }>>`
