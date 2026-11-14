@@ -75,7 +75,7 @@ describe("D8.4: the retention job's own role", () => {
     for (const acl of ["aclexplode(c.relacl)", "aclexplode(p.proacl)", "aclexplode(n.nspacl)", "aclexplode(d.datacl)", "aclexplode(da.defaclacl)"])
       expect(migration, acl).toContain(acl);
     expect(migration).toContain("is given ' || a.privilege_type || ' on objects created later");
-    expect(migration).toContain("NOT (a.privilege_type = 'CONNECT' AND d.datname = current_database())");
+    expect(migration).toContain("AND d.datname = current_database() AND a.privilege_type <> 'CONNECT'");
     expect(migration).toContain("NOT (a.privilege_type = 'USAGE' AND n.nspname = 'public')");
   });
 

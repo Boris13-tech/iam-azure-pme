@@ -61,10 +61,13 @@ BEGIN
       CROSS JOIN aclexplode(n.nspacl) a
       WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention') AND left(n.nspname, 3) <> 'pg_'
         AND NOT (a.privilege_type = 'USAGE' AND n.nspname = 'public')
+    -- This database only: the role is one for the whole cluster, so in a cluster with several databases (CI's
+    -- restored copy, a drill's scratch database) it rightly holds CONNECT on the others, and judging those here
+    -- would refuse every database but the first to be migrated.
     UNION ALL SELECT 'holds ' || a.privilege_type || ' on the database ' || d.datname FROM pg_database d
       CROSS JOIN aclexplode(d.datacl) a
       WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention')
-        AND NOT (a.privilege_type = 'CONNECT' AND d.datname = current_database())
+        AND d.datname = current_database() AND a.privilege_type <> 'CONNECT'
     -- And a default privilege would give it the next object created, without granting it anything today.
     UNION ALL SELECT 'is given ' || a.privilege_type || ' on objects created later' FROM pg_default_acl da
       CROSS JOIN aclexplode(da.defaclacl) a
