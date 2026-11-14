@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 // What counts as a fault lives in its own module, so a test can drive each decision to its failing answer instead of
 // reading it in this source (Codex F5, review of #195).
-import { EXPECTED_TRIGGERS, cleanEnvironment, oneTarget, publicAddress, sameServer, triggerFaults, validate } from "./g4-post-restore-checks.mjs";
+import { EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, cleanEnvironment, oneTarget, ownerOnlyFault, publicAddress, refusedTarget, sameServer, triggerFaults, unprotectedFault, validate } from "./g4-post-restore-checks.mjs";
 
 const fail = (message) => { console.error(`REFUSED: ${message}`); process.exit(1); };
 const arg = (name) => { const at = process.argv.indexOf(`--${name}`); return at >= 0 ? process.argv[at + 1] : undefined; };
@@ -69,6 +69,14 @@ check("the connection reached the disposable copy, not a database beyond this ne
 // databases: the invariants are read as the owner, the runtime role's rights as app_user.
 const elsewhere = sameServer(ownerIdentity, appIdentity);
 check("both connections reached the same copy", elsewhere === null, elsewhere ?? appIdentity);
+// If either is wrong, stop here: everything after this applies migrations and writes two rows, and a command whose
+// first duty is to touch nothing but the copy must not do that to a target it has just failed to recognise. Recording
+// the failure and carrying on to the end would have written to it anyway (Antigravity finding 1, third review of #195).
+const targetRefused = refusedTarget(checks);
+if (targetRefused) {
+  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ release, reached, checks, passed: false, stoppedBeforeWriting: true }, null, 1));
+  fail(`${targetRefused}; nothing was migrated or written`);
+}
 
 // Step 9: the release's migrations, as the Production gate applies them, through the same validated URL.
 const migrations = () => readOnly(owner.url, `SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`);
@@ -85,28 +93,27 @@ if (deploy.status !== 0) { writeFileSync(arg("report") ?? "g4-post-restore-repor
 // psql renders a boolean as true/false, so SQL builds the one line each check compares.
 const runtimeRole = readOnly(app.url, `SELECT current_user || ' bypassrls=' || r.rolbypassrls || ' superuser=' || r.rolsuper || ' createrole=' || r.rolcreaterole
   FROM pg_roles r WHERE r.rolname = current_user`);
-check("runtime role restricted", runtimeRole === "app_user bypassrls=false superuser=false createrole=false", runtimeRole);
+check("runtime role restricted", runtimeRole === EXPECTED_RUNTIME_ROLE, runtimeRole);
 
 // Row-level security must be ENABLED and FORCED: force alone, with it disabled, protects nothing (Codex F2).
 // Two tables hold an organization without it, by review: Tenant (the scope itself) and LegacyUserBridge (the only link
 // to the legacy tables, which R7 refuses to erase). The set must be exactly those two: one more would be customer data
 // left open to the runtime role, one fewer would mean the reviewed exception list no longer matches the schema.
-const REVIEWED_UNPROTECTED = "LegacyUserBridge,Tenant";
 const unprotected = readOnly(owner.url, `SELECT coalesce(string_agg(c.relname, ',' ORDER BY c.relname), '') FROM pg_class c
   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND NOT (c.relrowsecurity AND c.relforcerowsecurity)
     AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'organizationId' AND NOT a.attisdropped)`);
-check("row-level security enabled and forced, outside the reviewed exceptions", unprotected === REVIEWED_UNPROTECTED, `without both flags: ${unprotected || "none"}`);
+const rlsFault = unprotectedFault(unprotected);
+check("row-level security enabled and forced, outside the reviewed exceptions", rlsFault === null, rlsFault ?? `without both flags: ${unprotected || "none"}`);
 
 // Owner-only tables: every table privilege, and every privilege on the sequences they own, as the activation gate
 // reads them (Codex F3). The expected names are checked too, so a table drifting out of the candidate set is caught
 // instead of silently leaving the check with nothing to look at.
-const EXPECTED_OWNER_ONLY = ["OrganizationErasure", "RateLimitBucket", "RateLimitConfig", "RetentionRun", "SignupCode"];
 const ownerOnlyFound = readOnly(owner.url, `SELECT coalesce(string_agg(c.relname, ',' ORDER BY c.relname), '') FROM pg_class c
   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND c.relrowsecurity AND c.relforcerowsecurity
     AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid)`).split(",").filter(Boolean);
-const missing = EXPECTED_OWNER_ONLY.filter((name) => !ownerOnlyFound.includes(name));
-check("the owner-only tables are all still owner-only", missing.length === 0,
-  missing.length === 0 ? `${ownerOnlyFound.length} found, the ${EXPECTED_OWNER_ONLY.length} expected among them` : `no longer owner-only: ${missing.join(", ")}`);
+const ownerOnlyLost = ownerOnlyFault(ownerOnlyFound);
+check("the owner-only tables are all still owner-only", ownerOnlyLost === null,
+  ownerOnlyLost ?? `${ownerOnlyFound.length} found, the ${EXPECTED_OWNER_ONLY.length} expected among them`);
 
 const reachable = readOnly(owner.url, `SELECT coalesce(string_agg(entry, ', ' ORDER BY entry), '') FROM (
     SELECT c.relname || ':' || p AS entry FROM pg_class c

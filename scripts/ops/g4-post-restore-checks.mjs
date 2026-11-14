@@ -65,14 +65,59 @@ export function publicAddress(identity) {
   const plain = address.replace(/\/\d+$/, "");
   const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(plain)?.slice(1).map(Number);
   if (!octets) {
-    // IPv6: loopback, link-local (fe80::/10) and unique-local (fc00::/7) only.
-    return /^(::1|fe[89ab][0-9a-f]:|f[cd][0-9a-f]{2}:)/i.test(plain) ? null
+    // IPv6: loopback, link-local (fe80::/10) and unique-local (fc00::/7) only. Loopback is the whole address: an
+    // unanchored ::1 also accepted ::1234:… and ::10.0.0.1 (Antigravity finding 2, third review of #195).
+    return /^(::1$|fe[89ab][0-9a-f]:|f[cd][0-9a-f]{2}:)/i.test(plain) ? null
       : `the server answers ${address}, an address reachable beyond this network: the drill target must be a disposable copy here`;
   }
   const [a, b] = octets;
   const privateRange = a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
   return privateRange ? null
     : `the server answers ${address}, an address reachable beyond this network: the drill target must be a disposable copy here`;
+}
+
+/**
+ * The checks that establish the target. If one of them failed, the command must stop before it migrates or writes
+ * anything: it would otherwise do both to a database it has just failed to recognise (Antigravity finding 1, third
+ * review of #195). Returns the reason, or null when the target is established.
+ */
+export const TARGET_CHECKS = [
+  "the connection reached the disposable copy, not a database beyond this network",
+  "both connections reached the same copy",
+];
+export function refusedTarget(checks) {
+  for (const name of TARGET_CHECKS) {
+    const entry = checks.find((candidate) => candidate.name === name);
+    if (!entry) return `the target check "${name}" did not run`;
+    if (!entry.ok) return `the target is not established: ${entry.detail}`;
+  }
+  return null;
+}
+
+/** The runtime role as it must answer for itself on the copy. */
+export const EXPECTED_RUNTIME_ROLE = "app_user bypassrls=false superuser=false createrole=false";
+
+/**
+ * The two tables that hold an organization without row-level security, by review: Tenant, the scope itself, and
+ * LegacyUserBridge, the only link to the legacy tables, which R7 refuses to erase. The set read from the copy must be
+ * exactly these: one more is customer data open to the runtime role, one fewer means the reviewed list no longer
+ * matches the schema.
+ */
+export const REVIEWED_UNPROTECTED = ["LegacyUserBridge", "Tenant"];
+export function unprotectedFault(found) {
+  const names = found.split(",").filter(Boolean).sort();
+  const extra = names.filter((name) => !REVIEWED_UNPROTECTED.includes(name));
+  const gone = REVIEWED_UNPROTECTED.filter((name) => !names.includes(name));
+  if (extra.length) return `without both row-level security flags, beyond the reviewed exceptions: ${extra.join(", ")}`;
+  if (gone.length) return `the reviewed exceptions no longer match the schema: ${gone.join(", ")} not found among the tables without both flags`;
+  return null;
+}
+
+/** The tables only their owner may touch. Each must still be owner-only, so none drifts out of the candidate set. */
+export const EXPECTED_OWNER_ONLY = ["OrganizationErasure", "RateLimitBucket", "RateLimitConfig", "RetentionRun", "SignupCode"];
+export function ownerOnlyFault(found) {
+  const missing = EXPECTED_OWNER_ONLY.filter((name) => !found.includes(name));
+  return missing.length ? `no longer owner-only: ${missing.join(", ")}` : null;
 }
 
 /** The environment every tool runs with: the parent's, minus every libpq variable (PGHOST, PGHOSTADDR, PGSERVICE…). */

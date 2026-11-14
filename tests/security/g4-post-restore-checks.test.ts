@@ -3,7 +3,8 @@
 // show that a broken invariant is actually reported as a fault (Codex F5 and Antigravity finding 3, review of #195).
 import { describe, expect, it } from "vitest";
 import {
-  ALLOWED_PARAMETERS, EXPECTED_TRIGGERS, cleanEnvironment, oneTarget, publicAddress, sameServer, triggerFaults, validate,
+  ALLOWED_PARAMETERS, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, TARGET_CHECKS, cleanEnvironment, oneTarget, ownerOnlyFault,
+  publicAddress, refusedTarget, sameServer, triggerFaults, unprotectedFault, validate,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
 
 /** `validate` calls `fail` and must not return; here it throws so a refusal is visible as one. */
@@ -52,7 +53,8 @@ describe("G4 post-restore: the connection a drill may use", () => {
     for (const local of ["socket:none", "127.0.0.1:5432", "172.17.0.2/32:5432", "10.1.2.3:5432", "192.168.1.9:5432", "::1:5432", "fd00::2:5432"]) {
       expect(publicAddress(`luxia_restore_rc on ${local}`), local).toBeNull();
     }
-    for (const remote of ["3.120.4.5:5432", "203.0.113.9/32:5432", "2a05:d014::1:5432"]) {
+    // Loopback is the whole address ::1, not every address that starts with those characters (third review).
+    for (const remote of ["3.120.4.5:5432", "203.0.113.9/32:5432", "2a05:d014::1:5432", "::1234:abcd:1:5432", "::10.0.0.1:5432"]) {
       expect(publicAddress(`luxia_restore_rc on ${remote}`), remote).toContain("reachable beyond this network");
     }
     expect(publicAddress("luxia_restore_rc")).toContain("did not report an address");
@@ -62,6 +64,37 @@ describe("G4 post-restore: the connection a drill may use", () => {
     const clean = cleanEnvironment({ PGHOST: "db.example.com", PGHOSTADDR: "10.0.0.5", pghost: "db.example.com",
       PgService: "production", PATH: "/usr/bin", LUXIA_KEEP: "yes" });
     expect(clean).toEqual({ PATH: "/usr/bin", LUXIA_KEEP: "yes" });
+  });
+});
+
+describe("G4 post-restore: a target that is not established stops the run before it writes", () => {
+  // Antigravity finding 1, third review: the target checks recorded a failure and the run went on to migrate and write.
+  const ok = TARGET_CHECKS.map((name) => ({ name, ok: true, detail: "fine" }));
+  it("goes on only when every target check ran and passed", () => {
+    expect(refusedTarget(ok)).toBeNull();
+    expect(refusedTarget([{ ...ok[0], ok: false, detail: "the server answers 3.120.4.5" }, ok[1]]))
+      .toBe("the target is not established: the server answers 3.120.4.5");
+    expect(refusedTarget([ok[0], { ...ok[1], ok: false, detail: "the two connections reached different targets" }]))
+      .toContain("different targets");
+    // A check that did not run is not a pass.
+    expect(refusedTarget([ok[0]])).toContain("did not run");
+    expect(refusedTarget([])).toContain("did not run");
+  });
+});
+
+describe("G4 post-restore: row-level security and owner-only tables on the copy", () => {
+  it("accepts exactly the reviewed exceptions, and reports one more or one fewer", () => {
+    expect(unprotectedFault("LegacyUserBridge,Tenant")).toBeNull();
+    expect(unprotectedFault("Tenant,LegacyUserBridge")).toBeNull();
+    expect(unprotectedFault("LegacyUserBridge,Subject,Tenant")).toBe("without both row-level security flags, beyond the reviewed exceptions: Subject");
+    expect(unprotectedFault("Tenant")).toContain("LegacyUserBridge not found");
+    expect(unprotectedFault("")).toContain("no longer match the schema");
+  });
+
+  it("reports an expected owner-only table that is owner-only no more", () => {
+    expect(ownerOnlyFault([...EXPECTED_OWNER_ONLY, "SomethingElse"])).toBeNull();
+    expect(ownerOnlyFault(EXPECTED_OWNER_ONLY.filter((name) => name !== "RetentionRun"))).toBe("no longer owner-only: RetentionRun");
+    expect(ownerOnlyFault([])).toContain(EXPECTED_OWNER_ONLY.join(", "));
   });
 });
 

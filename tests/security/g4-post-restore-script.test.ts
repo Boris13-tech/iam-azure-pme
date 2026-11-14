@@ -165,9 +165,15 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     expect(source).toContain("unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'])");
     expect(source).toContain("unnest(ARRAY['USAGE','SELECT','UPDATE'])");
     expect(source).toContain("has_sequence_privilege('app_user', s.oid, p)");
-    // And the expected owner-only tables must still be owner-only, so none can drift out of the candidate set.
-    expect(source).toContain('const EXPECTED_OWNER_ONLY = ["OrganizationErasure", "RateLimitBucket", "RateLimitConfig", "RetentionRun", "SignupCode"];');
-    expect(source).toContain("the owner-only tables are all still owner-only");
+    // The verdicts on what was read come from the checks module, whose tests drive each to its failing answer.
+    expect(source).toContain("const ownerOnlyLost = ownerOnlyFault(ownerOnlyFound);");
+    expect(source).toContain("const rlsFault = unprotectedFault(unprotected);");
+    expect(source).toContain("runtimeRole === EXPECTED_RUNTIME_ROLE");
+    // And a target that was not established stops the run before the migrations and the two writes.
+    const stop = source.indexOf("const targetRefused = refusedTarget(checks);");
+    expect(stop).toBeGreaterThan(0);
+    expect(stop).toBeLessThan(source.indexOf("migrate\", \"deploy\""));
+    expect(stop).toBeLessThan(source.indexOf("luxia_retention_purge_transactions(1000, false)"));
     // Triggers: the catalog is read with the table, the function, the timing, the level, the operations and the state,
     // and the verdict comes from the checks module, whose own tests drive it to each failing answer.
     expect(source).not.toMatch(/Number\(triggers\) > 0/);
