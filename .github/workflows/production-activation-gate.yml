@@ -231,7 +231,8 @@ jobs:
         run: |
           set -euo pipefail
           PSQL_URL="${DATABASE_MIGRATION_URL%%\?*}"
-          psql -v ON_ERROR_STOP=1 "$PSQL_URL" <<'SQL'
+          # One transaction: the broad grants and their narrowing commit together, or not at all (Codex, review of #190).
+          psql -v ON_ERROR_STOP=1 --single-transaction "$PSQL_URL" <<'SQL'
           GRANT CONNECT ON DATABASE neondb TO app_user;
           GRANT USAGE ON SCHEMA public TO app_user;
           GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
@@ -252,6 +253,15 @@ jobs:
           -- R3: retention runs are owner-only, and only the purge function deletes expired sign-in rows.
           REVOKE ALL ON "RetentionRun" FROM app_user;
           REVOKE ALL ON SEQUENCE "RetentionRun_id_seq" FROM app_user;
+          -- R7: the erasure record is owner-only.
+          REVOKE ALL ON "OrganizationErasure" FROM app_user;
+          REVOKE ALL ON SEQUENCE "OrganizationErasure_id_seq" FROM app_user;
+          -- F2 and F3: provider connections and secret references are never deleted.
+          REVOKE DELETE, TRUNCATE ON "ProviderConnection" FROM app_user;
+          REVOKE DELETE, TRUNCATE ON "ProviderSecretReference" FROM app_user;
+          -- Resource scopes, SoD and access reviews: the migrations grant less than the broad grant (Codex, review of #190).
+          REVOKE UPDATE, DELETE, TRUNCATE ON "ResourceScope", "ResourceScopeMember" FROM app_user;
+          REVOKE DELETE, TRUNCATE ON "SoDPolicy", "SoDRule", "AccessReviewCampaign", "AccessReviewItem" FROM app_user;
           REVOKE DELETE, TRUNCATE ON "AuthTransaction", "LocalAuthChallenge" FROM app_user;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
