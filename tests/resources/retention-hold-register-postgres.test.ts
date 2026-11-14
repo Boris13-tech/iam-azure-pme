@@ -9,6 +9,7 @@ import { readdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+import { rollbacksAfter } from "../helpers/migration-rollbacks";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const NEW = "20261112130000_retention_hold_register";
@@ -65,11 +66,17 @@ async function invitation(org: Org, created: number, finished: number) {
   return row.id;
 }
 /** A person retired `days` ago, with a local sign-in name: what R6 pseudonymizes. */
+// The lifecycle date is the database's since #148: a fixture that needs a person retired in the past sets it as a
+// superuser would, with the triggers off for that statement only (the same way the invitation fixtures age a row).
 async function retired(org: Org, days: number) {
   const subject = await owner.subject.create({ data: { ...scope(org), type: "HUMAN", name: `Leaver ${randomUUID().slice(0, 6)}`, lifecycleState: "ACTIVE" } });
   const account = await owner.identityAccount.create({ data: { ...scope(org), subjectId: subject.id, providerConnectionId: org.local, externalObjectId: randomUUID() } });
   await owner.localIdentity.create({ data: { ...scope(org), identityAccountId: account.id, principalName: `leaver-${randomUUID().slice(0, 8)}` } });
-  await owner.subject.update({ where: { id: subject.id }, data: { lifecycleState: "RETIRED", lifecycleChangedAt: new Date(Date.now() - days * DAY) } });
+  await owner.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+    await tx.$executeRawUnsafe(`UPDATE "Subject" SET "lifecycleState" = 'RETIRED', "lifecycleVersion" = "lifecycleVersion" + 1,
+      "lifecycleChangedAt" = (now() AT TIME ZONE 'UTC') - $2::float8 * interval '1 day' WHERE "id" = $1`, subject.id, days);
+  });
   return subject.id;
 }
 const invitationsLeft = async (ids: string[]) => (await owner.invitation.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((r) => r.id).sort();
@@ -353,10 +360,19 @@ describe.runIf(enabled)("D8.2: hold register (PostgreSQL)", () => {
     try {
       deploy(url);
       expect(state()).toEqual(["t", "2"]);
-      // The status rollback is refused while the hold register is applied after it.
+      // The status rollback is refused while a newer migration, the hold register among them, is applied.
       const refused = psql(url, ["-1", "-f", STATUS_ROLLBACK]);
       expect(refused.status).not.toBe(0);
       expect(refused.stderr).toMatch(/ROLLBACK_NOT_LATEST_MIGRATION/);
+      // The hold register's own rollback is refused the same way while a migration newer than it is applied, so every
+      // newer one comes off first, newest first; this keeps the drill correct as later migrations are added.
+      const newer = rollbacksAfter(NEW);
+      if (newer.length > 0) {
+        const tooEarly = psql(url, ["-1", "-f", ROLLBACK]);
+        expect(tooEarly.status).not.toBe(0);
+        expect(tooEarly.stderr).toMatch(/ROLLBACK_NOT_LATEST_MIGRATION/);
+        for (const script of newer) psqlOk(url, ["-1", "-f", script]);
+      }
       psqlOk(url, ["-1", "-f", ROLLBACK]);
       expect(state()).toEqual(["f", "1"]);
       psqlOk(url, ["-1", "-f", STATUS_ROLLBACK]);

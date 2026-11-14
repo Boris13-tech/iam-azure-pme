@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+import { rollbacksAfter } from "../helpers/migration-rollbacks";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
 const suffix = randomUUID().slice(0, 8);
@@ -30,7 +31,12 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
   const retired = async (daysAgo: number, pseudonymized = false) => {
     const subject = await owner.subject.create({ data: { ...scope, type: "HUMAN", name: `Leaver ${randomUUID().slice(0, 6)}`, lifecycleState: "RETIRED" } });
     const name = pseudonymized ? `Ancien membre ${sha(subject.id).slice(0, 8)}` : subject.name;
-    await owner.$executeRawUnsafe(`UPDATE "Subject" SET "lifecycleChangedAt" = $1, "name" = $2 WHERE "id" = $3`, new Date(Date.now() - daysAgo * DAY), name, subject.id);
+    // The lifecycle date is the database's since #148: aged here as a superuser would, triggers off for this statement.
+    await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL session_replication_role = replica`;
+      await tx.$executeRawUnsafe(`UPDATE "Subject" SET "lifecycleChangedAt" = (now() AT TIME ZONE 'UTC') - $2::float8 * interval '1 day', "name" = $3 WHERE "id" = $1`,
+        subject.id, daysAgo, name);
+    });
   };
 
   beforeAll(async () => {
@@ -66,7 +72,9 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
     const after = await status();
     expect(after.R3.eligible - before.R3.eligible).toBe(3);
     expect(after.R3.overdue - before.R3.overdue).toBe(2);
-    expect(after.R3.oldestHours).toBeGreaterThanOrEqual(3650 * 24);
+    // One hour of margin, as the R6 assertion below already has: the function floors the hours, so a row aged by
+    // a whole number of days reads one hour short (Antigravity NB-03, review of #192).
+    expect(after.R3.oldestHours).toBeGreaterThanOrEqual(3650 * 24 - 1);
   }, 60_000);
 
   it("R6: a person retired for more than 30 days, not yet pseudonymized, is eligible; overdue after 33 days", async () => {
@@ -117,8 +125,9 @@ describe.runIf(enabled)("D8.1: retention status and run records (PostgreSQL)", (
       deploy(url);
       expect(state()).toEqual(["t", "1"]);
       expect(psql(url, ["-c", `SELECT (luxia_retention_status() ? 'R3')::text`])).toBe("true");
-      // Only the last migration rolls back: the hold register (D8.2) first, then the status.
-      psql(url, ["-1", "-f", "docs/operations/RETENTION-HOLD-REGISTER-ROLLBACK.sql"]);
+      // Only the last applied migration rolls back: every migration newer than the status comes back off first,
+      // newest first, which keeps this drill correct as later migrations are added.
+      for (const script of rollbacksAfter("20261112100000_retention_status")) psql(url, ["-1", "-f", script]);
       psql(url, ["-1", "-f", "docs/operations/RETENTION-STATUS-ROLLBACK.sql"]);
       expect(state()).toEqual(["f", "0"]);
       deploy(url);

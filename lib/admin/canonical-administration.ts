@@ -246,14 +246,9 @@ export async function updateSubject(
         },
         data: {
           ...(input.name != null ? { name: input.name.trim() } : {}),
-          ...(input.lifecycleState != null
-            ? {
-                lifecycleState: input.lifecycleState,
-                ...(lifecycleChanged
-                  ? { lifecycleVersion: { increment: 1 }, lifecycleChangedAt: new Date() }
-                  : {}),
-              }
-            : {}),
+          // The lifecycle date and version are the database's (#148): the guard stamps them on a state change and
+          // refuses a change without one, so this sends the state only.
+          ...(input.lifecycleState != null ? { lifecycleState: input.lifecycleState } : {}),
         },
       });
       let revokedSessions = 0;
