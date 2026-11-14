@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const queryRaw = vi.fn();
 vi.mock("@/lib/db/raw-prisma", () => ({ rawPrisma: { $queryRaw: (...args: unknown[]) => queryRaw(...args) } }));
 
-const { CHECK_IN_MONITORS, KNOWN_ERROR_CODES, buildCheckIn, reportCheckIn } = await import("../../lib/monitoring/error-reporter");
+const { CHECK_IN_MONITORS, KNOWN_ERROR_CODES, buildCheckIn, reportCheckIn, reportError } = await import("../../lib/monitoring/error-reporter");
 const { RETENTION_ALERT_DRILLS, reportRetentionFailure, reportRetentionOutcome } = await import("../../lib/retention/alerts");
 const { GET } = await import("../../app/api/internal/retention/route");
 
@@ -113,6 +113,34 @@ describe("D8.3: retention alerts", () => {
     delete process.env.LUXIA_ERROR_DSN; fetchMock.mockReset();
     expect((await call()).status).toBe(200);
     expect(await reportRetentionFailure("RETENTION_FAILED")).toEqual({ error: false, checkIn: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // Codex, review of #193 (N1): the route goes through the alerts' own boundary, which would mask a reporter that
+  // started throwing again. This asserts the reporters' own contract, directly, under each construction fault.
+  it("the reporters themselves never throw when the clock or the random source fails, with or without a DSN", async () => {
+    const report = async (dsn: string | undefined) => {
+      if (dsn) process.env.LUXIA_ERROR_DSN = dsn; else delete process.env.LUXIA_ERROR_DSN;
+      return {
+        error: await reportError(new Error("RETENTION_BACKLOG"), "retention", "/api/internal/retention"),
+        checkInOk: await reportCheckIn("retention-daily", "ok"),
+        checkInError: await reportCheckIn("retention-daily", "error"),
+      };
+    };
+    // A failing random source: both reporters build an identifier, so neither can send, and neither throws.
+    vi.stubGlobal("crypto", { getRandomValues: () => { throw new Error("no entropy"); },
+      randomUUID: globalThis.crypto.randomUUID.bind(globalThis.crypto), subtle: globalThis.crypto.subtle });
+    expect(await report(DSN)).toEqual({ error: false, checkInOk: false, checkInError: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await report(undefined)).toEqual({ error: false, checkInOk: false, checkInError: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals(); vi.stubGlobal("fetch", fetchMock);
+    // A failing clock: only the error event stamps a timestamp, so it cannot be sent; a check-in does not read the
+    // clock and keeps working, which is what the silence alert needs. Neither throws, which is the contract.
+    vi.spyOn(Date, "now").mockImplementation(() => { throw new Error("no clock"); });
+    expect(await report(DSN)).toEqual({ error: false, checkInOk: true, checkInError: true });
+    fetchMock.mockClear();
+    expect(await report(undefined)).toEqual({ error: false, checkInOk: false, checkInError: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

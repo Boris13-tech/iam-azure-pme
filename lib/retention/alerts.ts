@@ -4,7 +4,9 @@ import type { RetentionReport } from "@/lib/retention/purge";
 // D8.3 (Private Beta scope, section 4.1): the three alerts of the daily retention run, sent through the error reporter
 // (constants only, no row content, no organization): a failed run, no run for 3 days, and a record past its period
 // plus 3 days. A hold past its review date raises its own alert (section 4.3). Without LUXIA_ERROR_DSN nothing is sent;
-// the job's own log lines stay either way. Each call is bounded by the reporter's timeout and never throws.
+// the job's own log lines stay either way. No call here throws. Each signal's request is cancelled after the reporter's
+// timeout, and a report that sends several awaits them one after another, so a hung backend delays the run by that
+// timeout per signal (at most three; Codex and Antigravity, reviews of #193).
 const ROUTE = "/api/internal/retention";
 /** The job's work is done when it reports: no alert may turn a finished run into a failure (Codex, review of #193). */
 const quiet = async <T>(work: () => Promise<T>, whenItFails: T): Promise<T> => { try { return await work(); } catch { return whenItFails; } };

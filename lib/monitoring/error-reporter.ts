@@ -68,7 +68,7 @@ export function buildEvent(error: unknown, component: ErrorComponent, routePath?
   };
 }
 
-/** One envelope item to the backend. Never throws, never waits longer than the timeout, no-op without a DSN. */
+/** One envelope item to the backend. Never throws, no-op without a DSN; its own request is cancelled after the timeout. */
 async function send(header: Record<string, string>, type: "event" | "check_in", payload: unknown): Promise<boolean> {
   try {
     const target = envelopeTarget();
@@ -88,8 +88,8 @@ async function send(header: Record<string, string>, type: "event" | "check_in", 
 }
 
 /**
- * Sends one error event. Never throws, never waits longer than the timeout, no-op without a DSN: a caller's own work is
- * already done when it reports, so nothing here may turn it into a failure (Codex, review of #193).
+ * Sends one error event. Never throws, no-op without a DSN, and its request is cancelled after REPORT_TIMEOUT_MS: a
+ * caller's own work is already done when it reports, so nothing here may turn it into a failure (Codex, review of #193).
  */
 export async function reportError(error: unknown, component: ErrorComponent, routePath?: string): Promise<boolean> {
   try {
@@ -130,7 +130,7 @@ export function buildCheckIn(monitor: CheckInMonitor, status: "ok" | "error") {
   };
 }
 
-/** Sends one check-in. Never throws, never waits longer than the timeout, no-op without a DSN. */
+/** Sends one check-in. Never throws, no-op without a DSN; its request is cancelled after REPORT_TIMEOUT_MS. */
 export async function reportCheckIn(monitor: CheckInMonitor, status: "ok" | "error"): Promise<boolean> {
   try {
     if (!Object.hasOwn(CHECK_IN_MONITORS, monitor) || (status !== "ok" && status !== "error")) return false;
