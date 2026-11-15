@@ -82,7 +82,15 @@ export type RetentionReport = {
  * alert (Beta scope, section 4.1). A hold past its review date stays in effect and raises the overdue-review alert
  * (section 4.3). Their delivery to the operator is wired with the error reporter (D8.3).
  */
+/** The role the job must be connected as. */
+export const RETENTION_ROLE = "luxia_retention";
+
 export async function runRetention(enforce = retentionEnforced(), db = retentionPrisma()): Promise<RetentionReport> {
+  // The connection must be the job's own role and no other. A URL naming the owner by mistake would run the job with
+  // the owner's full rights, undoing the separation without any other sign; app_user's would fail on the first call,
+  // but under a less clear name (Gemini 4 Hydrogen F-06, third review of #196).
+  const [connected] = await db.$queryRaw<Array<{ role: string }>>`SELECT current_user::text AS role`;
+  if (connected?.role !== RETENTION_ROLE) throw new Error("RETENTION_CONNECTION_WRONG_ROLE");
   const r3 = await purgeExpiredTransactions(enforce, db);
   const enforceR4R6 = enforce && R4_R6_ENFORCE_AVAILABLE;
   const [r4] = await db.$queryRaw<Array<{ counts: RetentionReport["r4"] }>>`

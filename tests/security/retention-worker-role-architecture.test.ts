@@ -41,15 +41,28 @@ describe("D8.4: the retention job's own role", () => {
     expect([...new Set(granted)].sort()).toEqual(["CONNECT DATABASE", "EXECUTE FUNCTION", "USAGE SCHEMA"]);
   });
 
-  it("the activation gate grants them to that role in Production, and to app_user never", () => {
-    const block = /Bootstrap least-privilege runtime grants[\s\S]*?<<'SQL'\n([\s\S]*?)\n\s*SQL\n/.exec(gate)?.[1] ?? "";
+  it("the activation gate grants them to that role once D8.4 is applied, and to app_user only for a release before it", () => {
+    const block = /Bootstrap least-privilege runtime grants[\s\S]*?<<'SQL'\n([\s\S]*?)\n\s*SQL\n/.exec(gate)?.[1]?.replace(/\r/g, "") ?? "";
     expect(block).not.toBe("");
-    for (const fn of ["luxia_retention_purge_transactions(INTEGER,BOOLEAN)", "luxia_retention_purge_invitations(INTEGER,BOOLEAN)",
-      "luxia_retention_pseudonymize_retired(INTEGER,BOOLEAN)", "luxia_retention_status()"]) {
-      expect(block, fn).toContain(`GRANT EXECUTE ON FUNCTION public.${fn} TO luxia_retention;`);
-      expect(block, fn).toContain(`REVOKE EXECUTE ON FUNCTION public.${fn} FROM app_user;`);
-      expect(block, fn).not.toContain(`GRANT EXECUTE ON FUNCTION public.${fn} TO app_user;`);
-    }
+    for (const fn of ["luxia_retention_purge_transactions(integer,boolean)", "luxia_retention_purge_invitations(integer,boolean)",
+      "luxia_retention_pseudonymize_retired(integer,boolean)", "luxia_retention_status()"])
+      expect(block, fn).toContain(`'public.${fn}'`);
+    // Decided by the migration being applied, not by the role existing: its rollback keeps the role, and a release
+    // from before D8.4 runs its job as app_user (Gemini 4 Hydrogen F-04). The drill in the PostgreSQL suite runs this
+    // very block on a scratch database, before and after the rollback.
+    expect(block).toContain("FROM public._prisma_migrations WHERE migration_name = '20261114120000_retention_worker_role'");
+    // Without a history, the schema answers: the role holds the four only while D8.4 is applied. The role existing is
+    // never enough on its own.
+    expect(block).toContain("IF to_regclass('public._prisma_migrations') IS NOT NULL THEN");
+    expect(block).toContain("has_function_privilege('luxia_retention', 'public.luxia_retention_status()'::regprocedure, 'EXECUTE')");
+    expect(block).not.toMatch(/IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention'\) THEN/);
+    const decided = block.indexOf("IF v_d84 THEN");
+    const otherwise = block.indexOf("ELSE", decided);
+    expect(decided).toBeGreaterThan(0);
+    expect(block.slice(decided, otherwise)).toContain("GRANT EXECUTE ON FUNCTION %s TO luxia_retention");
+    expect(block.slice(decided, otherwise)).toContain("REVOKE EXECUTE ON FUNCTION %s FROM app_user");
+    expect(block.slice(decided, otherwise)).not.toContain("TO app_user");
+    expect(block.slice(otherwise, block.indexOf("END IF;", otherwise))).toContain("GRANT EXECUTE ON FUNCTION %s TO app_user");
     // The gate never creates the role or sets a password: the migration creates it, the operator gives it one.
     expect(block).not.toMatch(/CREATE ROLE luxia_retention|ALTER ROLE luxia_retention/);
   });
@@ -65,22 +78,27 @@ describe("D8.4: the retention job's own role", () => {
 
   it("the migration fails closed on a role of that name that is more than the narrow worker", () => {
     expect(migration).toContain("RAISE EXCEPTION 'RETENTION_ROLE_UNSAFE'");
-    for (const problem of ["'superuser'", "'bypassrls'", "'createrole'", "'createdb'", "'replication'",
-      "'member of ' || r.rolname", "'owns the relation '", "'owns the function '", "'owns the schema '"])
+    for (const problem of ["'superuser'", "'bypassrls'", "'createrole'", "'createdb'", "'replication'", "'inherit'",
+      "'member of ' || r.rolname", "'has the member ' || r.rolname", "'carries the setting '"])
       expect(migration, problem).toContain(problem);
     // Validated whether it was just created or already there: the check sits after the conditional creation.
     expect(migration.indexOf("RETENTION_ROLE_UNSAFE")).toBeGreaterThan(migration.indexOf("CREATE ROLE luxia_retention"));
-    // A privilege already granted to it is a capability no attribute names, so the ACLs are read too, and what it may
-    // already hold is exactly what this migration grants (Codex F1, second review of #196).
-    for (const acl of ["aclexplode(c.relacl)", "aclexplode(p.proacl)", "aclexplode(n.nspacl)", "aclexplode(d.datacl)", "aclexplode(da.defaclacl)"])
-      expect(migration, acl).toContain(acl);
-    expect(migration).toContain("is given ' || a.privilege_type || ' on objects created later");
-    expect(migration).toContain("AND d.datname = current_database() AND a.privilege_type <> 'CONNECT'");
-    expect(migration).toContain("NOT (a.privilege_type = 'USAGE' AND n.nspname = 'public')");
+    // Privileges and ownership are read from the cluster's own record of everything that refers to the role, not
+    // enumerated by kind, after three reviews each found a kind the list had missed (third review of #196).
+    expect(migration).toContain("FROM pg_shdepend d");
+    expect(migration).toContain("WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = v_role");
+    // The allowed entry points are named by exact signature, so an overload beside them is not admitted.
+    for (const signature of ["luxia_retention_purge_transactions(integer, boolean)", "luxia_retention_purge_invitations(integer, boolean)",
+      "luxia_retention_pseudonymize_retired(integer, boolean)", "luxia_retention_status()"])
+      expect(migration, signature).toContain(`'public.${signature}'::regprocedure::oid`);
+    // And no allowed privilege may carry the grant option.
+    expect(migration).toContain("may grant EXECUTE on ");
+    expect(migration).toContain("(a.privilege_type <> 'CONNECT' OR a.is_grantable)");
+    expect(migration).toContain("(a.privilege_type <> 'USAGE' OR a.is_grantable)");
   });
 
   it("CI mirrors it: the role has a test password, and app_user is granted no retention function", () => {
-    expect(bootstrap).toContain("CREATE ROLE luxia_retention LOGIN PASSWORD 'retention_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;");
+    expect(bootstrap).toContain("CREATE ROLE luxia_retention LOGIN PASSWORD 'retention_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOINHERIT;");
     expect(bootstrap).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.luxia_retention\w*\([^)]*\) TO app_user/);
     const ci = read(".github/workflows/ci.yml");
     expect(ci.match(/LUXIA_RETENTION_DATABASE_URL: postgresql:\/\/luxia_retention:/g)?.length).toBeGreaterThanOrEqual(3);

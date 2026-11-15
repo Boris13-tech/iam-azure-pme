@@ -2,10 +2,14 @@
 // On real roles: app_user, which serves every web request, can execute none of the four retention functions;
 // luxia_retention can execute exactly those four and nothing else; and it is no more able to enforce R4 or R6 than
 // app_user was, since enforcing stays the owner's in its own session.
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, describe, expect, it } from "vitest";
 import { rawPrisma } from "../../lib/db/raw-prisma";
+import { rollbacksAfter } from "../helpers/migration-rollbacks";
 import { retentionTestClient } from "../helpers/retention-client";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
@@ -128,44 +132,108 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
     // Applied where it has already run: what the role holds is exactly what this migration gave it.
     expect(await validate()).toBe("OK");
     const database = (await owner.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`)[0].name;
-    const seeds: Array<[string, string, string]> = [
-      [`GRANT TRUNCATE ON "RetentionRun" TO luxia_retention`, `REVOKE TRUNCATE ON "RetentionRun" FROM luxia_retention`, "TRUNCATE on the relation RetentionRun"],
-      [`GRANT SELECT ON "Subject" TO luxia_retention`, `REVOKE SELECT ON "Subject" FROM luxia_retention`, "SELECT on the relation Subject"],
-      [`GRANT CREATE ON SCHEMA public TO luxia_retention`, `REVOKE CREATE ON SCHEMA public FROM luxia_retention`, "CREATE on the schema public"],
-      [`GRANT TEMP ON DATABASE "${database}" TO luxia_retention`, `REVOKE TEMP ON DATABASE "${database}" FROM luxia_retention`, "TEMPORARY on the database"],
-      [`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO luxia_retention`,
-        `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM luxia_retention`, "is given SELECT on objects created later"],
+    // Every seed below was accepted by one of the earlier versions of this validation, as the reviews of #196 showed.
+    // Each is [statements that create it, statements that undo it, what the error must name]. The attribute, setting
+    // and membership seeds are cluster-wide, so each is undone in a finally; the resources suite runs its files one
+    // at a time, so no other suite sees the role in that state.
+    const seeds: Array<[string[], string[], string]> = [
+      [[`GRANT TRUNCATE ON "RetentionRun" TO luxia_retention`], [`REVOKE TRUNCATE ON "RetentionRun" FROM luxia_retention`], `table "RetentionRun"`],
+      [[`GRANT SELECT ON "Subject" TO luxia_retention`], [`REVOKE SELECT ON "Subject" FROM luxia_retention`], `table "Subject"`],
+      [[`GRANT SELECT ("id") ON "Subject" TO luxia_retention`], [`REVOKE SELECT ("id") ON "Subject" FROM luxia_retention`], `column id of table "Subject"`],
+      [[`GRANT CREATE ON SCHEMA public TO luxia_retention`], [`REVOKE CREATE ON SCHEMA public FROM luxia_retention`], "holds CREATE on the schema public"],
+      [[`GRANT TEMP ON DATABASE "${database}" TO luxia_retention`], [`REVOKE TEMP ON DATABASE "${database}" FROM luxia_retention`], `holds TEMPORARY on the database ${database}`],
+      [[`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO luxia_retention`],
+        [`ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM luxia_retention`], "default privileges on new relations"],
+      [["GRANT EXECUTE ON FUNCTION luxia_retention_status() TO luxia_retention WITH GRANT OPTION"],
+        ["REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION luxia_retention_status() FROM luxia_retention"], "may grant EXECUTE on luxia_retention_status() to others"],
+      // Fourth round (Gemini 4 Hydrogen): a catalog function, a type, an overload beside an entry point, a parameter.
+      [["GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO luxia_retention"],
+        ["REVOKE EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) FROM luxia_retention"], "function pg_read_file(text)"],
+      [[`GRANT USAGE ON TYPE "SubjectType" TO luxia_retention`], [`REVOKE USAGE ON TYPE "SubjectType" FROM luxia_retention`], `type "SubjectType"`],
+      [["CREATE FUNCTION public.luxia_retention_status(probe text) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+        "GRANT EXECUTE ON FUNCTION public.luxia_retention_status(text) TO luxia_retention"],
+        ["DROP FUNCTION public.luxia_retention_status(text)"], "function luxia_retention_status(text)"],
+      [["GRANT SET ON PARAMETER session_replication_role TO luxia_retention"],
+        ["REVOKE SET ON PARAMETER session_replication_role FROM luxia_retention"], "parameter session_replication_role"],
+      [["ALTER ROLE luxia_retention BYPASSRLS"], ["ALTER ROLE luxia_retention NOBYPASSRLS"], "bypassrls"],
+      [["ALTER ROLE luxia_retention CREATEROLE"], ["ALTER ROLE luxia_retention NOCREATEROLE"], "createrole"],
+      [["ALTER ROLE luxia_retention INHERIT"], ["ALTER ROLE luxia_retention NOINHERIT"], "inherit"],
+      [["ALTER ROLE luxia_retention SET statement_timeout = '1h'"], ["ALTER ROLE luxia_retention RESET statement_timeout"], "carries the setting statement_timeout"],
+      [["GRANT pg_read_all_data TO luxia_retention"], ["REVOKE pg_read_all_data FROM luxia_retention"], "member of pg_read_all_data"],
+      [["GRANT luxia_retention TO app_user"], ["REVOKE luxia_retention FROM app_user"], "has the member app_user"],
     ];
-    // The attribute and membership branches, on the live role. Both are cluster-wide, so each is undone in a finally;
-    // the resources suite runs its files one at a time, so no other suite sees the role in that state.
-    seeds.push(
-      ["ALTER ROLE luxia_retention BYPASSRLS", "ALTER ROLE luxia_retention NOBYPASSRLS", "bypassrls"],
-      ["ALTER ROLE luxia_retention CREATEROLE", "ALTER ROLE luxia_retention NOCREATEROLE", "createrole"],
-      ["GRANT pg_read_all_data TO luxia_retention", "REVOKE pg_read_all_data FROM luxia_retention", "member of pg_read_all_data"],
-      // Third review: a column privilege, the grant option on an allowed privilege, a setting on the role, and a member.
-      [`GRANT SELECT ("id") ON "Subject" TO luxia_retention`, `REVOKE SELECT ("id") ON "Subject" FROM luxia_retention`, "SELECT on the column Subject.id"],
-      ["GRANT EXECUTE ON FUNCTION luxia_retention_status() TO luxia_retention WITH GRANT OPTION",
-        "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION luxia_retention_status() FROM luxia_retention", "may grant EXECUTE to others"],
-      ["ALTER ROLE luxia_retention SET statement_timeout = '1h'", "ALTER ROLE luxia_retention RESET statement_timeout", "carries the setting statement_timeout"],
-      ["GRANT luxia_retention TO app_user", "REVOKE luxia_retention FROM app_user", "has the member app_user"],
-    );
     for (const [seed, undo, expected] of seeds) {
-      await owner.$executeRawUnsafe(seed);
+      for (const statement of seed) await owner.$executeRawUnsafe(statement);
       try {
         // The code is what the assertion rests on; the detail is read back separately so the reason is named too.
-        expect(await validate(), seed).toBe("RETENTION_ROLE_UNSAFE");
+        expect(await validate(), seed.join("; ")).toBe("RETENTION_ROLE_UNSAFE");
         const detail = await owner.$executeRawUnsafe(validation).catch((error: { message?: string }) => String(error.message));
-        expect(String(detail), seed).toContain(expected);
+        expect(String(detail), seed.join("; ")).toContain(expected);
       } finally {
-        await owner.$executeRawUnsafe(undo);
+        for (const statement of undo) await owner.$executeRawUnsafe(statement);
       }
     }
     expect(await validate()).toBe("OK");
-  });
+  }, 120_000); // seventeen seeded states, each applied, validated twice and undone: far past the 5 s default
 
   it("the role cannot grant itself anything, nor reach another role's rights", async () => {
     for (const sql of [`GRANT SELECT ON "Subject" TO luxia_retention`, `ALTER ROLE luxia_retention BYPASSRLS`,
       `SET ROLE app_user`, `CREATE TABLE luxia_retention_probe (id int)`])
       expect(await outcome(retention.$queryRawUnsafe(sql)), sql).not.toBe("OK");
   });
+
+  // Gemini 4 Hydrogen F-04 and F-05, third review of #196. A drill with Prisma's real history on a scratch database:
+  // the rollback gives the four functions back to app_user and keeps the role; the activation gate's own grant block,
+  // run on a release from before D8.4, must leave them with app_user (it used to revoke them because the role
+  // existed); and migrate deploy, then the gate again, bring the separation back.
+  it("drill: rollback, the gate on a release from before D8.4, then migrate deploy and the gate again", () => {
+    const psql = (url: string, args: string[]) => {
+      const target = new URL(url); target.search = "";
+      const result = spawnSync("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", target.toString(), ...args], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`psql failed: ${result.stderr ?? result.error}`);
+      return result.stdout.replace(/\r/g, "").trim();
+    };
+    const prisma = createRequire(import.meta.url).resolve("prisma/build/index.js");
+    const deploy = (url: string) => {
+      const result = spawnSync(process.execPath, [prisma, "migrate", "deploy"], { encoding: "utf8", env: { ...process.env, DATABASE_URL: url } });
+      if (result.status !== 0) throw new Error(`migrate deploy failed: ${result.stdout}${result.stderr}`);
+    };
+    // The gate's grant block, exactly as the workflow holds it.
+    const workflow = readFileSync(".github/workflows/production-activation-gate.yml", "utf8").replace(/\r/g, "");
+    const at = workflow.indexOf("v_d84 boolean");
+    const start = workflow.lastIndexOf("DO $$", at);
+    const gateBlock = workflow.slice(start, workflow.indexOf("END $$;", at) + "END $$;".length);
+    expect(gateBlock).toContain("GRANT EXECUTE ON FUNCTION %s TO app_user");
+    const admin = process.env.DATABASE_MIGRATION_URL!;
+    const name = `luxia_d84_${randomUUID().slice(0, 8)}`;
+    psql(admin, ["-c", `CREATE DATABASE ${name}`]);
+    const scratch = new URL(admin); scratch.pathname = `/${name}`;
+    const url = scratch.toString();
+    // How many of the four each role can execute, and whether the history records D8.4.
+    const state = () => psql(url, ["-c", `SELECT
+        (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'luxia_retention%'
+           AND has_function_privilege('app_user', p.oid, 'EXECUTE'))
+        || ' ' || (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'luxia_retention%'
+           AND has_function_privilege('luxia_retention', p.oid, 'EXECUTE'))
+        || ' ' || (SELECT count(*) FROM "_prisma_migrations" WHERE "migration_name" = '20261114120000_retention_worker_role'
+           AND "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL)`]);
+    const gate = () => psql(url, ["-1", "-c", gateBlock]);
+    try {
+      deploy(url);
+      expect(state(), "after deploy: app_user none, the role four, D8.4 recorded").toBe("0 4 1");
+      for (const script of rollbacksAfter("20261114120000_retention_worker_role")) psql(url, ["-1", "-f", script]);
+      psql(url, ["-1", "-f", "docs/operations/RETENTION-WORKER-ROLE-ROLLBACK.sql"]);
+      expect(state(), "after the rollback: back on app_user, the role kept but empty").toBe("4 0 0");
+      expect(psql(admin, ["-c", "SELECT count(*) FROM pg_roles WHERE rolname = 'luxia_retention'"])).toBe("1");
+      gate();
+      expect(state(), "the gate on a release from before D8.4 leaves them with app_user").toBe("4 0 0");
+      deploy(url);
+      expect(state(), "migrate deploy applies D8.4 again, its validation accepting the kept role").toBe("0 4 1");
+      gate();
+      expect(state(), "and the gate keeps the separation").toBe("0 4 1");
+    } finally {
+      const target = new URL(admin); target.search = "";
+      spawnSync("psql", ["-X", "-q", target.toString(), "-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`], { encoding: "utf8" });
+    }
+  }, 240_000);
 });

@@ -63,7 +63,7 @@ DO
 $retention$
 BEGIN
    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'luxia_retention') THEN
-      CREATE ROLE luxia_retention LOGIN PASSWORD 'retention_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+      CREATE ROLE luxia_retention LOGIN PASSWORD 'retention_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOINHERIT;
    ELSE
       ALTER ROLE luxia_retention LOGIN PASSWORD 'retention_password';
    END IF;

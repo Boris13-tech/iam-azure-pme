@@ -16,10 +16,12 @@ const R4_COUNTS = { invitations: 4, enforced: false };
 const R6_COUNTS = { subjects: 1, displayNames: 1, principalNames: 1, enforced: false };
 const STATUS = { R3: { eligible: 3, overdue: 0, oldestHours: 0 }, R4: { eligible: 4, overdue: 0, oldestHours: 0, held: 0 },
   R6: { eligible: 1, overdue: 0, oldestHours: 0, held: 0 }, holds: { active: 0, overdueReview: 0 } };
-const fn = (args: unknown[]) => /luxia_retention_(\w+)\(/.exec((args[0] as string[]).join("?"))?.[1] ?? "?";
-function stubDatabase(status = STATUS) {
+const fn = (args: unknown[]) => (args[0] as string[]).join("?").includes("current_user") ? "role"
+  : /luxia_retention_(\w+)\(/.exec((args[0] as string[]).join("?"))?.[1] ?? "?";
+function stubDatabase(status = STATUS, role = "luxia_retention") {
   queryRaw.mockImplementation((...args: unknown[]) => {
     switch (fn(args)) {
+      case "role": return Promise.resolve([{ role }]);
       case "purge_transactions": return Promise.resolve([{ counts: { localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: args[2] } }]);
       case "purge_invitations": return Promise.resolve([{ counts: { ...R4_COUNTS, enforced: args[2] } }]);
       case "pseudonymize_retired": return Promise.resolve([{ counts: { ...R6_COUNTS, enforced: args[2] } }]);
@@ -28,7 +30,8 @@ function stubDatabase(status = STATUS) {
     }
   });
 }
-const calls = () => queryRaw.mock.calls.map((args) => [fn(args), ...args.slice(1)]);
+// The connection's own role is checked first on every run; the lists below are the retention calls that follow.
+const calls = () => queryRaw.mock.calls.map((args) => [fn(args), ...args.slice(1)]).filter(([name]) => name !== "role");
 const { GET } = await import("../../app/api/internal/retention/route");
 const { middleware } = await import("../../middleware");
 
@@ -93,6 +96,19 @@ describe("R3 retention job: authorization", () => {
     const r4r6 = made.filter(([name]) => name === "purge_invitations" || name === "pseudonymize_retired");
     expect(r4r6).toHaveLength(2);
     expect(r4r6.every((call) => call[2] === false)).toBe(true);
+  });
+
+  // Gemini 4 Hydrogen F-06, third review of #196: a connection under any other role is refused before any call, and
+  // the failure carries its own listed code. The owner's URL configured by mistake would otherwise run the job with
+  // the owner's full rights and nothing else would show it.
+  it("refuses to run under any role but the job's own, before any retention call", async () => {
+    for (const role of ["neondb_owner", "app_user", "postgres"]) {
+      queryRaw.mockReset();
+      stubDatabase(STATUS, role);
+      await expect(runRetention(false)).rejects.toThrow("RETENTION_CONNECTION_WRONG_ROLE");
+      expect(calls(), role).toEqual([]);
+    }
+    expect(read("lib/monitoring/error-reporter.ts")).toContain('"RETENTION_CONNECTION_WRONG_ROLE"');
   });
 
   it("a record past its period plus 3 days is reported as the backlog alert, with counts and ages only", async () => {
@@ -182,11 +198,12 @@ describe("R3 retention job: migration architecture", () => {
 
   it("the runtime gets EXECUTE only; the run records stay owner-only; the rollback removes both", () => {
     // The activation gate recreates the runtime role's grants after the migrations: it must include this one.
-    // Since D8.4 (issue #150) the gate grants it to the job's own role and takes it from app_user.
+    // Since D8.4 (issue #150) the gate grants it to the job's own role and takes it from app_user once D8.4 is
+    // applied, and to app_user for a release from before it; the D8.4 drill runs that block for real.
     const gateSql = readFileSync(".github/workflows/production-activation-gate.yml", "utf8");
-    expect(gateSql).toContain("GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO luxia_retention;");
-    expect(gateSql).toContain("REVOKE EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) FROM app_user;");
-    expect(gateSql).not.toContain("GRANT EXECUTE ON FUNCTION public.luxia_retention_purge_transactions(INTEGER,BOOLEAN) TO app_user;");
+    expect(gateSql).toContain("'public.luxia_retention_purge_transactions(integer,boolean)'");
+    expect(gateSql).toContain("EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO luxia_retention', to_regprocedure(v_function));");
+    expect(gateSql).toContain("EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM app_user', to_regprocedure(v_function));");
     expect(migration.match(/GRANT [^;]+;/g)).toEqual(["GRANT EXECUTE ON FUNCTION luxia_retention_purge_transactions(integer, boolean) TO app_user;"]);
     expect(migration).toContain('REVOKE ALL ON "RetentionRun" FROM app_user;');
     // The gate's broad grant comes after the migrations: it must take these back too, like the CI bootstrap.
