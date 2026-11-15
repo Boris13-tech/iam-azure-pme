@@ -68,3 +68,10 @@ DO $$ BEGIN IF to_regclass('public."RetentionHold"') IS NOT NULL THEN
   REVOKE ALL ON "RetentionHold", "RetentionHoldEvent" FROM app_user;
   REVOKE ALL ON SEQUENCE "RetentionHoldEvent_id_seq" FROM app_user;
 END IF; END $$;
+-- What the activation gate leaves in Production: tables and sequences the owner creates later are granted to app_user
+-- on creation. Without it CI's database differed from Production's, which the G4 post-restore command, comparing a
+-- restored copy with a reference given the gate's grants, reported on the copy CI restores (review of #195).
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO app_user;

@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   ALLOWED_PARAMETERS, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
-  gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, triggerFaults,
-  unprotectedFault, validate,
+  gateGrantSql, gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf,
+  triggerFaults, unprotectedFault, validate,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
 
 /** `validate` calls `fail` and must not return; here it throws so a refusal is visible as one. */
@@ -45,11 +45,35 @@ describe("G4 post-restore: the connection a drill may use", () => {
     expect(new URL(validated("U", COPY).prismaUrl).searchParams.get("schema")).toBe("public");
     expect(() => validated("U", `${COPY}?schema=tenant_a`)).toThrow("names the schema tenant_a");
     for (const prismaOnly of ["connection_limit=1", "pool_timeout=5"]) expect(() => validated("U", `${COPY}?${prismaOnly}`)).toThrow("carries the parameter");
-    // The reference is a sibling on the same server, under a name that also marks it disposable.
-    const reference = referenceOf(target);
-    expect(reference.database).toBe("luxia_restore_rc_ref");
+    // The reference is a sibling on the same server, under a name of its own that also marks it disposable.
+    const reference = referenceOf(target, "0a1b2c3d");
+    expect(reference.database).toBe("luxia_restore_ref_0a1b2c3d");
     expect(reference.endpoint).toBe(target.endpoint);
-    expect(validated("R", reference.url).database).toBe("luxia_restore_rc_ref");
+    expect(validated("R", reference.url).database).toBe("luxia_restore_ref_0a1b2c3d");
+  });
+
+  // Gemini 4 Hydrogen finding 4: "<copy>_ref" is cut at 63 bytes by PostgreSQL, and a long copy name could be cut back
+  // to the copy's own, which the run then drops. The reference's name no longer depends on the copy's.
+  it("never names the reference after the copy, whatever the copy's length", () => {
+    const long = validated("U", `postgresql://o:p@127.0.0.1:5432/luxia_restore_${"x".repeat(49)}`);
+    expect(long.database.length).toBe(63);
+    const reference = referenceOf(long, "deadbeef");
+    expect(reference.database).toBe("luxia_restore_ref_deadbeef");
+    expect(reference.database).not.toBe(long.database);
+    expect(Buffer.byteLength(reference.database)).toBeLessThanOrEqual(63);
+    expect(() => referenceOf(long, "x")).toThrow("8-hex suffix");
+    expect(() => referenceOf(validated("U", "postgresql://o:p@127.0.0.1:5432/luxia_restore_ref_deadbeef"), "deadbeef")).toThrow("would be the copy");
+  });
+
+  it("applies the gate's grants only to a reference, with the reference's own database name", () => {
+    const gate = readFileSync(".github/workflows/production-activation-gate.yml", "utf8");
+    const sql = gateGrantSql(gate, "luxia_restore_ref_0a1b2c3d");
+    expect(sql).toContain("GRANT CONNECT ON DATABASE luxia_restore_ref_0a1b2c3d TO app_user");
+    expect(sql).not.toContain("neondb");
+    expect(sql).toContain("REVOKE ALL ON \"SignupCode\"");
+    for (const database of ["luxia_restore_rc", "neondb", "luxia_restore_ref_x"]) expect(() => gateGrantSql(gate, database), database).toThrow("only ever applied to a reference");
+    expect(serverOf("luxia_restore_ref_0a1b2c3d on 172.17.0.2/32:5432")).toBe(serverOf("luxia_restore_rc on 172.17.0.2/32:5432"));
+    expect(serverOf("luxia_restore_ref_0a1b2c3d on 172.17.0.3/32:5432")).not.toBe(serverOf("luxia_restore_rc on 172.17.0.2/32:5432"));
   });
 
   // Codex F2: the database name alone let the owner checks run on the copy while the runtime-role checks ran on a
@@ -70,9 +94,12 @@ describe("G4 post-restore: the connection a drill may use", () => {
   // Antigravity finding 1: the server's own address was recorded but never judged, so a local tunnel to a managed
   // database whose name happened to match would have passed.
   it("refuses a server whose own address is reachable beyond this network", () => {
-    for (const local of ["socket:none", "127.0.0.1:5432", "172.17.0.2/32:5432", "10.1.2.3:5432", "192.168.1.9:5432", "::1:5432", "fd00::2:5432"]) {
+    for (const local of ["127.0.0.1:5432", "172.17.0.2/32:5432", "10.1.2.3:5432", "192.168.1.9:5432", "::1:5432", "fd00::2:5432"]) {
       expect(publicAddress(`luxia_restore_rc on ${local}`), local).toBeNull();
     }
+    // Hydrogen finding 3: the drill connects over TCP, so a server that saw no TCP peer was reached through something
+    // that forwards to a socket — possibly another machine's.
+    expect(publicAddress("luxia_restore_rc on socket:none")).toContain("something forwards it");
     // Loopback is the whole address ::1, not every address that starts with those characters (third review).
     for (const remote of ["3.120.4.5:5432", "203.0.113.9/32:5432", "2a05:d014::1:5432", "::1234:abcd:1:5432", "::10.0.0.1:5432"]) {
       expect(publicAddress(`luxia_restore_rc on ${remote}`), remote).toContain("reachable beyond this network");
@@ -131,8 +158,14 @@ describe("G4 post-restore: the copy against a database migrated from the same re
   it("reads every kind it compares", () => {
     for (const fragment of ["FROM pg_policies WHERE schemaname = 'public'", "pg_get_triggerdef(t.oid)", "t.tgenabled::text",
       "c.relrowsecurity::text", "c.relforcerowsecurity::text", "p.prosecdef::text", "p.proconfig", "md5(coalesce(p.prosrc, ''))",
-      "has_function_privilege('public', p.oid, 'EXECUTE')"])
+      "has_function_privilege('public', p.oid, 'EXECUTE')",
+      // Fourth review (Hydrogen finding 1, Argon findings 1 to 3): grants, columns, constraints, indexes, views, owners.
+      "aclexplode(c.relacl)", "aclexplode(a.attacl)", "aclexplode(p.proacl)", "aclexplode(n.nspacl)", "aclexplode(da.defaclacl)",
+      "format_type(a.atttypid, a.atttypmod)", "pg_get_expr(d.adbin, d.adrelid)", "pg_get_constraintdef(k.oid)", "pg_get_indexdef(i.indexrelid)",
+      "pg_get_viewdef(c.oid)", "pg_get_userbyid(c.relowner)", "pg_get_userbyid(p.proowner)", "FROM pg_default_acl da"])
       expect(FINGERPRINT_SQL, fragment).toContain(fragment);
+    // The role that migrated is "owner" on both sides, so a copy restored by another role still compares.
+    expect(FINGERPRINT_SQL).toContain("= current_user THEN 'owner'");
   });
 });
 

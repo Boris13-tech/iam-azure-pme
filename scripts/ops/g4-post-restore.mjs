@@ -12,12 +12,13 @@
 // change the target; and the one validated URL is what both psql and Prisma receive (Codex F1, review of #195).
 // Counts and verdicts only: no row content is read or printed.
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 // What counts as a fault lives in its own module, so a test can drive each decision to its failing answer instead of
 // reading it in this source (Codex F5, review of #195).
-import { EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateRevokes,
-  heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, triggerFaults, unprotectedFault,
-  validate } from "./g4-post-restore-checks.mjs";
+import { EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateGrantSql,
+  gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf, triggerFaults,
+  unprotectedFault, validate } from "./g4-post-restore-checks.mjs";
 
 const fail = (message) => { console.error(`REFUSED: ${message}`); process.exit(1); };
 const arg = (name) => { const at = process.argv.indexOf(`--${name}`); return at >= 0 ? process.argv[at + 1] : undefined; };
@@ -35,6 +36,10 @@ const app = validate("LUXIA_RESTORE_APP_URL", process.env.LUXIA_RESTORE_APP_URL,
 // the runtime-role checks ran on a different, clean instance of the same name (Codex F2, review of #195).
 const differentTargets = oneTarget(owner, app);
 if (differentTargets) fail(differentTargets);
+// The job's own connection, when the release runs it as a role of its own (D8.4, luxia_retention): optional here,
+// required below if the copy has that migration, and held to the same target as the two others.
+const job = process.env.LUXIA_RESTORE_RETENTION_URL ? validate("LUXIA_RESTORE_RETENTION_URL", process.env.LUXIA_RESTORE_RETENTION_URL, fail) : null;
+if (job) { const elsewhereJob = oneTarget(owner, job); if (elsewhereJob) fail(elsewhereJob); }
 
 /**
  * The environment every tool runs with: the parent's, minus every libpq variable. PGHOSTADDR, PGHOST, PGSERVICE and
@@ -98,15 +103,21 @@ if (deploy.status !== 0) {
 // Step 10: the invariants Production must keep, on real restored data.
 // The copy against a reference: a second disposable database on the same server, migrated from the same release, read
 // the same way. It is created and dropped here, and never holds any data (Gemini 4 Hydrogen findings 1, 2 and 5).
-const reference = referenceOf(owner);
+const reference = referenceOf(owner, randomBytes(4).toString("hex"));
 const server = (sql) => psql(owner.url, sql); // CREATE and DROP DATABASE cannot run inside a transaction
+const gate = readFileSync(".github/workflows/production-activation-gate.yml", "utf8");
 let referenceLines = null;
 let referenceError = null;
 try {
   server(`DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)`);
   server(`CREATE DATABASE ${reference.database}`);
+  // The reference must answer from the copy's own server, like the copy (Gemini 4 Hydrogen finding 8).
+  const referenceIdentity = identity(reference.url);
+  if (serverOf(referenceIdentity) !== serverOf(ownerIdentity)) throw new Error(`the reference answered from ${referenceIdentity}`);
   const migrated = migrate(reference);
   if (migrated.status !== 0) throw new Error((migrated.stdout + migrated.stderr).split("\n").filter(Boolean).slice(-1)[0] ?? "migrate deploy failed");
+  // Production's grants are the migrations' and the activation gate's: the reference gets the release's gate grants.
+  psql(reference.url, `BEGIN;\n${gateGrantSql(gate, reference.database)}\nCOMMIT;`);
   referenceLines = readOnly(reference.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
 } catch (error) {
   referenceError = error instanceof Error ? error.message : String(error);
@@ -115,7 +126,7 @@ try {
 }
 const copyLines = readOnly(owner.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
 const drift = referenceLines ? fingerprintFaults(copyLines, referenceLines) : [`no reference: ${referenceError}`];
-check("tables, row-level security, policies, triggers and functions are exactly the release's", drift.length === 0,
+check("schema, grants, policies, triggers and functions are exactly the release's", drift.length === 0,
   drift.length === 0 ? `${copyLines.length} objects, identical to a database migrated from the same release`
     : `${drift.length} differences: ${drift.slice(0, 20).join("; ")}${drift.length > 20 ? "; …" : ""}`);
 
@@ -128,7 +139,7 @@ const runtimeRole = readOnly(app.url, `SELECT current_user || ' bypassrls=' || r
 check("runtime role restricted", runtimeRole === EXPECTED_RUNTIME_ROLE, runtimeRole);
 
 // The narrowings the release's activation gate applies to app_user, read from that gate: none may be back on the copy.
-const revokes = gateRevokes(readFileSync(".github/workflows/production-activation-gate.yml", "utf8"));
+const revokes = gateRevokes(gate);
 const regranted = readOnly(owner.url, heldRevokedSql(revokes));
 check("the activation gate's narrowings of the runtime role all hold", revokes.length > 0 && regranted === "",
   revokes.length === 0 ? "no narrowing found in the release's gate" : regranted ? `held again: ${regranted}` : `${revokes.length} privileges, none held`);
@@ -192,13 +203,24 @@ const faults = triggerFaults(triggerLines);
 check("the guard triggers are on their own tables and operations, and fire for ordinary writes", faults.length === 0,
   faults.join("; ") || `${Object.keys(EXPECTED_TRIGGERS).length} expected, ${triggerLines.length} present, none disabled or replica-only`);
 
-// The daily job's own entry points, on real restored data: R3's dry run deletes nothing and the status only counts,
-// but each records its own run in the copy's RetentionRun table (owner-only, counts only), so neither can sit in a
-// read-only transaction. These are the only two statements here that write, and only to the copy step 12 destroys.
-const r3 = psql(owner.url, `SELECT luxia_retention_purge_transactions(1000, false)::text`);
-check("R3 dry run (records its run in the copy)", r3.startsWith("{"), r3);
-const status = psql(owner.url, `SELECT luxia_retention_status()::text`);
-check("retention status (records its run in the copy)", status.startsWith("{"), status);
+// The daily job's own entry points, on real restored data, run by the role the job really runs as — not by the owner,
+// which would pass whatever the runtime's privileges had become (Argon finding 3 and Gemini 4 Hydrogen finding 2):
+// app_user for a release before D8.4, luxia_retention once D8.4 is applied. R3's dry run deletes nothing and the
+// status only counts, but each records its own run in the copy's RetentionRun table (owner-only, counts only), so
+// neither can sit in a read-only transaction. These are the only two statements here that write, and only to the copy
+// step 12 destroys.
+const ownRole = readOnly(owner.url, `SELECT EXISTS (SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '20261114120000_retention_worker_role'
+  AND finished_at IS NOT NULL AND rolled_back_at IS NULL)::text`) === "true";
+const runner = ownRole ? job : app;
+if (!runner) {
+  check("the daily job runs on the copy as its own role", false, "D8.4 is applied: set LUXIA_RESTORE_RETENTION_URL to luxia_retention on the copy");
+} else {
+  const as = readOnly(runner.url, "SELECT current_user");
+  const r3 = psql(runner.url, `SELECT luxia_retention_purge_transactions(1000, false)::text`);
+  check(`R3 dry run as ${as} (records its run in the copy)`, r3.startsWith("{"), r3);
+  const status = psql(runner.url, `SELECT luxia_retention_status()::text`);
+  check(`retention status as ${as} (records its run in the copy)`, status.startsWith("{"), status);
+}
 
 // How much data came back, per table, with no content: the planner's estimate after the migrations. Enough to see that
 // a table came back empty when it should not have, and it reads no row.

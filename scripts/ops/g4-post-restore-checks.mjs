@@ -45,13 +45,20 @@ export function validate(name, value, fail) {
  * The same server, another disposable database: the reference that the copy is compared with. It is migrated from the
  * same release, so every object a migration defines can be compared one for one with the restored copy's.
  */
-export function referenceOf(owner) {
+export function referenceOf(owner, suffix) {
+  // Its own name, never derived by appending to the copy's: PostgreSQL cuts a name at 63 bytes, and a long copy name
+  // plus "_ref" could be cut back to the copy's own, which would then be dropped (Gemini 4 Hydrogen finding 4).
+  if (!/^[a-f0-9]{8}$/.test(suffix)) throw new Error("the reference needs an 8-hex suffix");
+  const database = `luxia_restore_ref_${suffix}`;
+  if (database === owner.database) throw new Error("the reference would be the copy");
   const url = new URL(owner.url);
-  const database = `${owner.database}_ref`;
   url.pathname = `/${database}`;
   const forPrisma = new URL(url.toString()); forPrisma.searchParams.set("schema", "public");
   return { url: url.toString(), prismaUrl: forPrisma.toString(), database, endpoint: owner.endpoint };
 }
+
+/** The server part of what a connection reports about itself, so a copy and its reference can be compared. */
+export const serverOf = (identity) => /\son (.+)$/.exec(identity)?.[1] ?? "";
 
 /**
  * Everything the migrations define that guards the data, one line per object, read the same way from the copy and from
@@ -59,24 +66,61 @@ export function referenceOf(owner) {
  * had listed, a function body changed in place (Gemini 4 Hydrogen findings 1, 2 and 5, review of #195) — so the copy is
  * compared with a database migrated from the same release instead: anything missing, changed or added is a fault.
  *
- * Read: the tables of schema public and their row-level security flags; every policy with its command, roles and both
- * expressions; every trigger as PostgreSQL itself prints it, with its state; every function with its security
- * attributes, its settings, a digest of its body, and whether PUBLIC may execute it. Grants to app_user are not here:
- * the activation gate gives them, not the migrations, and they are checked against the gate below.
+ * Read: the schemas; the relations of schema public with their kind, owner and row-level security flags, and every
+ * grant on them, on their columns, on the schema and on the functions; every column with its type, nullability and
+ * default; every constraint and index as PostgreSQL prints them; every view's definition; every policy with its
+ * command, roles and both expressions; every trigger as PostgreSQL prints it, with its state; every function with its
+ * owner, security attributes, settings, a digest of its body, and whether PUBLIC may execute it; and the default
+ * privileges. The reference is given the activation gate's grants too, so the comparison covers what the runtime role
+ * may do as well as what the migrations define (Gemini 4 Hydrogen finding 1 and Argon findings 1 to 3, fourth review).
+ * The role that migrated is written "owner" on both sides, whatever it is called.
  */
+const OWNER = `CASE WHEN %s = current_user THEN 'owner' ELSE %s::text END`;
+const owned = (expression) => OWNER.replaceAll("%s", expression);
+const ACL = (column) => `coalesce((SELECT string_agg(${owned("CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END")} || ':' || a.privilege_type
+      || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END, ',' ORDER BY 1) FROM aclexplode(${column}) a), 'default')`;
 export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER BY line), '') FROM (
-  SELECT 'table ' || c.relname || ' ' || c.relkind::text || ' rls=' || c.relrowsecurity::text || ' forced=' || c.relforcerowsecurity::text AS line
+  SELECT 'schema ' || n.nspname || ' owner=' || ${owned("pg_get_userbyid(n.nspowner)")} || ' acl=' || ${ACL("n.nspacl")} AS line
+    FROM pg_namespace n WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'
+  UNION ALL SELECT 'table ' || c.relname || ' ' || c.relkind::text || ' owner=' || ${owned("pg_get_userbyid(c.relowner)")}
+      || ' rls=' || c.relrowsecurity::text || ' forced=' || c.relforcerowsecurity::text || ' acl=' || ${ACL("c.relacl")}
     FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
+  UNION ALL SELECT 'column ' || c.relname || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
+      || ' notnull=' || a.attnotnull::text || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-') || ' acl=' || ${ACL("a.attacl")}
+    FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p', 'v', 'm') AND a.attnum > 0 AND NOT a.attisdropped
+  UNION ALL SELECT 'constraint ' || c.relname || ' ' || k.conname || ' ' || pg_get_constraintdef(k.oid)
+    FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid WHERE c.relnamespace = 'public'::regnamespace
+  UNION ALL SELECT 'index ' || pg_get_indexdef(i.indexrelid)
+    FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid WHERE c.relnamespace = 'public'::regnamespace
+  UNION ALL SELECT 'view ' || c.relname || ' ' || md5(pg_get_viewdef(c.oid))
+    FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('v', 'm')
+  UNION ALL SELECT 'default-privileges ' || ${owned("pg_get_userbyid(da.defaclrole)")} || ' ' || da.defaclobjtype::text
+      || ' schema=' || coalesce(da.defaclnamespace::regnamespace::text, '-') || ' acl=' || ${ACL("da.defaclacl")}
+    FROM pg_default_acl da
   UNION ALL SELECT 'policy ' || tablename || ' ' || policyname || ' ' || permissive || ' ' || cmd || ' to=' || array_to_string(roles, ',')
       || ' using=' || coalesce(qual, '-') || ' check=' || coalesce(with_check, '-')
     FROM pg_policies WHERE schemaname = 'public'
   UNION ALL SELECT 'trigger ' || pg_get_triggerdef(t.oid) || ' state=' || t.tgenabled::text
     FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE NOT t.tgisinternal AND c.relnamespace = 'public'::regnamespace
-  UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' definer=' || p.prosecdef::text
+  UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' owner=' || ${owned("pg_get_userbyid(p.proowner)")}
+      || ' definer=' || p.prosecdef::text
       || ' config=' || coalesce(array_to_string(p.proconfig, ';'), '-') || ' body=' || md5(coalesce(p.prosrc, ''))
-      || ' public=' || has_function_privilege('public', p.oid, 'EXECUTE')::text
+      || ' public=' || has_function_privilege('public', p.oid, 'EXECUTE')::text || ' acl=' || ${ACL("p.proacl")}
     FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
 ) lines`;
+
+/**
+ * The activation gate's grant step, read from the release's own gate, for the reference: Production's grants are the
+ * migrations' plus these, so the reference only matches a restored Production copy once it has them too. The gate
+ * names Production's database; the reference's own name takes its place.
+ */
+export function gateGrantSql(gate, database) {
+  if (!/^luxia_restore_ref_[a-f0-9]{8}$/.test(database)) throw new Error("gate grants are only ever applied to a reference database");
+  const block = /Bootstrap least-privilege runtime grants[\s\S]*?<<'SQL'\n([\s\S]*?)\n\s*SQL\n/.exec(gate.replace(/\r/g, ""))?.[1];
+  if (!block) throw new Error("the release's activation gate has no grant step");
+  return block.replace(/^ {10}/gm, "").replace(/DATABASE neondb\b/g, `DATABASE ${database}`);
+}
 
 /** The lines of the reference missing from the copy, and the copy's lines the reference does not have. */
 export function fingerprintFaults(copy, reference) {
@@ -160,7 +204,10 @@ export function publicAddress(identity) {
   // The port is after the last colon, because an IPv6 address carries colons of its own.
   const address = /\son (.+):[^:]*$/.exec(identity)?.[1];
   if (!address) return `the server did not report an address: ${identity}`;
-  if (address === "socket") return null;
+  // Every drill connection is TCP to a loopback address, so the server must see a TCP peer. A server that reports none
+  // was reached over a Unix socket at its end: a local port forwarded to some other machine's socket would look like
+  // that (Gemini 4 Hydrogen finding 3).
+  if (address === "socket") return "the server saw no network connection, though the drill connects over TCP: something forwards it";
   const plain = address.replace(/\/\d+$/, "");
   const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(plain)?.slice(1).map(Number);
   if (!octets) {

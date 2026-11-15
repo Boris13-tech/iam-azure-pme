@@ -276,6 +276,8 @@ jobs:
       env:
         LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
         LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored
+        # Used only once the copy has D8.4, whose job runs as its own role.
+        LUXIA_RESTORE_RETENTION_URL: postgresql://luxia_retention:retention_password@localhost:5432/luxia_restored
 
     - name: The application's PostgreSQL suites pass on the restored database
       run: |

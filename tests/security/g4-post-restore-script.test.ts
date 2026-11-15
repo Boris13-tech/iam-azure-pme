@@ -67,7 +67,8 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
   });
 
   it("refuses any database whose name does not mark it a restore copy, Production's included", () => {
-    for (const database of ["neondb", "NEONDB", "neondb_prod", "luxia_db", "luxia_restored_elsewhere_x"].slice(0, 4)) {
+    // Every name in the list is exercised: the list itself is the evidence (Gemini 4 Hydrogen finding 5).
+    for (const database of ["neondb", "NEONDB", "neondb_prod", "luxia_db", "postgres", "luxia_restor"]) {
       const { code, out, calls: made } = run(OK_ARGS, { LUXIA_RESTORE_TARGET_URL: `postgresql://u:p@127.0.0.1:15560/${database}` });
       expect(code, database).toBe(1);
       expect(out, database).toContain(`names the database ${database}: the drill target must be named luxia_restore`);
@@ -164,7 +165,11 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     // One call site wraps everything in BEGIN READ ONLY; the migrations go through Prisma. A third direct call would
     // change this list and has to be reviewed.
     expect(source).toMatch(/const readOnly = \(connection, sql\) => psql\(connection, `BEGIN READ ONLY;/);
-    const direct = [...source.matchAll(/^const \w+ = psql\(owner\.url, `([^`]+)`\)/gm)].map((m) => m[1].trim());
+    // On the copy, only the job's two entry points, run by the job's own role (runner), never by the owner.
+    const direct = [...source.matchAll(/const \w+ = psql\(runner\.url, `([^`]+)`\)/g)].map((m) => m[1].trim());
+    expect(source).not.toMatch(/psql\(owner\.url, `SELECT luxia_retention/);
+    // And on the reference, only the release's gate grants, in one transaction.
+    expect([...source.matchAll(/psql\(reference\.url, `([^`]+)`\)/g)].map((m) => m[1])).toEqual(["BEGIN;\\n${gateGrantSql(gate, reference.database)}\\nCOMMIT;"]);
     expect(direct).toEqual([
       "SELECT luxia_retention_purge_transactions(1000, false)::text",
       "SELECT luxia_retention_status()::text",
