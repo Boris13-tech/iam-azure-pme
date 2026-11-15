@@ -4,8 +4,12 @@
  * reports; what counts as a fault lives here.
  */
 
-/** Parameters a drill connection may carry. Anything else can send the connection somewhere other than the copy. */
-export const ALLOWED_PARAMETERS = new Set(["sslmode", "schema", "connect_timeout", "connection_limit", "pool_timeout"]);
+/**
+ * Parameters a drill connection may carry. Anything else can send the connection somewhere other than the copy. Only
+ * libpq's own are kept for psql; `schema` is Prisma's, accepted only as `public` and dropped before psql sees the URL,
+ * which refuses any parameter it does not know (Gemini 4 Hydrogen finding 4, review of #195).
+ */
+export const ALLOWED_PARAMETERS = new Set(["sslmode", "connect_timeout", "schema"]);
 /** A restore copy names itself one: the drill creates it, so it can be named so, and no other database qualifies. */
 export const DISPOSABLE_NAME = /^luxia_restore[a-z0-9_]*$/;
 const LOOPBACK = ["127.0.0.1", "localhost", "[::1]", "::1"];
@@ -23,12 +27,107 @@ export function validate(name, value, fail) {
   for (const parameter of url.searchParams.keys()) {
     if (!ALLOWED_PARAMETERS.has(parameter)) return fail(`${name} carries the parameter ${parameter}, which could send the connection elsewhere`);
   }
+  const schemas = url.searchParams.getAll("schema");
+  if (schemas.some((schema) => schema !== "public")) return fail(`${name} names the schema ${schemas.join(",")}: the drill checks schema public only`);
   const database = url.pathname.replace(/^\//, "");
   if (!/^[A-Za-z0-9_]+$/.test(database)) return fail(`${name} has no plain database name`);
   if (!DISPOSABLE_NAME.test(database)) return fail(`${name} names the database ${database}: the drill target must be named luxia_restore… so that no other database can be reached`);
+  // What psql receives: libpq's parameters only. What Prisma receives: the same, with its schema pinned to public.
+  const forPsql = new URL(url.toString()); forPsql.searchParams.delete("schema");
+  const forPrisma = new URL(forPsql.toString()); forPrisma.searchParams.set("schema", "public");
   // localhost and 127.0.0.1 are the same endpoint here: both are refused unless they are loopback, and the two URLs
   // are compared on the resolved server identity as well, read back from each connection.
-  return { url: url.toString(), database, endpoint: `${url.hostname === "localhost" ? "127.0.0.1" : url.hostname}:${url.port || "5432"}` };
+  return { url: forPsql.toString(), prismaUrl: forPrisma.toString(), database,
+    endpoint: `${url.hostname === "localhost" ? "127.0.0.1" : url.hostname}:${url.port || "5432"}` };
+}
+
+/**
+ * The same server, another disposable database: the reference that the copy is compared with. It is migrated from the
+ * same release, so every object a migration defines can be compared one for one with the restored copy's.
+ */
+export function referenceOf(owner) {
+  const url = new URL(owner.url);
+  const database = `${owner.database}_ref`;
+  url.pathname = `/${database}`;
+  const forPrisma = new URL(url.toString()); forPrisma.searchParams.set("schema", "public");
+  return { url: url.toString(), prismaUrl: forPrisma.toString(), database, endpoint: owner.endpoint };
+}
+
+/**
+ * Everything the migrations define that guards the data, one line per object, read the same way from the copy and from
+ * the reference. A list of named checks kept missing what it did not name — a weakened policy, a guard trigger nobody
+ * had listed, a function body changed in place (Gemini 4 Hydrogen findings 1, 2 and 5, review of #195) — so the copy is
+ * compared with a database migrated from the same release instead: anything missing, changed or added is a fault.
+ *
+ * Read: the tables of schema public and their row-level security flags; every policy with its command, roles and both
+ * expressions; every trigger as PostgreSQL itself prints it, with its state; every function with its security
+ * attributes, its settings, a digest of its body, and whether PUBLIC may execute it. Grants to app_user are not here:
+ * the activation gate gives them, not the migrations, and they are checked against the gate below.
+ */
+export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER BY line), '') FROM (
+  SELECT 'table ' || c.relname || ' ' || c.relkind::text || ' rls=' || c.relrowsecurity::text || ' forced=' || c.relforcerowsecurity::text AS line
+    FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
+  UNION ALL SELECT 'policy ' || tablename || ' ' || policyname || ' ' || permissive || ' ' || cmd || ' to=' || array_to_string(roles, ',')
+      || ' using=' || coalesce(qual, '-') || ' check=' || coalesce(with_check, '-')
+    FROM pg_policies WHERE schemaname = 'public'
+  UNION ALL SELECT 'trigger ' || pg_get_triggerdef(t.oid) || ' state=' || t.tgenabled::text
+    FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE NOT t.tgisinternal AND c.relnamespace = 'public'::regnamespace
+  UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' definer=' || p.prosecdef::text
+      || ' config=' || coalesce(array_to_string(p.proconfig, ';'), '-') || ' body=' || md5(coalesce(p.prosrc, ''))
+      || ' public=' || has_function_privilege('public', p.oid, 'EXECUTE')::text
+    FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+) lines`;
+
+/** The lines of the reference missing from the copy, and the copy's lines the reference does not have. */
+export function fingerprintFaults(copy, reference) {
+  const have = new Set(copy);
+  const expected = new Set(reference);
+  const missing = reference.filter((line) => !have.has(line)).map((line) => `missing or changed: ${line}`);
+  const added = copy.filter((line) => !expected.has(line)).map((line) => `not in the release: ${line}`);
+  return [...missing, ...added];
+}
+
+/**
+ * The privileges the activation gate takes from app_user, read from the release's own gate: every
+ * `REVOKE … ON … FROM app_user` of its grant step. The copy must not give app_user back any of them (Gemini 4 Hydrogen
+ * finding 5, review of #195), and reading them from the gate means a narrowing added later is checked without this file
+ * having to name it.
+ */
+const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
+const SEQUENCE_PRIVILEGES = ["USAGE", "SELECT", "UPDATE"];
+export function gateRevokes(gate) {
+  // In order, as the gate runs them: a REVOKE takes privileges away and a later GRANT on the same named objects gives
+  // some back (REVOKE ALL on Invitation, then GRANT SELECT, INSERT, UPDATE). What is left revoked at the end is what
+  // app_user must not hold. The broad grant on ALL TABLES comes first and names no table, so it is not read here.
+  const revoked = new Map();
+  const pattern = /(REVOKE|GRANT) ([A-Z, ]+) ON (SEQUENCE )?((?:"[A-Za-z0-9_]+"(?:, *)?)+) (FROM|TO) app_user;/g;
+  for (const match of gate.replace(/\r/g, "").matchAll(pattern)) {
+    const [, verb, list, sequenceWord, objects, direction] = match;
+    if ((verb === "REVOKE") !== (direction === "FROM")) continue;
+    const sequence = Boolean(sequenceWord);
+    const named = list.split(",").map((privilege) => privilege.trim());
+    const privileges = named.includes("ALL") ? (sequence ? SEQUENCE_PRIVILEGES : TABLE_PRIVILEGES) : named;
+    for (const object of objects.split(",").map((name) => name.trim().replace(/"/g, ""))) {
+      for (const privilege of privileges) {
+        const key = `${object}\u0000${privilege}\u0000${sequence}`;
+        if (verb === "REVOKE") revoked.set(key, { object, privilege, sequence });
+        else revoked.delete(key);
+      }
+    }
+  }
+  return [...revoked.values()];
+}
+/** SQL listing the revoked privileges app_user holds again on the copy; objects the release does not have are skipped. */
+export function heldRevokedSql(revokes) {
+  if (revokes.length === 0) return `SELECT 'the gate revokes nothing from app_user'`;
+  const rows = revokes.map(({ object, privilege, sequence }) => {
+    if (!/^[A-Za-z0-9_]+$/.test(object) || !/^[A-Z]+$/.test(privilege)) throw new Error(`unexpected revoke: ${object} ${privilege}`);
+    return `('${object}', '${privilege}', ${sequence})`;
+  });
+  return `SELECT coalesce(string_agg(r.object || ':' || r.privilege, ', ' ORDER BY r.object, r.privilege), '') FROM (VALUES ${rows.join(", ")}) r(object, privilege, sequence)
+    WHERE to_regclass(format('public.%I', r.object)) IS NOT NULL
+      AND CASE WHEN r.sequence THEN has_sequence_privilege('app_user', format('public.%I', r.object), r.privilege)
+               ELSE has_table_privilege('app_user', format('public.%I', r.object), r.privilege) END`;
 }
 
 /**
@@ -94,8 +193,11 @@ export function refusedTarget(checks) {
   return null;
 }
 
-/** The runtime role as it must answer for itself on the copy. */
-export const EXPECTED_RUNTIME_ROLE = "app_user bypassrls=false superuser=false createrole=false";
+/**
+ * The runtime role as it must answer for itself on the copy: no attribute that widens it, no role it can become, and
+ * nothing it owns, since an owner is exempt from row-level security unless it is forced and can always change it.
+ */
+export const EXPECTED_RUNTIME_ROLE = "app_user bypassrls=false superuser=false createrole=false memberships=0 owns=0";
 
 /**
  * The two tables that hold an organization without row-level security, by review: Tenant, the scope itself, and
@@ -114,7 +216,8 @@ export function unprotectedFault(found) {
 }
 
 /** The tables only their owner may touch. Each must still be owner-only, so none drifts out of the candidate set. */
-export const EXPECTED_OWNER_ONLY = ["OrganizationErasure", "RateLimitBucket", "RateLimitConfig", "RetentionRun", "SignupCode"];
+export const EXPECTED_OWNER_ONLY = ["OrganizationErasure", "RateLimitBucket", "RateLimitConfig", "RetentionHold", "RetentionHoldEvent",
+  "RetentionRun", "SignupCode"];
 export function ownerOnlyFault(found) {
   const missing = EXPECTED_OWNER_ONLY.filter((name) => !found.includes(name));
   return missing.length ? `no longer owner-only: ${missing.join(", ")}` : null;

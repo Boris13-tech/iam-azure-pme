@@ -12,10 +12,12 @@
 // change the target; and the one validated URL is what both psql and Prisma receive (Codex F1, review of #195).
 // Counts and verdicts only: no row content is read or printed.
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 // What counts as a fault lives in its own module, so a test can drive each decision to its failing answer instead of
 // reading it in this source (Codex F5, review of #195).
-import { EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, cleanEnvironment, oneTarget, ownerOnlyFault, publicAddress, refusedTarget, sameServer, triggerFaults, unprotectedFault, validate } from "./g4-post-restore-checks.mjs";
+import { EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateRevokes,
+  heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, triggerFaults, unprotectedFault,
+  validate } from "./g4-post-restore-checks.mjs";
 
 const fail = (message) => { console.error(`REFUSED: ${message}`); process.exit(1); };
 const arg = (name) => { const at = process.argv.indexOf(`--${name}`); return at >= 0 ? process.argv[at + 1] : undefined; };
@@ -82,18 +84,54 @@ if (targetRefused) {
 const migrations = () => readOnly(owner.url, `SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`);
 const before = migrations();
 const deployStarted = Date.now();
-const deploy = spawnSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"],
-  { encoding: "utf8", env: { ...CLEAN_ENV, DATABASE_URL: owner.url } });
+const migrate = (target) => spawnSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"],
+  { encoding: "utf8", env: { ...CLEAN_ENV, DATABASE_URL: target.prismaUrl } });
+const deploy = migrate(owner);
 const deploySeconds = Math.round((Date.now() - deployStarted) / 1000);
 check("migrate deploy", deploy.status === 0, deploy.status === 0 ? `${before} applied before, ${migrations()} after, ${deploySeconds} s`
   : (deploy.stdout + deploy.stderr).split("\n").filter(Boolean).slice(-1)[0] ?? "failed");
-if (deploy.status !== 0) { writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ release, reached, checks }, null, 1)); process.exit(1); }
+if (deploy.status !== 0) {
+  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release, reached, checks, passed: false }, null, 1));
+  process.exit(1);
+}
 
 // Step 10: the invariants Production must keep, on real restored data.
+// The copy against a reference: a second disposable database on the same server, migrated from the same release, read
+// the same way. It is created and dropped here, and never holds any data (Gemini 4 Hydrogen findings 1, 2 and 5).
+const reference = referenceOf(owner);
+const server = (sql) => psql(owner.url, sql); // CREATE and DROP DATABASE cannot run inside a transaction
+let referenceLines = null;
+let referenceError = null;
+try {
+  server(`DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)`);
+  server(`CREATE DATABASE ${reference.database}`);
+  const migrated = migrate(reference);
+  if (migrated.status !== 0) throw new Error((migrated.stdout + migrated.stderr).split("\n").filter(Boolean).slice(-1)[0] ?? "migrate deploy failed");
+  referenceLines = readOnly(reference.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
+} catch (error) {
+  referenceError = error instanceof Error ? error.message : String(error);
+} finally {
+  try { server(`DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)`); } catch { /* reported by the check below */ }
+}
+const copyLines = readOnly(owner.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
+const drift = referenceLines ? fingerprintFaults(copyLines, referenceLines) : [`no reference: ${referenceError}`];
+check("tables, row-level security, policies, triggers and functions are exactly the release's", drift.length === 0,
+  drift.length === 0 ? `${copyLines.length} objects, identical to a database migrated from the same release`
+    : `${drift.length} differences: ${drift.slice(0, 20).join("; ")}${drift.length > 20 ? "; …" : ""}`);
+
 // psql renders a boolean as true/false, so SQL builds the one line each check compares.
 const runtimeRole = readOnly(app.url, `SELECT current_user || ' bypassrls=' || r.rolbypassrls || ' superuser=' || r.rolsuper || ' createrole=' || r.rolcreaterole
+    || ' memberships=' || (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid)
+    || ' owns=' || ((SELECT count(*) FROM pg_class c WHERE c.relowner = r.oid) + (SELECT count(*) FROM pg_proc p WHERE p.proowner = r.oid)
+                  + (SELECT count(*) FROM pg_namespace n WHERE n.nspowner = r.oid))
   FROM pg_roles r WHERE r.rolname = current_user`);
 check("runtime role restricted", runtimeRole === EXPECTED_RUNTIME_ROLE, runtimeRole);
+
+// The narrowings the release's activation gate applies to app_user, read from that gate: none may be back on the copy.
+const revokes = gateRevokes(readFileSync(".github/workflows/production-activation-gate.yml", "utf8"));
+const regranted = readOnly(owner.url, heldRevokedSql(revokes));
+check("the activation gate's narrowings of the runtime role all hold", revokes.length > 0 && regranted === "",
+  revokes.length === 0 ? "no narrowing found in the release's gate" : regranted ? `held again: ${regranted}` : `${revokes.length} privileges, none held`);
 
 // Row-level security must be ENABLED and FORCED: force alone, with it disabled, protects nothing (Codex F2).
 // Two tables hold an organization without it, by review: Tenant (the scope itself) and LegacyUserBridge (the only link
@@ -181,8 +219,11 @@ const report = {
   tables: Object.keys(rows).length,
   checks,
   wroteToTheCopy: ["RetentionRun: one row for the R3 dry run, one for the status call"],
+  wroteToTheServer: [`${reference.database}: created empty, migrated from the release, read, and dropped`],
   limits: ["The server address is checked against the ranges no database beyond this network can have; a PostgreSQL "
-    + "server on another machine inside the same private network would not be distinguished from a local copy."],
+    + "server on another machine inside the same private network would not be distinguished from a local copy.",
+    "Grants to app_user come from the activation gate, not the migrations: they are checked against the release's gate "
+    + "narrowings and the owner-only tables, not compared with the reference."],
   passed: checks.every((entry) => entry.ok),
 };
 const path = arg("report") ?? "g4-post-restore-report.json";

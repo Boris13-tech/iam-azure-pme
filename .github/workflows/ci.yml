@@ -267,6 +267,16 @@ jobs:
         LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
         LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored
 
+    # G4, steps 9 to 11, run for real on every change: the same command the operator runs after restoring a real
+    # backup, on this restored copy, against a reference migrated from this commit (Gemini 4 Hydrogen finding 6).
+    - name: G4 post-restore command passes on the restored copy
+      run: |
+        PATH="$PG_BIN:$PATH" node scripts/ops/g4-post-restore.mjs --release "$GITHUB_SHA" --backup-age-minutes 0 \
+          --started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --report "$RUNNER_TEMP/g4-post-restore-report.json"
+      env:
+        LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
+        LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored
+
     - name: The application's PostgreSQL suites pass on the restored database
       run: |
         npm run test:resources

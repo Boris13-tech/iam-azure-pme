@@ -2,9 +2,11 @@
 // exercises its refusals through a real process; this one exercises the verdicts, because reading the source cannot
 // show that a broken invariant is actually reported as a fault (Codex F5 and Antigravity finding 3, review of #195).
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
-  ALLOWED_PARAMETERS, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, TARGET_CHECKS, cleanEnvironment, oneTarget, ownerOnlyFault,
-  publicAddress, refusedTarget, sameServer, triggerFaults, unprotectedFault, validate,
+  ALLOWED_PARAMETERS, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
+  gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, triggerFaults,
+  unprotectedFault, validate,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
 
 /** `validate` calls `fail` and must not return; here it throws so a refusal is visible as one. */
@@ -29,7 +31,25 @@ describe("G4 post-restore: the connection a drill may use", () => {
     for (const parameter of ["host=/tmp", "hostaddr=10.0.0.5", "options=-csearch_path%3Dx", "service=production", "target_session_attrs=any"]) {
       expect(() => validated("U", `${COPY}?${parameter}`), parameter).toThrow(`carries the parameter ${parameter.split("=")[0]}`);
     }
-    for (const allowed of ALLOWED_PARAMETERS) expect(validated("U", `${COPY}?${allowed}=x`).database).toBe("luxia_restore_rc");
+    for (const allowed of ["sslmode=disable", "connect_timeout=5", "schema=public"]) expect(validated("U", `${COPY}?${allowed}`).database).toBe("luxia_restore_rc");
+    expect([...ALLOWED_PARAMETERS].sort()).toEqual(["connect_timeout", "schema", "sslmode"]);
+  });
+
+  // Gemini 4 Hydrogen finding 4: Prisma's own parameters were handed to psql, which refuses them, and the schema was
+  // not pinned. psql now gets libpq's parameters only; Prisma gets the schema, which must be public.
+  it("gives psql libpq's parameters only, and Prisma schema public", () => {
+    const target = validated("U", `${COPY}?sslmode=disable&schema=public`);
+    expect(new URL(target.url).searchParams.has("schema")).toBe(false);
+    expect(new URL(target.url).searchParams.get("sslmode")).toBe("disable");
+    expect(new URL(target.prismaUrl).searchParams.get("schema")).toBe("public");
+    expect(new URL(validated("U", COPY).prismaUrl).searchParams.get("schema")).toBe("public");
+    expect(() => validated("U", `${COPY}?schema=tenant_a`)).toThrow("names the schema tenant_a");
+    for (const prismaOnly of ["connection_limit=1", "pool_timeout=5"]) expect(() => validated("U", `${COPY}?${prismaOnly}`)).toThrow("carries the parameter");
+    // The reference is a sibling on the same server, under a name that also marks it disposable.
+    const reference = referenceOf(target);
+    expect(reference.database).toBe("luxia_restore_rc_ref");
+    expect(reference.endpoint).toBe(target.endpoint);
+    expect(validated("R", reference.url).database).toBe("luxia_restore_rc_ref");
   });
 
   // Codex F2: the database name alone let the owner checks run on the copy while the runtime-role checks ran on a
@@ -79,6 +99,69 @@ describe("G4 post-restore: a target that is not established stops the run before
     // A check that did not run is not a pass.
     expect(refusedTarget([ok[0]])).toContain("did not run");
     expect(refusedTarget([])).toContain("did not run");
+  });
+});
+
+describe("G4 post-restore: the copy against a database migrated from the same release", () => {
+  // Gemini 4 Hydrogen findings 1, 2 and 5: named checks missed what they did not name. Anything missing, changed or
+  // added relative to the reference is a fault, whatever its kind.
+  const reference = [
+    "table Subject r rls=true forced=true",
+    "policy Subject tenant_isolation PERMISSIVE ALL to=app_user using=(\"organizationId\" = current_setting('app.org')) check=(\"organizationId\" = current_setting('app.org'))",
+    "trigger CREATE TRIGGER audit_append_only BEFORE DELETE OR UPDATE ON public.\"CanonicalAdminAuditEvent\" FOR EACH ROW EXECUTE FUNCTION luxia_audit_append_only() state=O",
+    "function luxia_audit_append_only() definer=false config=- body=0cc175b9c0f1b6a831c399e269772661 public=false",
+  ];
+  it("passes only when the copy matches line for line", () => {
+    expect(fingerprintFaults([...reference], reference)).toEqual([]);
+    expect(fingerprintFaults([...reference].reverse(), reference)).toEqual([]);
+  });
+  it("reports a weakened policy, a guard gone, a body changed in place, a table without row-level security, and an addition", () => {
+    const weakened = reference.map((line) => line.startsWith("policy") ? line.replace(/using=.*/, "using=true check=true") : line);
+    expect(fingerprintFaults(weakened, reference)).toEqual([`missing or changed: ${reference[1]}`, `not in the release: ${weakened[1]}`]);
+    expect(fingerprintFaults(reference.filter((line) => !line.startsWith("trigger")), reference)).toEqual([`missing or changed: ${reference[2]}`]);
+    const replica = reference.map((line) => line.replace("state=O", "state=R"));
+    expect(fingerprintFaults(replica, reference)[0]).toBe(`missing or changed: ${reference[2]}`);
+    const rewritten = reference.map((line) => line.replace(/body=\w+/, "body=ffffffffffffffffffffffffffffffff"));
+    expect(fingerprintFaults(rewritten, reference)[0]).toBe(`missing or changed: ${reference[3]}`);
+    const open = reference.map((line) => line.replace("rls=true forced=true", "rls=false forced=true"));
+    expect(fingerprintFaults(open, reference)[0]).toBe(`missing or changed: ${reference[0]}`);
+    const extra = "policy Subject anyone PERMISSIVE ALL to=public using=true check=true";
+    expect(fingerprintFaults([...reference, extra], reference)).toEqual([`not in the release: ${extra}`]);
+  });
+  it("reads every kind it compares", () => {
+    for (const fragment of ["FROM pg_policies WHERE schemaname = 'public'", "pg_get_triggerdef(t.oid)", "t.tgenabled::text",
+      "c.relrowsecurity::text", "c.relforcerowsecurity::text", "p.prosecdef::text", "p.proconfig", "md5(coalesce(p.prosrc, ''))",
+      "has_function_privilege('public', p.oid, 'EXECUTE')"])
+      expect(FINGERPRINT_SQL, fragment).toContain(fragment);
+  });
+});
+
+describe("G4 post-restore: the activation gate's narrowings of the runtime role", () => {
+  it("reads every narrowing of the release's own gate, expanding ALL by kind", () => {
+    const revokes = gateRevokes(readFileSync(".github/workflows/production-activation-gate.yml", "utf8"));
+    const has = (object: string, privilege: string, sequence = false) =>
+      revokes.some((r: { object: string; privilege: string; sequence: boolean }) => r.object === object && r.privilege === privilege && r.sequence === sequence);
+    expect(has("CanonicalAdminAuditEvent", "DELETE")).toBe(true);
+    expect(has("AuthenticationEvidence", "TRUNCATE")).toBe(true);
+    expect(has("SignupCode", "SELECT")).toBe(true);                    // REVOKE ALL on a table
+    expect(has("RetentionRun_id_seq", "USAGE", true)).toBe(true);      // REVOKE ALL on a sequence
+    expect(has("_prisma_migrations", "INSERT")).toBe(true);
+    expect(has("RetentionHold", "SELECT")).toBe(true);
+    expect(has("CanonicalAdminAuditEvent", "SELECT")).toBe(false);     // only what the gate takes away
+    // Read in order: REVOKE ALL on Invitation, then GRANT SELECT, INSERT, UPDATE back. Found by running it on a copy:
+    // reading the REVOKEs alone reported those three as wrongly held.
+    expect(has("Invitation", "DELETE")).toBe(true);
+    expect(has("Invitation", "SELECT")).toBe(false);
+    expect(has("OrganizationDomain", "UPDATE")).toBe(false);
+    expect(gateRevokes(`REVOKE ALL ON "A" FROM app_user;\nGRANT SELECT ON "A" TO app_user;\nREVOKE SELECT ON "A" FROM app_user;`)
+      .map((r: { privilege: string }) => r.privilege).sort()).toEqual(["DELETE", "INSERT", "REFERENCES", "SELECT", "TRIGGER", "TRUNCATE", "UPDATE"]);
+  });
+  it("builds a query that lists what app_user holds again, and refuses anything that is not a plain name", () => {
+    const sql = heldRevokedSql([{ object: "Invitation", privilege: "DELETE", sequence: false }, { object: "RetentionRun_id_seq", privilege: "USAGE", sequence: true }]);
+    expect(sql).toContain("('Invitation', 'DELETE', false)");
+    expect(sql).toContain("has_sequence_privilege('app_user'");
+    expect(sql).toContain("to_regclass(format('public.%I', r.object)) IS NOT NULL");
+    expect(() => heldRevokedSql([{ object: "x'); DROP TABLE y; --", privilege: "DELETE", sequence: false }])).toThrow("unexpected revoke");
   });
 });
 

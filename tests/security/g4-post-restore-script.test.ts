@@ -32,7 +32,9 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 const LOCAL = "postgresql://restore_owner:p@127.0.0.1:15560/luxia_restore_rc";
 const LOCAL_APP = "postgresql://app_user:p@127.0.0.1:15560/luxia_restore_rc";
-const OK_ARGS = ["--release", "rc-private-beta-1", "--backup-age-minutes", "42", "--started", new Date().toISOString()];
+// The report goes to the test's own directory, never into the repository (Gemini 4 Hydrogen finding 8).
+const OK_ARGS = ["--release", "rc-private-beta-1", "--backup-age-minutes", "42", "--started", new Date().toISOString(),
+  "--report", join(dir, "report.json")];
 const source = readFileSync("scripts/ops/g4-post-restore.mjs", "utf8");
 
 /** A variable the stand-in must report back, so an empty recording is read as a broken recorder, not as a clean run. */
@@ -126,7 +128,10 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     // Both tools are given the same cleaned environment, and the same validated URL.
     expect(source).toContain("const CLEAN_ENV = cleanEnvironment(process.env);");
     expect(source).toContain("{ encoding: \"utf8\", env: CLEAN_ENV }");
-    expect(source).toContain("env: { ...CLEAN_ENV, DATABASE_URL: owner.url }");
+    // Prisma gets the same validated target, its schema pinned to public; the copy and the reference both go through it.
+    expect(source).toContain("env: { ...CLEAN_ENV, DATABASE_URL: target.prismaUrl }");
+    expect(source).toContain("const deploy = migrate(owner);");
+    expect(source).toContain("const migrated = migrate(reference);");
   });
 
   it("refuses a missing or malformed URL, or a database name that is not plain", () => {
@@ -165,6 +170,15 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
       "SELECT luxia_retention_status()::text",
     ]);
     expect(source).toContain("wroteToTheCopy");
+    // The only statements sent to the server outside a transaction: the reference database, created and dropped, and
+    // never the copy. Both name the reference, which carries the copy's name plus "_ref".
+    const toServer = [...source.matchAll(/server\(`([^`]+)`\)/g)].map((m) => m[1]);
+    expect(toServer).toEqual([
+      "DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)",
+      "CREATE DATABASE ${reference.database}",
+      "DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)",
+    ]);
+    expect(source).toContain("wroteToTheServer");
     const sent = [...source.matchAll(/readOnly\([^,]+,\s*`\s*([A-Za-z]+)/g)].map((m) => m[1].toUpperCase());
     expect(sent.length).toBeGreaterThanOrEqual(8);
     expect([...new Set(sent)]).toEqual(["SELECT"]);
