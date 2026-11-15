@@ -352,9 +352,11 @@ jobs:
               EXECUTE $q$SELECT EXISTS (SELECT 1 FROM public._prisma_migrations WHERE migration_name = '20261114120000_retention_worker_role'
                 AND finished_at IS NOT NULL AND rolled_back_at IS NULL)$q$ INTO v_d84;
             ELSE
-              v_d84 := to_regprocedure('public.luxia_retention_status()') IS NOT NULL
+              -- to_regprocedure, not a ::regprocedure cast: a cast is resolved when the statement is parsed, so it would
+              -- fail on a release without the function even behind the guard (Claude Opus, fourth review of #196).
+              v_d84 := coalesce(to_regprocedure('public.luxia_retention_status()') IS NOT NULL
                 AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention')
-                AND has_function_privilege('luxia_retention', 'public.luxia_retention_status()'::regprocedure, 'EXECUTE');
+                AND has_function_privilege('luxia_retention', to_regprocedure('public.luxia_retention_status()'), 'EXECUTE'), false);
             END IF;
             FOREACH v_function IN ARRAY ARRAY['public.luxia_retention_purge_transactions(integer,boolean)',
               'public.luxia_retention_purge_invitations(integer,boolean)', 'public.luxia_retention_pseudonymize_retired(integer,boolean)',
@@ -412,6 +414,7 @@ jobs:
       - name: Verify runtime role and RLS posture
         run: |
           cat > verify-production.ts <<'TS'
+          import { readFileSync } from "node:fs";
           import { PrismaClient } from "@prisma/client";
 
           const requiredRlsTables = [
@@ -513,7 +516,15 @@ jobs:
                     AND pg_has_role('app_user', r.oid, 'MEMBER') AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
                 `;
                 if (retention[0]?.reachable !== "") throw new Error(`Runtime role can reach retention functions: ${retention[0]?.reachable}`);
-                console.log("Retention PASS: no retention function is reachable from the runtime role");
+                // The worker role itself, again, at every activation: the migration checked it once, when it ran, and
+                // a role can drift afterwards (an attribute, a grant, a setting, a member). The release's own validation
+                // block is run as it stands, so the two can never differ (Claude Opus, fourth review of #196).
+                const migration = readFileSync("prisma/migrations/20261114120000_retention_worker_role/migration.sql", "utf8");
+                const from = migration.indexOf("DO $$");
+                const validation = migration.slice(from, migration.indexOf("END $$;", from) + "END $$;".length);
+                if (!validation.includes("RETENTION_ROLE_UNSAFE")) throw new Error("Retention role validation not found in the release");
+                await db.$executeRawUnsafe(validation);
+                console.log("Retention PASS: no retention function is reachable from the runtime role; the worker role is still narrow");
               } else {
                 console.log("Retention: D8.4 not applied in this release; the job runs as the runtime role");
               }

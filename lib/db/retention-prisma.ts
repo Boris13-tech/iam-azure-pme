@@ -9,16 +9,18 @@ import { PrismaClient } from "@prisma/client";
 // There is no fallback to the application's connection: without LUXIA_RETENTION_DATABASE_URL the job refuses, and the
 // refusal carries a listed code so the failed-run alert names it. A silent fallback would put the privilege back on
 // app_user, which is exactly what #150 removed.
-const globalForRetention = global as unknown as { retentionPrisma?: PrismaClient };
+const globalForRetention = global as unknown as { retentionPrisma?: { url: string; client: PrismaClient } };
 
 export const RETENTION_CONNECTION_VARIABLE = "LUXIA_RETENTION_DATABASE_URL";
 
 /** The job's own client. Throws RETENTION_CONNECTION_NOT_CONFIGURED when the connection is not configured. */
 export function retentionPrisma(url = process.env[RETENTION_CONNECTION_VARIABLE]): PrismaClient {
   if (!url) throw new Error("RETENTION_CONNECTION_NOT_CONFIGURED");
-  if (globalForRetention.retentionPrisma) return globalForRetention.retentionPrisma;
-  const client = new PrismaClient({ datasources: { db: { url } } });
   // One client per process, as for the application's own: a cron invocation must not open a connection each time.
-  globalForRetention.retentionPrisma = client;
+  // Kept per URL: a call with another URL gets its own client instead of silently the first one's.
+  const cached = globalForRetention.retentionPrisma;
+  if (cached?.url === url) return cached.client;
+  const client = new PrismaClient({ datasources: { db: { url } } });
+  globalForRetention.retentionPrisma = { url, client };
   return client;
 }

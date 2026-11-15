@@ -13,7 +13,8 @@ import { rollbacksAfter } from "../helpers/migration-rollbacks";
 import { retentionTestClient } from "../helpers/retention-client";
 
 const enabled = process.env.LUXIA_RESOURCE_RLS === "true";
-const owner = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } });
+// Built only when the suite runs: without a database the file must still load, so the others can run.
+const owner = enabled ? new PrismaClient({ datasources: { db: { url: process.env.DATABASE_MIGRATION_URL } } }) : (undefined as unknown as PrismaClient);
 const retention = retentionTestClient();
 
 /** The four entry points of the daily job, with a dry-run call for each. */
@@ -101,6 +102,8 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
         AND has_function_privilege('app_user', p.oid, 'EXECUTE')`)[0].granted;
     // The membership is made non-inherited, which is where the two questions part: has_function_privilege follows
     // inheritance, so it answers "no" while SET ROLE still carries app_user into the role and its privileges.
+    // app_user's own inheritance is restored to what it was, whatever that is (CI's bootstrap and the gate differ).
+    const [{ inherited }] = await owner.$queryRaw<Array<{ inherited: boolean }>>`SELECT rolinherit AS inherited FROM pg_roles WHERE rolname = 'app_user'`;
     await owner.$executeRawUnsafe(`ALTER ROLE app_user NOINHERIT`);
     await owner.$executeRawUnsafe(`GRANT luxia_retention TO app_user`);
     try {
@@ -108,13 +111,16 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
       expect(seen).toContain("luxia_retention_purge_transactions as luxia_retention");
       expect(seen).toContain("luxia_retention_status as luxia_retention");
       expect(await asAppUserOnly()).toBe("");
-      // And the path is real, not only a catalog entry: app_user reaches the function through SET ROLE.
-      expect(await outcome(rawPrisma.$queryRawUnsafe(`SET ROLE luxia_retention`))).toBe("OK");
-      expect(await outcome(rawPrisma.$queryRawUnsafe(`SELECT luxia_retention_status()`))).toBe("OK");
+      // And the path is real, not only a catalog entry: app_user reaches the function through SET ROLE. One
+      // transaction, so both statements share one connection of the pool, and SET LOCAL ends with it.
+      const reached = await outcome(rawPrisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL ROLE luxia_retention`);
+        return tx.$queryRawUnsafe(`SELECT luxia_retention_status()`);
+      }));
+      expect(reached).toBe("OK");
     } finally {
-      await rawPrisma.$executeRawUnsafe(`RESET ROLE`);
       await owner.$executeRawUnsafe(`REVOKE luxia_retention FROM app_user`);
-      await owner.$executeRawUnsafe(`ALTER ROLE app_user INHERIT`);
+      await owner.$executeRawUnsafe(`ALTER ROLE app_user ${inherited ? "INHERIT" : "NOINHERIT"}`);
     }
     expect(await reachable()).toBe("");
   });
@@ -158,7 +164,9 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
       [["ALTER ROLE luxia_retention BYPASSRLS"], ["ALTER ROLE luxia_retention NOBYPASSRLS"], "bypassrls"],
       [["ALTER ROLE luxia_retention CREATEROLE"], ["ALTER ROLE luxia_retention NOCREATEROLE"], "createrole"],
       [["ALTER ROLE luxia_retention INHERIT"], ["ALTER ROLE luxia_retention NOINHERIT"], "inherit"],
-      [["ALTER ROLE luxia_retention SET statement_timeout = '1h'"], ["ALTER ROLE luxia_retention RESET statement_timeout"], "carries the setting statement_timeout"],
+      // A setting that silences the guard triggers for every session the worker opens.
+      [["ALTER ROLE luxia_retention SET session_replication_role = replica"], ["ALTER ROLE luxia_retention RESET session_replication_role"],
+        "carries the setting session_replication_role"],
       [["GRANT pg_read_all_data TO luxia_retention"], ["REVOKE pg_read_all_data FROM luxia_retention"], "member of pg_read_all_data"],
       [["GRANT luxia_retention TO app_user"], ["REVOKE luxia_retention FROM app_user"], "has the member app_user"],
     ];
@@ -174,6 +182,9 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
       }
     }
     expect(await validate()).toBe("OK");
+    // A timeout only narrows a session, and is how this repository hardens its service roles: accepted (Claude Opus).
+    await owner.$executeRawUnsafe(`ALTER ROLE luxia_retention SET statement_timeout = '5min'`);
+    try { expect(await validate()).toBe("OK"); } finally { await owner.$executeRawUnsafe(`ALTER ROLE luxia_retention RESET statement_timeout`); }
   }, 120_000); // seventeen seeded states, each applied, validated twice and undone: far past the 5 s default
 
   it("the role cannot grant itself anything, nor reach another role's rights", async () => {
@@ -181,6 +192,41 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
       `SET ROLE app_user`, `CREATE TABLE luxia_retention_probe (id int)`])
       expect(await outcome(retention.$queryRawUnsafe(sql)), sql).not.toBe("OK");
   });
+
+  // Claude Opus F2 and Gemini 4 Hydrogen F5, fourth review of #196: another database of the cluster cannot be read
+  // from here, but a built-in such as pg_read_file has the same id everywhere, and more than the four functions is
+  // more than the worker needs. Both are refused from this database.
+  it("the validation refuses, from here, a built-in or a fifth function granted in another database", async () => {
+    const migration = readFileSync("prisma/migrations/20261114120000_retention_worker_role/migration.sql", "utf8");
+    const from = migration.indexOf("DO $$");
+    const validation = migration.slice(from, migration.indexOf("END $$;", from) + "END $$;".length);
+    const admin = new URL(process.env.DATABASE_MIGRATION_URL!); admin.search = "";
+    const name = `luxia_d84o_${randomUUID().slice(0, 8)}`;
+    const run = (url: string, sql: string) => {
+      const result = spawnSync("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", url, "-c", sql], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`psql failed: ${result.stderr}`);
+    };
+    run(admin.toString(), `CREATE DATABASE ${name}`);
+    const other = new URL(admin.toString()); other.pathname = `/${name}`;
+    try {
+      run(other.toString(), "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO luxia_retention");
+      const builtIn = await owner.$executeRawUnsafe(validation).then(() => "OK", (error: { message?: string }) => String(error.message));
+      expect(builtIn).toContain("RETENTION_ROLE_UNSAFE");
+      expect(builtIn).toContain("holds a privilege on pg_proc in another database");
+      run(other.toString(), "REVOKE EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) FROM luxia_retention");
+      // Five functions created there and granted: one more than the worker's four.
+      for (let i = 1; i <= 5; i++) {
+        run(other.toString(), `CREATE FUNCTION public.probe_${i}() RETURNS integer LANGUAGE sql AS 'SELECT ${i}'`);
+        run(other.toString(), `GRANT EXECUTE ON FUNCTION public.probe_${i}() TO luxia_retention`);
+      }
+      const five = await owner.$executeRawUnsafe(validation).then(() => "OK", (error: { message?: string }) => String(error.message));
+      expect(five).toContain("holds a privilege on 5 functions in another database");
+      run(other.toString(), "DROP FUNCTION public.probe_5()");
+      expect(await owner.$executeRawUnsafe(validation).then(() => "OK", (error: { message?: string }) => String(error.message))).toBe("OK");
+    } finally {
+      spawnSync("psql", ["-X", "-q", admin.toString(), "-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`], { encoding: "utf8" });
+    }
+  }, 120_000);
 
   // Gemini 4 Hydrogen F-04 and F-05, third review of #196. A drill with Prisma's real history on a scratch database:
   // the rollback gives the four functions back to app_user and keeps the role; the activation gate's own grant block,
@@ -224,15 +270,26 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
       for (const script of rollbacksAfter("20261114120000_retention_worker_role")) psql(url, ["-1", "-f", script]);
       psql(url, ["-1", "-f", "docs/operations/RETENTION-WORKER-ROLE-ROLLBACK.sql"]);
       expect(state(), "after the rollback: back on app_user, the role kept but empty").toBe("4 0 0");
-      expect(psql(admin, ["-c", "SELECT count(*) FROM pg_roles WHERE rolname = 'luxia_retention'"])).toBe("1");
+      // Kept. Its login is disabled only when no other database of the cluster refers to it: here the suite's own
+      // database does, so it keeps it, and the other suites still connect (the single-database case, Production's, is
+      // the production-owner drill's: there the login goes).
+      const elsewhere = psql(url, ["-c", `SELECT EXISTS (SELECT 1 FROM pg_shdepend d WHERE d.refclassid = 'pg_authid'::regclass
+        AND d.refobjid = 'luxia_retention'::regrole AND d.dbid <> (SELECT oid FROM pg_database WHERE datname = current_database())
+        AND NOT (d.dbid = 0 AND d.classid = 'pg_database'::regclass AND d.objid = (SELECT oid FROM pg_database WHERE datname = current_database())))::text`]);
+      expect(elsewhere).toBe("true");
+      expect(psql(admin, ["-c", "SELECT count(*) || ' ' || bool_or(rolcanlogin)::text FROM pg_roles WHERE rolname = 'luxia_retention'"])).toBe("1 true");
       gate();
       expect(state(), "the gate on a release from before D8.4 leaves them with app_user").toBe("4 0 0");
+      // Before D8.4 comes back, its login is enabled again, as the operator does in Neon.
+      psql(admin, ["-c", "ALTER ROLE luxia_retention LOGIN"]);
       deploy(url);
       expect(state(), "migrate deploy applies D8.4 again, its validation accepting the kept role").toBe("0 4 1");
       gate();
       expect(state(), "and the gate keeps the separation").toBe("0 4 1");
     } finally {
       const target = new URL(admin); target.search = "";
+      // The role is the cluster's: whatever happened above, the other suites need it able to log in.
+      spawnSync("psql", ["-X", "-q", target.toString(), "-c", "ALTER ROLE luxia_retention LOGIN"], { encoding: "utf8" });
       spawnSync("psql", ["-X", "-q", target.toString(), "-c", `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`], { encoding: "utf8" });
     }
   }, 240_000);

@@ -54,7 +54,9 @@ describe("D8.4: the retention job's own role", () => {
     // Without a history, the schema answers: the role holds the four only while D8.4 is applied. The role existing is
     // never enough on its own.
     expect(block).toContain("IF to_regclass('public._prisma_migrations') IS NOT NULL THEN");
-    expect(block).toContain("has_function_privilege('luxia_retention', 'public.luxia_retention_status()'::regprocedure, 'EXECUTE')");
+    expect(block).toContain("has_function_privilege('luxia_retention', to_regprocedure('public.luxia_retention_status()'), 'EXECUTE')");
+    // No cast that is resolved at parse time, which would fail on a release without the function.
+    expect(block).not.toContain("'public.luxia_retention_status()'::regprocedure");
     expect(block).not.toMatch(/IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention'\) THEN/);
     const decided = block.indexOf("IF v_d84 THEN");
     const otherwise = block.indexOf("ELSE", decided);
@@ -65,6 +67,13 @@ describe("D8.4: the retention job's own role", () => {
     expect(block.slice(otherwise, block.indexOf("END IF;", otherwise))).toContain("GRANT EXECUTE ON FUNCTION %s TO app_user");
     // The gate never creates the role or sets a password: the migration creates it, the operator gives it one.
     expect(block).not.toMatch(/CREATE ROLE luxia_retention|ALTER ROLE luxia_retention/);
+  });
+
+  it("the gate re-checks the worker role at every activation, with the release's own validation block", () => {
+    expect(gate).toContain('import { readFileSync } from "node:fs";');
+    expect(gate).toContain('readFileSync("prisma/migrations/20261114120000_retention_worker_role/migration.sql", "utf8")');
+    expect(gate).toContain("await db.$executeRawUnsafe(validation);");
+    expect(gate).toContain('if (!validation.includes("RETENTION_ROLE_UNSAFE")) throw');
   });
 
   it("the gate's posture check covers every role app_user can become, not only its own privileges", () => {

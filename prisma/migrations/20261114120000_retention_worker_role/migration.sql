@@ -51,14 +51,27 @@ BEGIN
     UNION ALL SELECT 'inherit' FROM pg_roles WHERE oid = v_role AND rolinherit
     -- Memberships, both ways: what it can become, and who can become it.
     UNION ALL SELECT 'member of ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid WHERE m.member = v_role
-    UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE m.roleid = v_role
+    -- One member is expected: since PostgreSQL 16, a role created by a non-superuser is granted to its creator with
+    -- the admin option only (no SET, no INHERIT), and that is how Production's owner creates it here. Refusing it
+    -- made the migration refuse its own role on Production (Claude Opus and Gemini 4 Hydrogen, fourth review of #196).
+    -- The migrating role already holds more than the worker; any other member, or that grant with SET or INHERIT
+    -- (set_option and inherit_option exist from PostgreSQL 16, read through to_jsonb so PostgreSQL 15 parses this too),
+    -- is still refused.
+    UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
+      WHERE m.roleid = v_role AND NOT (m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user) AND m.admin_option
+        AND NOT coalesce((to_jsonb(m) ->> 'set_option')::boolean, false) AND NOT coalesce((to_jsonb(m) ->> 'inherit_option')::boolean, false))
     -- A setting attached to the role applies to every session it opens: a superuser's ALTER ROLE ... SET
-    -- session_replication_role = replica, for one, would silence the guard triggers for the worker's writes.
+    -- session_replication_role = replica, for one, would silence the guard triggers for the worker's writes. Timeouts
+    -- only narrow a session, and are how this repository hardens its service roles, so those four are accepted.
     UNION ALL SELECT 'carries the setting ' || split_part(c.setting, '=', 1) FROM pg_db_role_setting rs
       CROSS JOIN unnest(rs.setconfig) c(setting) WHERE rs.setrole = v_role
+        AND split_part(c.setting, '=', 1) NOT IN ('statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout', 'idle_session_timeout')
     -- Everything the cluster records as referring to the role. Allowed: in this database, EXECUTE on the four entry
-    -- points and USAGE on schema public; on databases, CONNECT (judged below, for its kind and its grant option). In
-    -- another database of the cluster, only the same two kinds of object, which that database's own migration judges.
+    -- points and USAGE on schema public; on databases, CONNECT (judged below, for its kind and its grant option).
+    -- Another database of the cluster cannot be read from here, so what it holds there is judged by shape: at most the
+    -- four entry points' kind of object, created by a migration (an object id from 16384 up, never a built-in such as
+    -- pg_read_file), and schema public (id 2200). Which user function it is cannot be named from here; that database's
+    -- own migration and activation judge it (Claude Opus and Gemini 4 Hydrogen, fourth review of #196).
     UNION ALL SELECT CASE d.deptype WHEN 'o' THEN 'owns ' WHEN 'r' THEN 'is named in ' ELSE 'holds a privilege on ' END
         || CASE WHEN d.dbid IN (0, v_database) THEN coalesce(pg_describe_object(d.classid, d.objid, d.objsubid), d.classid::regclass::text)
                 ELSE d.classid::regclass::text || ' in another database' END
@@ -68,7 +81,13 @@ BEGIN
               (d.dbid = v_database AND d.objsubid = 0 AND d.classid = 'pg_proc'::regclass AND d.objid = ANY (v_allowed))
            OR (d.dbid = v_database AND d.classid = 'pg_namespace'::regclass AND d.objid = 'public'::regnamespace)
            OR (d.dbid = 0 AND d.classid = 'pg_database'::regclass)
-           OR (d.dbid NOT IN (0, v_database) AND d.objsubid = 0 AND d.classid IN ('pg_proc'::regclass, 'pg_namespace'::regclass))))
+           OR (d.dbid NOT IN (0, v_database) AND d.objsubid = 0 AND d.classid = 'pg_proc'::regclass AND d.objid >= 16384)
+           OR (d.dbid NOT IN (0, v_database) AND d.classid = 'pg_namespace'::regclass AND d.objid = 2200)))
+    -- And no more than the four functions in any other database.
+    UNION ALL SELECT 'holds a privilege on ' || count(*) || ' functions in another database' FROM pg_shdepend d
+      WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = v_role AND d.deptype = 'a'
+        AND d.dbid NOT IN (0, v_database) AND d.classid = 'pg_proc'::regclass
+      GROUP BY d.dbid HAVING count(*) > 4
     -- What the allowed entries may carry: EXECUTE and USAGE as such, CONNECT on a database, never the grant option,
     -- which would let the worker hand EXECUTE back to app_user between two runs of the activation gate.
     UNION ALL SELECT 'holds ' || a.privilege_type || CASE WHEN a.is_grantable THEN ' with the grant option' ELSE '' END

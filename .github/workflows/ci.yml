@@ -187,6 +187,44 @@ jobs:
   # Independent backup (docs/operations/INDEPENDENT-BACKUP-ARCHITECTURE.md), proven end to end on every change:
   # the backup role reads everything and writes nothing; a backup restores into a blank database identical, table
   # by table and object by object; and the application's PostgreSQL suites pass on the restored database.
+  # The migrations and the activation gate as Production runs them: an owner that is not a superuser, on PostgreSQL 17.
+  # The other jobs migrate as the container's superuser, which hid a migration that refused its own role on Production
+  # (fourth review of #196). Also a D8.4 rollback and redeploy, and a drifted role refused at the next activation.
+  production-owner-drill:
+    runs-on: ubuntu-24.04
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci --legacy-peer-deps
+
+    - name: Migrations, activation gate, rollback and redeploy as a non-superuser owner
+      run: bash scripts/ci/production-owner-drill.sh
+      env:
+        ADMIN_URL: postgresql://admin:admin_password@localhost:5432/postgres
+
   backup-restore-roundtrip:
     runs-on: ubuntu-24.04
 
