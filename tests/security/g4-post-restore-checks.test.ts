@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
-  ALLOWED_PARAMETERS, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
+  ALLOWED_PARAMETERS, BACKUP_ROLE_SQL, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
   gateGrantSql, gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf,
   triggerFaults, unprotectedFault, validate,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
@@ -166,6 +166,12 @@ describe("G4 post-restore: the copy against a database migrated from the same re
       expect(FINGERPRINT_SQL, fragment).toContain(fragment);
     // The role that migrated is "owner" on both sides, so a copy restored by another role still compares.
     expect(FINGERPRINT_SQL).toContain("= current_user THEN 'owner'");
+    // The backup role's read grants are the backup system's, not the release's: left out of the comparison, and judged
+    // on their own as read only (found by running the command on CI's restored copy).
+    expect(FINGERPRINT_SQL).toContain("WHERE a.grantee IS DISTINCT FROM (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')");
+    for (const fragment of ["a.privilege_type NOT IN ('SELECT', 'USAGE') OR a.is_grantable", "aclexplode(t.attacl)", "aclexplode(p.proacl)",
+      "'member of ' || r.rolname", "FROM pg_default_acl da"])
+      expect(BACKUP_ROLE_SQL, fragment).toContain(fragment);
   });
 });
 

@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 // What counts as a fault lives in its own module, so a test can drive each decision to its failing answer instead of
 // reading it in this source (Codex F5, review of #195).
-import { EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateGrantSql,
+import { BACKUP_ROLE_SQL, EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateGrantSql,
   gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf, triggerFaults,
   unprotectedFault, validate } from "./g4-post-restore-checks.mjs";
 
@@ -143,6 +143,10 @@ const revokes = gateRevokes(gate);
 const regranted = readOnly(owner.url, heldRevokedSql(revokes));
 check("the activation gate's narrowings of the runtime role all hold", revokes.length > 0 && regranted === "",
   revokes.length === 0 ? "no narrowing found in the release's gate" : regranted ? `held again: ${regranted}` : `${revokes.length} privileges, none held`);
+
+// The backup role is left out of the comparison with the reference, so it is judged here: read only.
+const backupBeyondRead = readOnly(owner.url, BACKUP_ROLE_SQL);
+check("the backup role can read and do nothing else", backupBeyondRead === "", backupBeyondRead ? `beyond reading: ${backupBeyondRead}` : "read only, or absent");
 
 // Row-level security must be ENABLED and FORCED: force alone, with it disabled, protects nothing (Codex F2).
 // Two tables hold an organization without it, by review: Tenant (the scope itself) and LegacyUserBridge (the only link

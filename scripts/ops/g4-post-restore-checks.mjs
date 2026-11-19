@@ -77,8 +77,12 @@ export const serverOf = (identity) => /\son (.+)$/.exec(identity)?.[1] ?? "";
  */
 const OWNER = `CASE WHEN %s = current_user THEN 'owner' ELSE %s::text END`;
 const owned = (expression) => OWNER.replaceAll("%s", expression);
+// The backup role (scripts/backup/luxia-backup-role.sql) is the backup system's, not the release's: Production and any
+// copy restored from it carry its read grants, a reference migrated from the release does not. Its entries are left out
+// of the comparison and judged on their own instead: read only (BACKUP_ROLE_SQL below).
 const ACL = (column) => `coalesce((SELECT string_agg(${owned("CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END")} || ':' || a.privilege_type
-      || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END, ',' ORDER BY 1) FROM aclexplode(${column}) a), 'default')`;
+      || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END, ',' ORDER BY 1) FROM aclexplode(${column}) a
+      WHERE a.grantee IS DISTINCT FROM (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')), 'default')`;
 export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER BY line), '') FROM (
   SELECT 'schema ' || n.nspname || ' owner=' || ${owned("pg_get_userbyid(n.nspowner)")} || ' acl=' || ${ACL("n.nspacl")} AS line
     FROM pg_namespace n WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'
@@ -121,6 +125,28 @@ export function gateGrantSql(gate, database) {
   if (!block) throw new Error("the release's activation gate has no grant step");
   return block.replace(/^ {10}/gm, "").replace(/DATABASE neondb\b/g, `DATABASE ${database}`);
 }
+
+/**
+ * What the backup role holds on the copy beyond reading: it may connect, use the schema and read tables and sequences,
+ * and nothing else, with no grant option. Empty when it holds no more, or does not exist.
+ */
+export const BACKUP_ROLE_SQL = `SELECT coalesce(string_agg(DISTINCT entry, ', '), '') FROM (
+  SELECT c.relname || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END AS entry
+    FROM pg_class c CROSS JOIN aclexplode(c.relacl) a
+    WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+      AND (a.privilege_type NOT IN ('SELECT', 'USAGE') OR a.is_grantable)
+  UNION ALL SELECT c.relname || '.' || t.attname || ':' || a.privilege_type FROM pg_attribute t JOIN pg_class c ON c.oid = t.attrelid
+    CROSS JOIN aclexplode(t.attacl) a
+    WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND a.privilege_type <> 'SELECT'
+  UNION ALL SELECT n.nspname || ':' || a.privilege_type FROM pg_namespace n CROSS JOIN aclexplode(n.nspacl) a
+    WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND (a.privilege_type <> 'USAGE' OR a.is_grantable)
+  UNION ALL SELECT p.oid::regprocedure::text || ':' || a.privilege_type FROM pg_proc p CROSS JOIN aclexplode(p.proacl) a
+    WHERE p.pronamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+  UNION ALL SELECT 'default ' || da.defaclobjtype::text || ':' || a.privilege_type FROM pg_default_acl da CROSS JOIN aclexplode(da.defaclacl) a
+    WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND (a.privilege_type NOT IN ('SELECT', 'USAGE') OR a.is_grantable)
+  UNION ALL SELECT 'member of ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+    WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+) held`;
 
 /** The lines of the reference missing from the copy, and the copy's lines the reference does not have. */
 export function fingerprintFaults(copy, reference) {
