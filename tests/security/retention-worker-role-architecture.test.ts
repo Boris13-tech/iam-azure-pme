@@ -31,7 +31,7 @@ describe("D8.4: the retention job's own role", () => {
     expect(code).not.toMatch(/PASSWORD/i);
     // No LOGIN anywhere once NOLOGIN is set aside: the earlier lookahead let "LOGIN NOINHERIT" through (Hydrogen, sixth
     // review of #196).
-    expect(code.replace(/\bNOLOGIN\b/g, "")).not.toMatch(/\bLOGIN\b/);
+    expect(code.replace(/\bNOLOGIN\b/gi, "")).not.toMatch(/\bLOGIN\b/i);
     expect(code).toContain("CREATE ROLE luxia_retention NOLOGIN NOINHERIT;");
     expect(migration).toContain("GRANT USAGE ON SCHEMA public TO luxia_retention;");
     expect(migration).toContain("GRANT CONNECT ON DATABASE %I TO luxia_retention");
@@ -40,8 +40,16 @@ describe("D8.4: the retention job's own role", () => {
       expect(migration, fn).toContain(`REVOKE EXECUTE ON FUNCTION ${fn} FROM app_user;`);
     }
     // Nothing else is granted to it: no table, no sequence, no other function.
-    const granted = [...code.matchAll(/GRANT ([A-Z, ]+) ON (FUNCTION|SCHEMA|DATABASE|TABLE|SEQUENCE|ALL [A-Z]+)/g)].map((m) => `${m[1].trim()} ${m[2]}`);
-    expect([...new Set(granted)].sort()).toEqual(["CONNECT DATABASE", "EXECUTE FUNCTION", "USAGE SCHEMA"]);
+    // Every GRANT statement outside a string, whatever its case or form (a table grant needs no TABLE keyword, a role
+    // grant has no ON), must be one of these two kinds; the one inside a string is the database grant checked above
+    // (Neon, eighth review of #196). The PostgreSQL suite checks the catalog itself.
+    const statements = code.replace(/'[^']*'/g, "''");
+    const kinds = [...statements.matchAll(/\bGRANT\b[^;]*/gi)].map((m) => m[0].replace(/\s+/g, " ").trim()).map((g) =>
+      /^GRANT EXECUTE ON FUNCTION luxia_retention_\w+\([a-z, ]*\) TO luxia_retention$/.test(g) ? "EXECUTE FUNCTION"
+        : g === "GRANT USAGE ON SCHEMA public TO luxia_retention" ? "USAGE SCHEMA" : `UNEXPECTED: ${g}`);
+    expect([...new Set(kinds)].sort()).toEqual(["EXECUTE FUNCTION", "USAGE SCHEMA"]);
+    expect(kinds.length).toBe(5);
+    expect([...code.matchAll(/'GRANT [^']*'/gi)].map((m) => m[0])).toEqual(["'GRANT CONNECT ON DATABASE %I TO luxia_retention'"]);
   });
 
   it("the activation gate grants them to that role once D8.4 is applied, and to app_user only for a release before it", () => {
@@ -57,7 +65,10 @@ describe("D8.4: the retention job's own role", () => {
     // Without a history, the schema answers: the role holds the four only while D8.4 is applied. The role existing is
     // never enough on its own.
     expect(block).toContain("IF to_regclass('public._prisma_migrations') IS NOT NULL THEN");
-    expect(block).toContain("has_function_privilege('luxia_retention', to_regprocedure('public.luxia_retention_status()'), 'EXECUTE')");
+    // In a CASE, by the role's oid: AND fixes no order, and a missing role named by text would raise (Neon, eighth review).
+    expect(block).toContain("v_d84 := CASE WHEN to_regprocedure('public.luxia_retention_status()') IS NULL");
+    expect(block).toMatch(/has_function_privilege\(\(SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention'\),\s+to_regprocedure\('public\.luxia_retention_status\(\)'\), 'EXECUTE'\)/);
+    expect(block).not.toContain("has_function_privilege('luxia_retention'");
     // No cast that is resolved at parse time, which would fail on a release without the function.
     expect(block).not.toContain("'public.luxia_retention_status()'::regprocedure");
     expect(block).not.toMatch(/IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = 'luxia_retention'\) THEN/);

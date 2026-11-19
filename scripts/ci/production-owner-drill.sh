@@ -80,6 +80,15 @@ refused "has the member luxia_status_owner" "the owner of one entry point only"
 admin "REVOKE luxia_retention FROM luxia_status_owner"
 psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_status() OWNER TO luxia_owner"
 admin "DROP ROLE luxia_status_owner"
+# The database's owner, when it owns no entry point, with the same narrow grant: refused too (Neon, eighth review: the
+# seventh round dropped the database-owner exception, and nothing showed it).
+admin "CREATE ROLE luxia_db_owner NOLOGIN"
+admin "ALTER DATABASE neondb OWNER TO luxia_db_owner"
+admin "GRANT luxia_retention TO luxia_db_owner WITH ADMIN OPTION, SET FALSE, INHERIT FALSE"
+refused "has the member luxia_db_owner" "the database owner who owns no entry point"
+admin "REVOKE luxia_retention FROM luxia_db_owner"
+admin "ALTER DATABASE neondb OWNER TO luxia_owner"
+admin "DROP ROLE luxia_db_owner"
 validate; echo "ok: the creator's admin-only grant alone passes"
 
 step "Rollback, as that owner; then the gate as for a release from before D8.4"

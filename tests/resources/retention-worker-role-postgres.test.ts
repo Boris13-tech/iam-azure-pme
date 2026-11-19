@@ -191,7 +191,7 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
     // A timeout only narrows a session, and is how this repository hardens its service roles: accepted (Claude Opus).
     await owner.$executeRawUnsafe(`ALTER ROLE luxia_retention SET statement_timeout = '5min'`);
     try { expect(await validate()).toBe("OK"); } finally { await owner.$executeRawUnsafe(`ALTER ROLE luxia_retention RESET statement_timeout`); }
-  }, 120_000); // seventeen seeded states, each applied, validated twice and undone: far past the 5 s default
+  }, 120_000); // every seeded state, each applied, validated twice and undone: far past the 5 s default
 
   it("the role cannot grant itself anything, nor reach another role's rights", async () => {
     for (const sql of [`GRANT SELECT ON "Subject" TO luxia_retention`, `ALTER ROLE luxia_retention BYPASSRLS`,
