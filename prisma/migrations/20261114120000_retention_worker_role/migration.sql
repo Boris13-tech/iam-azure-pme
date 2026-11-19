@@ -25,6 +25,14 @@ BEGIN
     -- set outside any migration, so no credential is ever written here. The operator also enables LOGIN, which a
     -- password alone does not (Codex F3, review of #196).
     CREATE ROLE luxia_retention NOLOGIN NOINHERIT;
+    -- PostgreSQL 16+ has just granted the role to its creator, admin only. When createrole_self_grant is set, the
+    -- creator also grants it to itself a second time, with SET or INHERIT: that second grant is taken back here, so
+    -- only the narrow one remains whatever that setting is in Production (sixth review of #196). Shown on PostgreSQL
+    -- 17: two rows, the second granted by the creator itself; after this, the admin-only one alone.
+    IF EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.roleid = 'luxia_retention'::regrole
+        AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user) AND m.grantor = m.member) THEN
+      EXECUTE format('REVOKE luxia_retention FROM %I GRANTED BY %I', current_user, current_user);
+    END IF;
   END IF;
   v_role := (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention');
   -- The four entry points, by exact signature: a name alone would also admit an overload created beside them.
@@ -60,7 +68,10 @@ BEGIN
     -- The creator is named by what it owns, not by who runs this block: the activation gate re-runs it as app_user,
     -- and keyed to current_user it refused Production's own owner at every activation (fifth review of #196).
     UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
-      WHERE m.roleid = v_role AND NOT (m.member = (SELECT proowner FROM pg_proc WHERE oid = 'public.luxia_retention_status()'::regprocedure) AND m.admin_option
+      -- The owner of the retention functions, or the database's owner: on Neon both are the owner role, and whichever
+      -- one ran the migration is already more powerful than the worker it created.
+      WHERE m.roleid = v_role AND NOT (m.member IN ((SELECT proowner FROM pg_proc WHERE oid = 'public.luxia_retention_status()'::regprocedure),
+          (SELECT datdba FROM pg_database WHERE datname = current_database())) AND m.admin_option
         AND NOT coalesce((to_jsonb(m) ->> 'set_option')::boolean, false) AND NOT coalesce((to_jsonb(m) ->> 'inherit_option')::boolean, false))
     -- A setting attached to the role applies to every session it opens: a superuser's ALTER ROLE ... SET
     -- session_replication_role = replica, for one, would silence the guard triggers for the worker's writes. Timeouts

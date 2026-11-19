@@ -29,7 +29,10 @@ describe("D8.4: the retention job's own role", () => {
     // the migration's own comments say so in words.
     const code = migration.replace(/--[^\n]*/g, "");
     expect(code).not.toMatch(/PASSWORD/i);
-    expect(code).not.toMatch(/LOGIN(?! NOINHERIT)/);
+    // No LOGIN anywhere once NOLOGIN is set aside: the earlier lookahead let "LOGIN NOINHERIT" through (Hydrogen, sixth
+    // review of #196).
+    expect(code.replace(/\bNOLOGIN\b/g, "")).not.toMatch(/\bLOGIN\b/);
+    expect(code).toContain("CREATE ROLE luxia_retention NOLOGIN NOINHERIT;");
     expect(migration).toContain("GRANT USAGE ON SCHEMA public TO luxia_retention;");
     expect(migration).toContain("GRANT CONNECT ON DATABASE %I TO luxia_retention");
     for (const fn of FUNCTIONS) {

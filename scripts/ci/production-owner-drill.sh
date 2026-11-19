@@ -25,6 +25,9 @@ psql -X -v ON_ERROR_STOP=1 "$ADMIN_URL" -q \
   -c "CREATE ROLE app_user LOGIN PASSWORD 'app_password' NOSUPERUSER NOINHERIT NOBYPASSRLS" \
   -c "CREATE DATABASE neondb OWNER luxia_owner"
 psql -X -v ON_ERROR_STOP=1 "${base}/neondb" -q -c "ALTER SCHEMA public OWNER TO luxia_owner"
+# The least favourable setting Production could have: a creator that also gets SET and INHERIT on the roles it makes.
+# The migration must narrow its own grant and pass anyway (sixth review of #196).
+psql -X -v ON_ERROR_STOP=1 "$ADMIN_URL" -q -c "ALTER ROLE luxia_owner SET createrole_self_grant = 'set, inherit'"
 [ "$(psql -X -At "$OWNER_URL" -c 'SELECT rolsuper FROM pg_roles WHERE rolname = current_user')" = "f" ] || { echo "FAIL: owner is a superuser"; exit 1; }
 
 # The activation gate's grant step and the migration's role validation, extracted from the files under test.
@@ -46,7 +49,9 @@ refused() { if validate 2>"$work/err"; then echo "FAIL: $2 passed the re-check";
 
 step "Every migration, as that owner"
 DATABASE_URL="${OWNER_URL}?schema=public" npx prisma migrate deploy
-echo "creator membership: $(psql -X -At "$OWNER_URL" -c "SELECT count(*) FROM pg_auth_members WHERE roleid = 'luxia_retention'::regrole")"
+grant="$(psql -X -At "$OWNER_URL" -c "SELECT r.rolname || ' admin=' || m.admin_option || ' set=' || m.set_option || ' inherit=' || m.inherit_option FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE m.roleid = 'luxia_retention'::regrole")"
+[ "$grant" = "luxia_owner admin=true set=false inherit=false" ] || { echo "FAIL: creator grant is '$grant'"; exit 1; }
+echo "ok: the creator's grant is admin only, despite createrole_self_grant ($grant)"
 
 step "The activation gate, as that owner, then its re-check of the worker role"
 gate; validate; expect "app_user=0 retention=4" "after the gate"

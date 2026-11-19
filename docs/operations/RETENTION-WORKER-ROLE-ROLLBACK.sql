@@ -9,8 +9,9 @@
 -- do not match the database, so the code cannot go first. Between the two, the job of the release still running has
 -- lost its privileges and fails every run, closed, with its alert: that is expected, and lasts until the deploy.
 -- R4 and R6 must not be enforcing: this puts the privilege to delete back on the role that serves web requests, which
--- is what #150 removed. If the database is restored into a new cluster later, roles do not travel with a backup: the
--- role must be created again (CREATE ROLE luxia_retention NOLOGIN NOINHERIT) before the activation gate runs.
+-- is what #150 removed. If the database is restored into a new cluster later, roles do not travel with a backup:
+-- scripts/backup/restore.mjs creates the roles the backup names, luxia_retention among them, NOLOGIN NOINHERIT; its
+-- login and password are then the operator's again, before the daily job can connect.
 -- Possible while it is the last applied migration; a later one may depend on it.
 SET lock_timeout = '5s';
 DO $$ BEGIN
@@ -44,7 +45,14 @@ DO $$ BEGIN
         WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_retention')
           AND NOT (d.dbid = (SELECT oid FROM pg_database WHERE datname = current_database()))
           AND NOT (d.dbid = 0 AND d.classid = 'pg_database'::regclass AND d.objid = (SELECT oid FROM pg_database WHERE datname = current_database()))) THEN
-      ALTER ROLE luxia_retention NOLOGIN;
+      -- Needs the admin option on the role, which its creator holds. An owner that lacks it must not lose the whole
+      -- rollback over this one step, which only tidies a role that holds nothing here any more: it is reported loudly
+      -- and left to the operator (Claude Opus, sixth review of #196).
+      BEGIN
+        ALTER ROLE luxia_retention NOLOGIN;
+      EXCEPTION WHEN insufficient_privilege THEN
+        RAISE WARNING 'luxia_retention keeps its login: this owner cannot alter it. Disable it in Neon (ALTER ROLE luxia_retention NOLOGIN).';
+      END;
     ELSE
       RAISE NOTICE 'luxia_retention keeps its login: another database of this cluster still refers to it';
     END IF;
