@@ -12,6 +12,9 @@
 -- is what #150 removed. If the database is restored into a new cluster later, roles do not travel with a backup:
 -- scripts/backup/restore.mjs creates the roles the backup names, luxia_retention among them, NOLOGIN NOINHERIT; its
 -- login and password are then the operator's again, before the daily job can connect.
+-- On PostgreSQL 16+, if the role that runs the restore is not a superuser and has createrole_self_grant set, it is
+-- also granted luxia_retention with SET or INHERIT, which the activation gate refuses; revoke that grant first:
+-- REVOKE luxia_retention FROM <restoring role> GRANTED BY <restoring role> (Gemini 4 Neon F-01, seventh review).
 -- Possible while it is the last applied migration; a later one may depend on it.
 SET lock_timeout = '5s';
 DO $$ BEGIN

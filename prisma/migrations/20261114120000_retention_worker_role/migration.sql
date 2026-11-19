@@ -68,11 +68,14 @@ BEGIN
     -- The creator is named by what it owns, not by who runs this block: the activation gate re-runs it as app_user,
     -- and keyed to current_user it refused Production's own owner at every activation (fifth review of #196).
     UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
-      -- The owner of the retention functions, or the database's owner: on Neon both are the owner role, and whichever
-      -- one ran the migration is already more powerful than the worker it created.
-      WHERE m.roleid = v_role AND NOT (m.member IN ((SELECT proowner FROM pg_proc WHERE oid = 'public.luxia_retention_status()'::regprocedure),
-          (SELECT datdba FROM pg_database WHERE datname = current_database())) AND m.admin_option
-        AND NOT coalesce((to_jsonb(m) ->> 'set_option')::boolean, false) AND NOT coalesce((to_jsonb(m) ->> 'inherit_option')::boolean, false))
+      -- The owner of the retention functions only: it can already do everything the worker can. The database's owner was
+      -- accepted too for a round, but where it is another role, admin on the worker would let it hand itself the job's
+      -- power (Gemini 4 Neon F-03, seventh review). On Neon both are the owner role.
+      -- PostgreSQL 15 has no set_option or inherit_option: there every member can SET ROLE, so a missing column counts
+      -- as SET and INHERIT granted, and the exception never applies there (Gemini 4 Neon F-04, seventh review).
+      WHERE m.roleid = v_role AND NOT (m.member = (SELECT proowner FROM pg_proc WHERE oid = 'public.luxia_retention_status()'::regprocedure)
+        AND m.admin_option
+        AND NOT coalesce((to_jsonb(m) ->> 'set_option')::boolean, true) AND NOT coalesce((to_jsonb(m) ->> 'inherit_option')::boolean, true))
     -- A setting attached to the role applies to every session it opens: a superuser's ALTER ROLE ... SET
     -- session_replication_role = replica, for one, would silence the guard triggers for the worker's writes. Timeouts
     -- only narrow a session, and are how this repository hardens its service roles, so those four are accepted.

@@ -137,6 +137,8 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
     const validate = () => outcome(owner.$executeRawUnsafe(validation));
     // Applied where it has already run: what the role holds is exactly what this migration gave it.
     expect(await validate()).toBe("OK");
+    const functionOwner = (await owner.$queryRaw<Array<{ name: string }>>`
+      SELECT pg_get_userbyid(proowner) AS name FROM pg_proc WHERE oid = 'public.luxia_retention_status()'::regprocedure`)[0].name;
     const database = (await owner.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`)[0].name;
     // Every seed below was accepted by one of the earlier versions of this validation, as the reviews of #196 showed.
     // Each is [statements that create it, statements that undo it, what the error must name]. The attribute, setting
@@ -169,6 +171,10 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
         "carries the setting session_replication_role"],
       [["GRANT pg_read_all_data TO luxia_retention"], ["REVOKE pg_read_all_data FROM luxia_retention"], "member of pg_read_all_data"],
       [["GRANT luxia_retention TO app_user"], ["REVOKE luxia_retention FROM app_user"], "has the member app_user"],
+      // The functions' owner itself, granted explicitly with the admin option: refused on PostgreSQL 15, where every
+      // member can SET ROLE and the missing option columns count as granted, and on 16+, where such a grant carries
+      // SET by default. Only the grant PostgreSQL 16+ makes on creation, admin alone, is accepted (Gemini 4 Neon F-04).
+      [[`GRANT luxia_retention TO "${functionOwner}" WITH ADMIN OPTION`], [`REVOKE luxia_retention FROM "${functionOwner}"`], `has the member ${functionOwner}`],
     ];
     for (const [seed, undo, expected] of seeds) {
       for (const statement of seed) await owner.$executeRawUnsafe(statement);
