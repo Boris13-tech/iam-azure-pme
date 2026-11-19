@@ -157,8 +157,11 @@ describe("G4 post-restore: the copy against a database migrated from the same re
   });
   it("reads every kind it compares", () => {
     for (const fragment of ["FROM pg_policies WHERE schemaname = 'public'", "pg_get_triggerdef(t.oid)", "t.tgenabled::text",
-      "c.relrowsecurity::text", "c.relforcerowsecurity::text", "p.prosecdef::text", "p.proconfig", "md5(coalesce(p.prosrc, ''))",
+      "c.relrowsecurity::text", "c.relforcerowsecurity::text", "p.prosecdef::text", "p.proconfig", "pg_get_functiondef(p.oid)",
       "has_function_privilege('public', p.oid, 'EXECUTE')",
+      // Sixth review (Argon finding 3): rules, index state, types, settings, and the migration history with checksums.
+      "pg_get_ruledef(r.oid)", "i.indisvalid::text", "i.indisready::text", "FROM pg_enum e", "aclexplode(t.typacl)",
+      "FROM pg_db_role_setting s", "' checksum=' || m.checksum", "FROM public._prisma_migrations m",
       // Fourth review (Hydrogen finding 1, Argon findings 1 to 3): grants, columns, constraints, indexes, views, owners.
       "aclexplode(c.relacl)", "aclexplode(a.attacl)", "aclexplode(p.proacl)", "aclexplode(n.nspacl)", "aclexplode(da.defaclacl)",
       "format_type(a.atttypid, a.atttypmod)", "pg_get_expr(d.adbin, d.adrelid)", "pg_get_constraintdef(k.oid)", "pg_get_indexdef(i.indexrelid)",
@@ -169,9 +172,13 @@ describe("G4 post-restore: the copy against a database migrated from the same re
     // The backup role's read grants are the backup system's, not the release's: left out of the comparison, and judged
     // on their own as read only (found by running the command on CI's restored copy).
     expect(FINGERPRINT_SQL).toContain("WHERE a.grantee IS DISTINCT FROM (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')");
-    for (const fragment of ["a.privilege_type NOT IN ('SELECT', 'USAGE') OR a.is_grantable", "aclexplode(t.attacl)", "aclexplode(p.proacl)",
-      "'member of ' || r.rolname", "FROM pg_default_acl da"])
+    // Sixth review (Argon finding 1, Hydrogen finding 1): SELECT only (a sequence's USAGE lets nextval() write), no
+    // grant option even on a column, its attributes, its read-only sessions, and memberships both ways.
+    for (const fragment of ["a.privilege_type <> 'SELECT' OR a.is_grantable", "aclexplode(t.attacl)", "aclexplode(p.proacl)",
+      "'member of ' || r.rolname", "'has the member ' || r.rolname", "FROM pg_default_acl da", "'sessions are not read only'",
+      "c.setting = 'default_transaction_read_only=on'", "rolsuper", "rolcreaterole", "rolcreatedb", "rolreplication", "rolinherit"])
       expect(BACKUP_ROLE_SQL, fragment).toContain(fragment);
+    expect(BACKUP_ROLE_SQL).not.toContain("NOT IN ('SELECT', 'USAGE')");
   });
 });
 

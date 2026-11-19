@@ -107,11 +107,33 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
     FROM pg_policies WHERE schemaname = 'public'
   UNION ALL SELECT 'trigger ' || pg_get_triggerdef(t.oid) || ' state=' || t.tgenabled::text
     FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE NOT t.tgisinternal AND c.relnamespace = 'public'::regnamespace
+  -- The whole definition, as PostgreSQL prints it: body, language, volatility, strictness, leakproofness, security
+  -- and settings, not the body alone (Argon finding 3, sixth review).
   UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' owner=' || ${owned("pg_get_userbyid(p.proowner)")}
       || ' definer=' || p.prosecdef::text
-      || ' config=' || coalesce(array_to_string(p.proconfig, ';'), '-') || ' body=' || md5(coalesce(p.prosrc, ''))
+      || ' config=' || coalesce(array_to_string(p.proconfig, ';'), '-')
+      || ' definition=' || md5(CASE WHEN p.prokind IN ('f', 'p', 'w') THEN pg_get_functiondef(p.oid) ELSE coalesce(p.prosrc, '') END)
       || ' public=' || has_function_privilege('public', p.oid, 'EXECUTE')::text || ' acl=' || ${ACL("p.proacl")}
     FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+  -- Rules rewrite what a statement does to a table; views keep theirs in the view line above.
+  UNION ALL SELECT 'rule ' || c.relname || ' ' || r.rulename || ' ' || md5(pg_get_ruledef(r.oid))
+    FROM pg_rewrite r JOIN pg_class c ON c.oid = r.ev_class WHERE c.relnamespace = 'public'::regnamespace AND r.rulename <> '_RETURN'
+  -- An index that is not valid or not ready enforces nothing, and prints the same definition.
+  UNION ALL SELECT 'index-state ' || c.relname || ' valid=' || i.indisvalid::text || ' ready=' || i.indisready::text
+    FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relnamespace = 'public'::regnamespace
+  UNION ALL SELECT 'type ' || t.typname || ' ' || t.typtype::text || ' owner=' || ${owned("pg_get_userbyid(t.typowner)")}
+      || ' labels=' || coalesce((SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) FROM pg_enum e WHERE e.enumtypid = t.oid), '-')
+      || ' acl=' || ${ACL("t.typacl")}
+    FROM pg_type t WHERE t.typnamespace = 'public'::regnamespace AND t.typtype IN ('e', 'd', 'c')
+      AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.reltype = t.oid AND c.relkind <> 'c')
+  -- Settings that every session of the database, or of the runtime role, starts with.
+  UNION ALL SELECT 'setting ' || CASE WHEN s.setrole = 0 THEN 'database' ELSE pg_get_userbyid(s.setrole) END || ' ' || array_to_string(s.setconfig, ';')
+    FROM pg_db_role_setting s WHERE s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
+      AND (s.setrole = 0 AND s.setdatabase <> 0 OR s.setrole = (SELECT oid FROM pg_roles WHERE rolname = 'app_user'))
+  -- The migration history: the same migrations, with the same checksums, finished and not rolled back.
+  UNION ALL SELECT 'migration ' || m.migration_name || ' checksum=' || m.checksum || ' finished=' || (m.finished_at IS NOT NULL)::text
+      || ' rolled_back=' || (m.rolled_back_at IS NOT NULL)::text
+    FROM public._prisma_migrations m
 ) lines`;
 
 /**
@@ -130,20 +152,35 @@ export function gateGrantSql(gate, database) {
  * What the backup role holds on the copy beyond reading: it may connect, use the schema and read tables and sequences,
  * and nothing else, with no grant option. Empty when it holds no more, or does not exist.
  */
+// Every way the backup role could be more than a reader: what scripts/backup/luxia-backup-role.sql makes it is a role
+// that cannot create, replicate or inherit, starts every session read only, has no member and is a member of nothing,
+// and holds SELECT on tables and sequences — not USAGE on a sequence, which lets nextval() write (Argon finding 1 and
+// Gemini 4 Hydrogen finding 1, sixth review). BYPASSRLS it has by design: a backup must read every organization.
 export const BACKUP_ROLE_SQL = `SELECT coalesce(string_agg(DISTINCT entry, ', '), '') FROM (
-  SELECT c.relname || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END AS entry
+  SELECT 'superuser' AS entry FROM pg_roles WHERE rolname = 'luxia_backup' AND rolsuper
+  UNION ALL SELECT 'createrole' FROM pg_roles WHERE rolname = 'luxia_backup' AND rolcreaterole
+  UNION ALL SELECT 'createdb' FROM pg_roles WHERE rolname = 'luxia_backup' AND rolcreatedb
+  UNION ALL SELECT 'replication' FROM pg_roles WHERE rolname = 'luxia_backup' AND rolreplication
+  UNION ALL SELECT 'inherit' FROM pg_roles WHERE rolname = 'luxia_backup' AND rolinherit
+  UNION ALL SELECT 'sessions are not read only' FROM pg_roles r WHERE r.rolname = 'luxia_backup' AND NOT EXISTS (
+      SELECT 1 FROM pg_db_role_setting s CROSS JOIN unnest(s.setconfig) c(setting)
+      WHERE s.setrole = r.oid AND c.setting = 'default_transaction_read_only=on')
+  UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
+    WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+  UNION ALL SELECT c.relname || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END
     FROM pg_class c CROSS JOIN aclexplode(c.relacl) a
     WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
-      AND (a.privilege_type NOT IN ('SELECT', 'USAGE') OR a.is_grantable)
-  UNION ALL SELECT c.relname || '.' || t.attname || ':' || a.privilege_type FROM pg_attribute t JOIN pg_class c ON c.oid = t.attrelid
-    CROSS JOIN aclexplode(t.attacl) a
-    WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND a.privilege_type <> 'SELECT'
+      AND (a.privilege_type <> 'SELECT' OR a.is_grantable)
+  UNION ALL SELECT c.relname || '.' || t.attname || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END
+    FROM pg_attribute t JOIN pg_class c ON c.oid = t.attrelid CROSS JOIN aclexplode(t.attacl) a
+    WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+      AND (a.privilege_type <> 'SELECT' OR a.is_grantable)
   UNION ALL SELECT n.nspname || ':' || a.privilege_type FROM pg_namespace n CROSS JOIN aclexplode(n.nspacl) a
     WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND (a.privilege_type <> 'USAGE' OR a.is_grantable)
   UNION ALL SELECT p.oid::regprocedure::text || ':' || a.privilege_type FROM pg_proc p CROSS JOIN aclexplode(p.proacl) a
     WHERE p.pronamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
   UNION ALL SELECT 'default ' || da.defaclobjtype::text || ':' || a.privilege_type FROM pg_default_acl da CROSS JOIN aclexplode(da.defaclacl) a
-    WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND (a.privilege_type NOT IN ('SELECT', 'USAGE') OR a.is_grantable)
+    WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND (a.privilege_type <> 'SELECT' OR a.is_grantable)
   UNION ALL SELECT 'member of ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
     WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
 ) held`;

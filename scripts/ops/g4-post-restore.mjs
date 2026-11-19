@@ -219,11 +219,21 @@ const runner = ownRole ? job : app;
 if (!runner) {
   check("the daily job runs on the copy as its own role", false, "D8.4 is applied: set LUXIA_RESTORE_RETENTION_URL to luxia_retention on the copy");
 } else {
-  const as = readOnly(runner.url, "SELECT current_user");
-  const r3 = psql(runner.url, `SELECT luxia_retention_purge_transactions(1000, false)::text`);
-  check(`R3 dry run as ${as} (records its run in the copy)`, r3.startsWith("{"), r3);
-  const status = psql(runner.url, `SELECT luxia_retention_status()::text`);
-  check(`retention status as ${as} (records its run in the copy)`, status.startsWith("{"), status);
+  // Who that connection really is, and where, before anything is sent through it: the expected role, restricted, on
+  // the copy's own server (Argon finding 2, sixth review).
+  const expected = ownRole ? "luxia_retention" : "app_user";
+  const runnerIdentity = identity(runner.url);
+  const as = readOnly(runner.url, `SELECT current_user || ' superuser=' || r.rolsuper || ' bypassrls=' || r.rolbypassrls
+    || ' createrole=' || r.rolcreaterole FROM pg_roles r WHERE r.rolname = current_user`);
+  const runnerOk = as === `${expected} superuser=false bypassrls=false createrole=false` && serverOf(runnerIdentity) === serverOf(ownerIdentity)
+    && runnerIdentity.startsWith(`${owner.database} on `);
+  check(`the daily job's connection is ${expected}, restricted, on the copy`, runnerOk, `${as} at ${runnerIdentity}`);
+  if (runnerOk) {
+    const r3 = psql(runner.url, `SELECT luxia_retention_purge_transactions(1000, false)::text`);
+    check(`R3 dry run as ${expected} (records its run in the copy)`, r3.startsWith("{"), r3);
+    const status = psql(runner.url, `SELECT luxia_retention_status()::text`);
+    check(`retention status as ${expected} (records its run in the copy)`, status.startsWith("{"), status);
+  }
 }
 
 // How much data came back, per table, with no content: the planner's estimate after the migrations. Enough to see that
@@ -245,11 +255,12 @@ const report = {
   tables: Object.keys(rows).length,
   checks,
   wroteToTheCopy: ["RetentionRun: one row for the R3 dry run, one for the status call"],
-  wroteToTheServer: [`${reference.database}: created empty, migrated from the release, read, and dropped`],
+  wroteToTheServer: [`${reference.database}: created empty, migrated from the release, given the release's gate grants, read, and dropped`],
   limits: ["The server address is checked against the ranges no database beyond this network can have; a PostgreSQL "
     + "server on another machine inside the same private network would not be distinguished from a local copy.",
-    "Grants to app_user come from the activation gate, not the migrations: they are checked against the release's gate "
-    + "narrowings and the owner-only tables, not compared with the reference."],
+    "The backup role's grants are not compared with the reference, which has none: they are judged on their own, read only.",
+    "The migration history is compared with checksums: a migration file edited after it was applied in Production shows "
+    + "as a difference, which is for the operator to judge."],
   passed: checks.every((entry) => entry.ok),
 };
 const path = arg("report") ?? "g4-post-restore-report.json";
