@@ -20,6 +20,9 @@ const LOOPBACK = ["127.0.0.1", "localhost", "[::1]", "::1"];
  */
 export function validate(name, value, fail) {
   if (!value) return fail(`set ${name}`);
+  // A "#" is a fragment to this parser and not to libpq, so the two could read different targets from one string; it
+  // has no use in a connection string and is refused outright (Gemini 4 Neon finding 1, seventh review).
+  if (value.includes("#")) return fail(`${name} contains "#", which libpq and this check would not read the same way`);
   let url;
   try { url = new URL(value); } catch { return fail(`${name} is not a URL`); }
   if (!["postgres:", "postgresql:"].includes(url.protocol)) return fail(`${name} is not a postgres URL (${url.protocol})`);
@@ -32,8 +35,13 @@ export function validate(name, value, fail) {
   const database = url.pathname.replace(/^\//, "");
   if (!/^[A-Za-z0-9_]+$/.test(database)) return fail(`${name} has no plain database name`);
   if (!DISPOSABLE_NAME.test(database)) return fail(`${name} names the database ${database}: the drill target must be named luxia_restore… so that no other database can be reached`);
-  // What psql receives: libpq's parameters only. What Prisma receives: the same, with its schema pinned to public.
-  const forPsql = new URL(url.toString()); forPsql.searchParams.delete("schema");
+  // What psql receives is rebuilt from the parts just checked, not passed through: scheme, credentials, the loopback
+  // host and port, the database, and libpq's own parameters. What Prisma receives: the same, schema pinned to public.
+  const host = url.hostname === "localhost" ? "127.0.0.1" : url.hostname;
+  const credentials = url.username ? `${url.username}${url.password ? `:${url.password}` : ""}@` : "";
+  const libpq = new URLSearchParams([...url.searchParams].filter(([key]) => key !== "schema"));
+  const query = libpq.toString() ? `?${libpq}` : "";
+  const forPsql = new URL(`postgresql://${credentials}${host}${url.port ? `:${url.port}` : ""}/${database}${query}`);
   const forPrisma = new URL(forPsql.toString()); forPrisma.searchParams.set("schema", "public");
   // localhost and 127.0.0.1 are the same endpoint here: both are refused unless they are loopback, and the two URLs
   // are compared on the resolved server identity as well, read back from each connection.
@@ -353,7 +361,8 @@ export const runnerExpected = (role) =>
  * The runtime role as it must answer for itself on the copy: no attribute that widens it, no role it can become, and
  * nothing it owns, since an owner is exempt from row-level security unless it is forced and can always change it.
  */
-export const EXPECTED_RUNTIME_ROLE = "app_user bypassrls=false superuser=false createrole=false memberships=0 owns=0";
+export const EXPECTED_RUNTIME_ROLE =
+  "app_user bypassrls=false superuser=false createrole=false createdb=false replication=false memberships=0 owns=0 database=none";
 
 /**
  * The two tables that hold an organization without row-level security, by review: Tenant, the scope itself, and

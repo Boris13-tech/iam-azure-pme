@@ -35,6 +35,16 @@ describe("G4 post-restore: the connection a drill may use", () => {
     expect([...ALLOWED_PARAMETERS].sort()).toEqual(["connect_timeout", "schema", "sslmode"]);
   });
 
+  // Gemini 4 Neon finding 1: a "#" is a fragment to this parser and not to libpq. Refused; and psql gets a URL rebuilt
+  // from the parts that were checked, never the string as given.
+  it("refuses a fragment, and hands psql a URL rebuilt from the checked parts", () => {
+    for (const value of [`${COPY}#@evil.example.com/neondb`, "postgresql://o:p#x@127.0.0.1:5432/luxia_restore_rc", `${COPY}?sslmode=disable#x`])
+      expect(() => validated("U", value), value).toThrow('contains "#"');
+    const target = validated("U", "postgres://o:p@localhost:5433/luxia_restore_rc?sslmode=disable&schema=public");
+    expect(target.url).toBe("postgresql://o:p@127.0.0.1:5433/luxia_restore_rc?sslmode=disable");
+    expect(target.prismaUrl).toBe("postgresql://o:p@127.0.0.1:5433/luxia_restore_rc?sslmode=disable&schema=public");
+  });
+
   // Gemini 4 Hydrogen finding 4: Prisma's own parameters were handed to psql, which refuses them, and the schema was
   // not pinned. psql now gets libpq's parameters only; Prisma gets the schema, which must be public.
   it("gives psql libpq's parameters only, and Prisma schema public", () => {

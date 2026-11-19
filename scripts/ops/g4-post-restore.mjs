@@ -141,10 +141,18 @@ check("schema, grants, policies, triggers and functions are exactly the release'
     : `${drift.length} differences: ${drift.slice(0, 20).join("; ")}${drift.length > 20 ? "; …" : ""}`);
 
 // psql renders a boolean as true/false, so SQL builds the one line each check compares.
+// Also nothing on the database itself beyond connecting: not its owner, no CREATE, nothing granted to it there directly
+// (Gemini 4 Neon findings 4 and 6, seventh review). TEMPORARY through PUBLIC is PostgreSQL's default and not counted.
 const runtimeRole = readOnly(app.url, `SELECT current_user || ' bypassrls=' || r.rolbypassrls || ' superuser=' || r.rolsuper || ' createrole=' || r.rolcreaterole
+    || ' createdb=' || r.rolcreatedb || ' replication=' || r.rolreplication
     || ' memberships=' || (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid)
     || ' owns=' || ((SELECT count(*) FROM pg_class c WHERE c.relowner = r.oid) + (SELECT count(*) FROM pg_proc p WHERE p.proowner = r.oid)
                   + (SELECT count(*) FROM pg_namespace n WHERE n.nspowner = r.oid))
+    || ' database=' || coalesce((SELECT string_agg(DISTINCT entry, ',' ORDER BY entry) FROM (
+        SELECT 'owner' AS entry FROM pg_database d WHERE d.datname = current_database() AND d.datdba = r.oid
+        UNION ALL SELECT a.privilege_type FROM pg_database d CROSS JOIN aclexplode(d.datacl) a
+          WHERE d.datname = current_database() AND a.grantee = r.oid AND a.privilege_type <> 'CONNECT'
+        UNION ALL SELECT 'CREATE' WHERE has_database_privilege(r.oid, current_database(), 'CREATE')) held), 'none')
   FROM pg_roles r WHERE r.rolname = current_user`);
 check("runtime role restricted", runtimeRole === EXPECTED_RUNTIME_ROLE, runtimeRole);
 
