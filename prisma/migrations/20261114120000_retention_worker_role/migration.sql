@@ -57,8 +57,10 @@ BEGIN
     -- The migrating role already holds more than the worker; any other member, or that grant with SET or INHERIT
     -- (set_option and inherit_option exist from PostgreSQL 16, read through to_jsonb so PostgreSQL 15 parses this too),
     -- is still refused.
+    -- The creator is named by what it owns, not by who runs this block: the activation gate re-runs it as app_user,
+    -- and keyed to current_user it refused Production's own owner at every activation (fifth review of #196).
     UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
-      WHERE m.roleid = v_role AND NOT (m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user) AND m.admin_option
+      WHERE m.roleid = v_role AND NOT (m.member = (SELECT proowner FROM pg_proc WHERE oid = 'public.luxia_retention_status()'::regprocedure) AND m.admin_option
         AND NOT coalesce((to_jsonb(m) ->> 'set_option')::boolean, false) AND NOT coalesce((to_jsonb(m) ->> 'inherit_option')::boolean, false))
     -- A setting attached to the role applies to every session it opens: a superuser's ALTER ROLE ... SET
     -- session_replication_role = replica, for one, would silence the guard triggers for the worker's writes. Timeouts

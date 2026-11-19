@@ -11,6 +11,7 @@ set -euo pipefail
 : "${ADMIN_URL:?set ADMIN_URL to a superuser URL of a disposable PostgreSQL 17 server}"
 base="${ADMIN_URL%/*}"; host="${base#*@}"
 OWNER_URL="postgresql://luxia_owner:owner_password@${host}/neondb"
+APP_URL="postgresql://app_user:app_password@${host}/neondb"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 step() { printf '\n== %s\n' "$*"; }
 state() { psql -X -At "$OWNER_URL" -c "SELECT 'app_user=' || count(*) FILTER (WHERE has_function_privilege('app_user', p.oid, 'EXECUTE'))
@@ -36,7 +37,12 @@ const m = fs.readFileSync("prisma/migrations/20261114120000_retention_worker_rol
 const a = m.indexOf("DO $$");
 fs.writeFileSync(process.argv[1] + "/validate.sql", m.slice(a, m.indexOf("END $$;", a) + 7) + "\n");' "$work"
 gate() { psql -X -q -v ON_ERROR_STOP=1 --single-transaction "$OWNER_URL" -f "$work/gate.sql" >/dev/null; }
-validate() { psql -X -q -v ON_ERROR_STOP=1 "$OWNER_URL" -f "$work/validate.sql"; }
+# The re-check runs where the activation gate runs it: as app_user, the posture step's connection. Running it as the
+# owner hid that the creator exception was keyed to whoever ran it (fifth review of #196).
+validate() { psql -X -q -v ON_ERROR_STOP=1 "$APP_URL" -f "$work/validate.sql"; }
+# Refused, and for the reason given: a refusal for anything else is a failure of the drill.
+refused() { if validate 2>"$work/err"; then echo "FAIL: $2 passed the re-check"; exit 1; fi
+  grep -q "$1" "$work/err" || { echo "FAIL: $2 refused for another reason: $(cat "$work/err")"; exit 1; }; echo "ok: $2 refused"; }
 
 step "Every migration, as that owner"
 DATABASE_URL="${OWNER_URL}?schema=public" npx prisma migrate deploy
@@ -46,12 +52,26 @@ step "The activation gate, as that owner, then its re-check of the worker role"
 gate; validate; expect "app_user=0 retention=4" "after the gate"
 
 step "Drift is refused at the next activation"
-psql -X -q -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "ALTER ROLE luxia_retention SET session_replication_role = replica"
-if validate 2>"$work/err"; then echo "FAIL: a drifted role passed the re-check"; exit 1; fi
-grep -q "carries the setting session_replication_role" "$work/err" && echo "ok: drift refused"
-psql -X -q -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "ALTER ROLE luxia_retention RESET session_replication_role"
+admin() { psql -X -q -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "$1"; }
+admin "ALTER ROLE luxia_retention SET session_replication_role = replica"
+refused "carries the setting session_replication_role" "a setting that silences the guards"
+admin "ALTER ROLE luxia_retention RESET session_replication_role"
+# The creator's own grant is accepted only as PostgreSQL 16+ makes it: admin, no SET, no INHERIT.
+admin "GRANT luxia_retention TO luxia_owner WITH SET TRUE"
+refused "has the member luxia_owner" "the creator's grant with SET"
+admin "GRANT luxia_retention TO luxia_owner WITH SET FALSE"
+admin "GRANT luxia_retention TO luxia_owner WITH INHERIT TRUE"
+refused "has the member luxia_owner" "the creator's grant with INHERIT"
+admin "GRANT luxia_retention TO luxia_owner WITH INHERIT FALSE"
+admin "GRANT luxia_retention TO app_user"
+refused "has the member app_user" "another member"
+admin "REVOKE luxia_retention FROM app_user"
+validate; echo "ok: the creator's admin-only grant alone passes"
 
 step "Rollback, as that owner; then the gate as for a release from before D8.4"
+# Production's role can log in (the operator enabled it), so the rollback must be seen to take that away: without
+# this, the check below held whatever the rollback did (fifth review of #196).
+admin "ALTER ROLE luxia_retention LOGIN"
 psql -X -q -1 -v ON_ERROR_STOP=1 "$OWNER_URL" -f docs/operations/RETENTION-WORKER-ROLE-ROLLBACK.sql
 [ "$(psql -X -At "$OWNER_URL" -c "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'luxia_retention'")" = "f" ] || { echo "FAIL: role can still log in"; exit 1; }
 gate; expect "app_user=4 retention=0" "after the rollback and the gate"
