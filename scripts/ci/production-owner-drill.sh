@@ -71,6 +71,15 @@ admin "GRANT luxia_retention TO luxia_owner WITH INHERIT FALSE"
 admin "GRANT luxia_retention TO app_user"
 refused "has the member app_user" "another member"
 admin "REVOKE luxia_retention FROM app_user"
+# The owner of one entry point only, with the narrow admin grant: refused, since it could reach the other purges
+# through the worker (Codex F1, eighth review).
+admin "CREATE ROLE luxia_status_owner NOLOGIN"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_status() OWNER TO luxia_status_owner"
+admin "GRANT luxia_retention TO luxia_status_owner WITH ADMIN OPTION, SET FALSE, INHERIT FALSE"
+refused "has the member luxia_status_owner" "the owner of one entry point only"
+admin "REVOKE luxia_retention FROM luxia_status_owner"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_status() OWNER TO luxia_owner"
+admin "DROP ROLE luxia_status_owner"
 validate; echo "ok: the creator's admin-only grant alone passes"
 
 step "Rollback, as that owner; then the gate as for a release from before D8.4"

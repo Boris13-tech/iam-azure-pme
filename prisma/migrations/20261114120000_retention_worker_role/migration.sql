@@ -73,7 +73,10 @@ BEGIN
       -- power (Gemini 4 Neon F-03, seventh review). On Neon both are the owner role.
       -- PostgreSQL 15 has no set_option or inherit_option: there every member can SET ROLE, so a missing column counts
       -- as SET and INHERIT granted, and the exception never applies there (Gemini 4 Neon F-04, seventh review).
-      WHERE m.roleid = v_role AND NOT (m.member = (SELECT proowner FROM pg_proc WHERE oid = 'public.luxia_retention_status()'::regprocedure)
+      -- "The owner" means the owner of all four entry points: the owner of one only could use its admin option to reach
+      -- the others' purges through the worker (Codex F1, eighth review).
+      WHERE m.roleid = v_role AND NOT (m.member = ALL (SELECT proowner FROM pg_proc WHERE oid = ANY (v_allowed))
+        AND (SELECT count(*) FROM pg_proc WHERE oid = ANY (v_allowed)) = 4
         AND m.admin_option
         AND NOT coalesce((to_jsonb(m) ->> 'set_option')::boolean, true) AND NOT coalesce((to_jsonb(m) ->> 'inherit_option')::boolean, true))
     -- A setting attached to the role applies to every session it opens: a superuser's ALTER ROLE ... SET
