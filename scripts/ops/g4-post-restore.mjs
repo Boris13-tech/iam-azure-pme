@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 // What counts as a fault lives in its own module, so a test can drive each decision to its failing answer instead of
 // reading it in this source (Codex F5, review of #195).
-import { BACKUP_ROLE_SQL, EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateGrantSql,
+import { BACKUP_ROLE_SQL, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateGrantSql,
   gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf, triggerFaults,
   unprotectedFault, validate } from "./g4-post-restore-checks.mjs";
 
@@ -48,12 +48,18 @@ if (job) { const elsewhereJob = oneTarget(owner, job); if (elsewhereJob) fail(el
  */
 const CLEAN_ENV = cleanEnvironment(process.env);
 
-const psql = (connection, sql) => {
+// Throws rather than exits, so a failure inside the reference's block still reaches the finally that drops it
+// (Gemini 4 Hydrogen finding 8, seventh review); everywhere else the throw ends the run with the same refusal.
+const run = (connection, sql) => {
   const result = spawnSync("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", connection, "-c", sql], { encoding: "utf8", env: CLEAN_ENV });
-  if (result.status !== 0) fail(`psql failed: ${(result.stderr || result.error?.message || "").split("\n")[0]}`);
+  if (result.status !== 0) throw new Error(`psql failed: ${(result.stderr || result.error?.message || "").split("\n")[0]}`);
   return result.stdout.replace(/\r/g, "").trim();
 };
-const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\n${sql};\nCOMMIT;`);
+const psql = (connection, sql) => { try { return run(connection, sql); } catch (error) { return fail(error.message); } };
+// Every read pins its search path: a tampered copy cannot shadow what the checks call with objects of its own
+// (Gemini 4 Hydrogen finding 5, seventh review).
+const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog, public;\n${sql};\nCOMMIT;`);
+const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog, public;\n${sql};\nCOMMIT;`);
 
 const checks = [];
 const check = (name, ok, detail) => { checks.push({ name, ok, detail }); console.log(`${ok ? "PASS" : "FAIL"} ${name}: ${detail}`); return ok; };
@@ -61,7 +67,8 @@ const check = (name, ok, detail) => { checks.push({ name, ok, detail }); console
 // The connection really in use, read back from the server: the report states what was reached, not what was asked for.
 // The server's own address is asserted, not merely recorded: a local port forward to another database whose name
 // matched would otherwise have passed (Antigravity finding 1, review of #195).
-const identity = (connection) => readOnly(connection, `SELECT current_database() || ' on ' || coalesce(inet_server_addr()::text, 'socket') || ':' || coalesce(inet_server_port()::text, 'none')`);
+const IDENTITY_SQL = `SELECT current_database() || ' on ' || coalesce(inet_server_addr()::text, 'socket') || ':' || coalesce(inet_server_port()::text, 'none')`;
+const identity = (connection) => readOnly(connection, IDENTITY_SQL);
 const ownerIdentity = identity(owner.url);
 const appIdentity = identity(app.url);
 const reached = `${ownerIdentity} as ${readOnly(owner.url, "SELECT current_user")}`;
@@ -104,25 +111,28 @@ if (deploy.status !== 0) {
 // The copy against a reference: a second disposable database on the same server, migrated from the same release, read
 // the same way. It is created and dropped here, and never holds any data (Gemini 4 Hydrogen findings 1, 2 and 5).
 const reference = referenceOf(owner, randomBytes(4).toString("hex"));
-const server = (sql) => psql(owner.url, sql); // CREATE and DROP DATABASE cannot run inside a transaction
+const server = (sql) => run(owner.url, sql); // CREATE and DROP DATABASE cannot run inside a transaction; throws, see run
 const gate = readFileSync(".github/workflows/production-activation-gate.yml", "utf8");
 let referenceLines = null;
 let referenceError = null;
+// Only a database this run created is ever dropped: a name that already exists is refused, never cleared first, so
+// even a collision cannot take away someone else's database (Codex F5, seventh review).
+let created = false;
 try {
-  server(`DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)`);
   server(`CREATE DATABASE ${reference.database}`);
+  created = true;
   // The reference must answer from the copy's own server, like the copy (Gemini 4 Hydrogen finding 8).
-  const referenceIdentity = identity(reference.url);
+  const referenceIdentity = readOnlyOrThrow(reference.url, IDENTITY_SQL);
   if (serverOf(referenceIdentity) !== serverOf(ownerIdentity)) throw new Error(`the reference answered from ${referenceIdentity}`);
   const migrated = migrate(reference);
   if (migrated.status !== 0) throw new Error((migrated.stdout + migrated.stderr).split("\n").filter(Boolean).slice(-1)[0] ?? "migrate deploy failed");
   // Production's grants are the migrations' and the activation gate's: the reference gets the release's gate grants.
-  psql(reference.url, `BEGIN;\n${gateGrantSql(gate, reference.database)}\nCOMMIT;`);
-  referenceLines = readOnly(reference.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
+  run(reference.url, `BEGIN;\n${gateGrantSql(gate, reference.database)}\nCOMMIT;`);
+  referenceLines = readOnlyOrThrow(reference.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
 } catch (error) {
   referenceError = error instanceof Error ? error.message : String(error);
 } finally {
-  try { server(`DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)`); } catch { /* reported by the check below */ }
+  if (created) { try { server(`DROP DATABASE ${reference.database} WITH (FORCE)`); } catch { /* reported by the check below */ } }
 }
 const copyLines = readOnly(owner.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
 const drift = referenceLines ? fingerprintFaults(copyLines, referenceLines) : [`no reference: ${referenceError}`];
@@ -147,6 +157,10 @@ check("the activation gate's narrowings of the runtime role all hold", revokes.l
 // The backup role is left out of the comparison with the reference, so it is judged here: read only.
 const backupBeyondRead = readOnly(owner.url, BACKUP_ROLE_SQL);
 check("the backup role can read and do nothing else", backupBeyondRead === "", backupBeyondRead ? `beyond reading: ${backupBeyondRead}` : "read only, or absent");
+
+// Settings sessions start with, judged rather than compared: a role-wide one is the cluster's, the same on both sides.
+const unsafeSettings = readOnly(owner.url, SESSION_SETTINGS_SQL);
+check("sessions start with no setting beyond timeouts", unsafeSettings === "", unsafeSettings || `only ${SESSION_TIMEOUTS.join(", ")}, if any`);
 
 // Row-level security must be ENABLED and FORCED: force alone, with it disabled, protects nothing (Codex F2).
 // Two tables hold an organization without it, by review: Tenant (the scope itself) and LegacyUserBridge (the only link
@@ -216,16 +230,27 @@ check("the guard triggers are on their own tables and operations, and fire for o
 const ownRole = readOnly(owner.url, `SELECT EXISTS (SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '20261114120000_retention_worker_role'
   AND finished_at IS NOT NULL AND rolled_back_at IS NULL)::text`) === "true";
 const runner = ownRole ? job : app;
-if (!runner) {
+// The job's functions run only on a copy that has passed everything above: once a function, a trigger or a grant is
+// known to differ from the release, calling the job would run what is possibly tampered code (Codex F4, seventh review).
+const failedSoFar = checks.filter((entry) => !entry.ok).map((entry) => entry.name);
+if (failedSoFar.length > 0) {
+  check("the daily job was not run on a copy that already failed", false, `not run, because of: ${failedSoFar.join("; ")}`);
+} else if (!runner) {
   check("the daily job runs on the copy as its own role", false, "D8.4 is applied: set LUXIA_RESTORE_RETENTION_URL to luxia_retention on the copy");
 } else {
   // Who that connection really is, and where, before anything is sent through it: the expected role, restricted, on
   // the copy's own server (Argon finding 2, sixth review).
   const expected = ownRole ? "luxia_retention" : "app_user";
   const runnerIdentity = identity(runner.url);
+  // The whole role, not three attributes: what it can become and what it owns would widen it as much (Argon finding 4
+  // and Gemini 4 Hydrogen finding 6, seventh review).
   const as = readOnly(runner.url, `SELECT current_user || ' superuser=' || r.rolsuper || ' bypassrls=' || r.rolbypassrls
-    || ' createrole=' || r.rolcreaterole FROM pg_roles r WHERE r.rolname = current_user`);
-  const runnerOk = as === `${expected} superuser=false bypassrls=false createrole=false` && serverOf(runnerIdentity) === serverOf(ownerIdentity)
+    || ' createrole=' || r.rolcreaterole || ' createdb=' || r.rolcreatedb || ' replication=' || r.rolreplication
+    || ' memberships=' || (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid)
+    || ' owns=' || ((SELECT count(*) FROM pg_class c WHERE c.relowner = r.oid) + (SELECT count(*) FROM pg_proc p WHERE p.proowner = r.oid)
+                  + (SELECT count(*) FROM pg_namespace n WHERE n.nspowner = r.oid))
+    FROM pg_roles r WHERE r.rolname = current_user`);
+  const runnerOk = as === runnerExpected(expected) && serverOf(runnerIdentity) === serverOf(ownerIdentity)
     && runnerIdentity.startsWith(`${owner.database} on `);
   check(`the daily job's connection is ${expected}, restricted, on the copy`, runnerOk, `${as} at ${runnerIdentity}`);
   if (runnerOk) {

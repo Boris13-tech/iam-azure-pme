@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
-  ALLOWED_PARAMETERS, BACKUP_ROLE_SQL, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
+  ALLOWED_PARAMETERS, BACKUP_ROLE_SQL, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
   gateGrantSql, gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf,
   triggerFaults, unprotectedFault, validate,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
@@ -161,14 +161,24 @@ describe("G4 post-restore: the copy against a database migrated from the same re
       "has_function_privilege('public', p.oid, 'EXECUTE')",
       // Sixth review (Argon finding 3): rules, index state, types, settings, and the migration history with checksums.
       "pg_get_ruledef(r.oid)", "i.indisvalid::text", "i.indisready::text", "FROM pg_enum e", "aclexplode(t.typacl)",
-      "FROM pg_db_role_setting s", "' checksum=' || m.checksum", "FROM public._prisma_migrations m",
+      "' checksum=' || m.checksum", "FROM public._prisma_migrations m",
       // Fourth review (Hydrogen finding 1, Argon findings 1 to 3): grants, columns, constraints, indexes, views, owners.
       "aclexplode(c.relacl)", "aclexplode(a.attacl)", "aclexplode(p.proacl)", "aclexplode(n.nspacl)", "aclexplode(da.defaclacl)",
       "format_type(a.atttypid, a.atttypmod)", "pg_get_expr(d.adbin, d.adrelid)", "pg_get_constraintdef(k.oid)", "pg_get_indexdef(i.indexrelid)",
       "pg_get_viewdef(c.oid)", "pg_get_userbyid(c.relowner)", "pg_get_userbyid(p.proowner)", "FROM pg_default_acl da"])
       expect(FINGERPRINT_SQL, fragment).toContain(fragment);
-    // The role that migrated is "owner" on both sides, so a copy restored by another role still compares.
-    expect(FINGERPRINT_SQL).toContain("= current_user THEN 'owner'");
+    // The role that migrated is "owner" on both sides, read as the owner of the migration history in each database, so a
+    // Production backup restored as it is, owned by Production's owner, still compares (Argon finding 3, seventh review:
+    // the previous version failed such a copy with 288 differences).
+    expect(FINGERPRINT_SQL).toContain("to_regclass('public._prisma_migrations')");
+    expect(FINGERPRINT_SQL).not.toContain("= current_user THEN 'owner'");
+    // An aggregate's ORDER BY 1 orders by the constant 1: the ACL entries are ordered by themselves.
+    expect(FINGERPRINT_SQL).not.toContain("ORDER BY 1)");
+    // Settings are judged, not compared (a role-wide one is the cluster's, the same on both sides).
+    expect(FINGERPRINT_SQL).not.toContain("pg_db_role_setting");
+    // The internal foreign-key triggers, read by their constraint (Codex F2, seventh review).
+    expect(FINGERPRINT_SQL).toContain("'constraint-trigger ' || c.relname || ' ' || k.conname");
+    expect(FINGERPRINT_SQL).toContain("WHERE t.tgisinternal AND c.relnamespace = 'public'::regnamespace");
     // The backup role's read grants are the backup system's, not the release's: left out of the comparison, and judged
     // on their own as read only (found by running the command on CI's restored copy).
     expect(FINGERPRINT_SQL).toContain("WHERE a.grantee IS DISTINCT FROM (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')");
@@ -176,9 +186,25 @@ describe("G4 post-restore: the copy against a database migrated from the same re
     // grant option even on a column, its attributes, its read-only sessions, and memberships both ways.
     for (const fragment of ["a.privilege_type <> 'SELECT' OR a.is_grantable", "aclexplode(t.attacl)", "aclexplode(p.proacl)",
       "'member of ' || r.rolname", "'has the member ' || r.rolname", "FROM pg_default_acl da", "'sessions are not read only'",
-      "c.setting = 'default_transaction_read_only=on'", "rolsuper", "rolcreaterole", "rolcreatedb", "rolreplication", "rolinherit"])
+      "'default_transaction_read_only'", "rolsuper", "rolcreaterole", "rolcreatedb", "rolreplication", "rolinherit",
+      // Seventh review: the per-database setting wins, a NOLOGIN role opens no session, the database and types.
+      "s.setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())", "r.rolcanlogin",
+      "aclexplode(d.datacl)", "'owns the database'", "aclexplode(t.typacl)"])
       expect(BACKUP_ROLE_SQL, fragment).toContain(fragment);
     expect(BACKUP_ROLE_SQL).not.toContain("NOT IN ('SELECT', 'USAGE')");
+  });
+
+  it("judges the settings sessions start with, allowing timeouts only", () => {
+    for (const fragment of ["FROM pg_db_role_setting s", "s.setrole = 0", "'app_user', 'luxia_retention'", "s.setdatabase IN (0,"])
+      expect(SESSION_SETTINGS_SQL, fragment).toContain(fragment);
+    expect(SESSION_TIMEOUTS).toEqual(["statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout", "idle_session_timeout"]);
+    for (const timeout of SESSION_TIMEOUTS) expect(SESSION_SETTINGS_SQL).toContain(`'${timeout}'`);
+  });
+
+  it("expects the daily job's connection to be its role and nothing wider", () => {
+    expect(runnerExpected("luxia_retention")).toBe(
+      "luxia_retention superuser=false bypassrls=false createrole=false createdb=false replication=false memberships=0 owns=0");
+    expect(runnerExpected("app_user")).toMatch(/^app_user .* memberships=0 owns=0$/);
   });
 });
 

@@ -73,15 +73,22 @@ export const serverOf = (identity) => /\son (.+)$/.exec(identity)?.[1] ?? "";
  * owner, security attributes, settings, a digest of its body, and whether PUBLIC may execute it; and the default
  * privileges. The reference is given the activation gate's grants too, so the comparison covers what the runtime role
  * may do as well as what the migrations define (Gemini 4 Hydrogen finding 1 and Argon findings 1 to 3, fourth review).
- * The role that migrated is written "owner" on both sides, whatever it is called.
+ * The role that migrated is written "owner" on both sides, whatever it is called. That role is the owner of the
+ * migration history in each database, not the role running this: a Production backup restored as it is keeps
+ * Production's owner name, and the reference is owned by the local one (Argon finding 3, seventh review).
  */
-const OWNER = `CASE WHEN %s = current_user THEN 'owner' ELSE %s::text END`;
+const MIGRATOR = `pg_get_userbyid(coalesce((SELECT relowner FROM pg_class WHERE oid = to_regclass('public._prisma_migrations')),
+  (SELECT oid FROM pg_roles WHERE rolname = current_user)))`;
+const OWNER = `CASE WHEN %s = ${MIGRATOR} THEN 'owner' ELSE %s::text END`;
 const owned = (expression) => OWNER.replaceAll("%s", expression);
 // The backup role (scripts/backup/luxia-backup-role.sql) is the backup system's, not the release's: Production and any
 // copy restored from it carry its read grants, a reference migrated from the release does not. Its entries are left out
 // of the comparison and judged on their own instead: read only (BACKUP_ROLE_SQL below).
-const ACL = (column) => `coalesce((SELECT string_agg(${owned("CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END")} || ':' || a.privilege_type
-      || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END, ',' ORDER BY 1) FROM aclexplode(${column}) a
+// Ordered by the entry itself: "ORDER BY 1" inside an aggregate orders by the constant 1, which is no order at all, and
+// two identical lists could print differently (Gemini 4 Hydrogen finding 4, seventh review).
+const ACL_ENTRY = `${owned("CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END")} || ':' || a.privilege_type
+      || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END`;
+const ACL = (column) => `coalesce((SELECT string_agg(${ACL_ENTRY}, ',' ORDER BY ${ACL_ENTRY}) FROM aclexplode(${column}) a
       WHERE a.grantee IS DISTINCT FROM (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')), 'default')`;
 export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER BY line), '') FROM (
   SELECT 'schema ' || n.nspname || ' owner=' || ${owned("pg_get_userbyid(n.nspowner)")} || ' acl=' || ${ACL("n.nspacl")} AS line
@@ -107,6 +114,12 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
     FROM pg_policies WHERE schemaname = 'public'
   UNION ALL SELECT 'trigger ' || pg_get_triggerdef(t.oid) || ' state=' || t.tgenabled::text
     FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE NOT t.tgisinternal AND c.relnamespace = 'public'::regnamespace
+  -- The internal triggers that enforce foreign keys: named after object ids, so read by their constraint, table and
+  -- kind, with their state. ALTER TABLE ... DISABLE TRIGGER ALL switches them off and leaves every constraint in place
+  -- (Codex F2, seventh review).
+  UNION ALL SELECT 'constraint-trigger ' || c.relname || ' ' || k.conname || ' type=' || t.tgtype::text || ' state=' || t.tgenabled::text
+    FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_constraint k ON k.oid = t.tgconstraint
+    WHERE t.tgisinternal AND c.relnamespace = 'public'::regnamespace
   -- The whole definition, as PostgreSQL prints it: body, language, volatility, strictness, leakproofness, security
   -- and settings, not the body alone (Argon finding 3, sixth review).
   UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' owner=' || ${owned("pg_get_userbyid(p.proowner)")}
@@ -127,9 +140,6 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
     FROM pg_type t WHERE t.typnamespace = 'public'::regnamespace AND t.typtype IN ('e', 'd', 'c')
       AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.reltype = t.oid AND c.relkind <> 'c')
   -- Settings that every session of the database, or of the runtime role, starts with.
-  UNION ALL SELECT 'setting ' || CASE WHEN s.setrole = 0 THEN 'database' ELSE pg_get_userbyid(s.setrole) END || ' ' || array_to_string(s.setconfig, ';')
-    FROM pg_db_role_setting s WHERE s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
-      AND (s.setrole = 0 AND s.setdatabase <> 0 OR s.setrole = (SELECT oid FROM pg_roles WHERE rolname = 'app_user'))
   -- The migration history: the same migrations, with the same checksums, finished and not rolled back.
   UNION ALL SELECT 'migration ' || m.migration_name || ' checksum=' || m.checksum || ' finished=' || (m.finished_at IS NOT NULL)::text
       || ' rolled_back=' || (m.rolled_back_at IS NOT NULL)::text
@@ -162,9 +172,25 @@ export const BACKUP_ROLE_SQL = `SELECT coalesce(string_agg(DISTINCT entry, ', ')
   UNION ALL SELECT 'createdb' FROM pg_roles WHERE rolname = 'luxia_backup' AND rolcreatedb
   UNION ALL SELECT 'replication' FROM pg_roles WHERE rolname = 'luxia_backup' AND rolreplication
   UNION ALL SELECT 'inherit' FROM pg_roles WHERE rolname = 'luxia_backup' AND rolinherit
-  UNION ALL SELECT 'sessions are not read only' FROM pg_roles r WHERE r.rolname = 'luxia_backup' AND NOT EXISTS (
-      SELECT 1 FROM pg_db_role_setting s CROSS JOIN unnest(s.setconfig) c(setting)
-      WHERE s.setrole = r.oid AND c.setting = 'default_transaction_read_only=on')
+  -- Its sessions on this database start read only: the per-database setting wins over the role's, so an override here
+  -- to anything else is a fault even when the role-wide one says on (Gemini 4 Hydrogen and Argon finding 2, seventh
+  -- review). A role that cannot log in opens no session at all: restore.mjs recreates the roles a backup names that
+  -- way, without their settings, which must not fail a clean restore.
+  UNION ALL SELECT 'sessions are not read only' FROM pg_roles r WHERE r.rolname = 'luxia_backup' AND r.rolcanlogin AND coalesce(
+      (SELECT split_part(c.setting, '=', 2) FROM pg_db_role_setting s CROSS JOIN unnest(s.setconfig) c(setting)
+        WHERE s.setrole = r.oid AND s.setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND split_part(c.setting, '=', 1) = 'default_transaction_read_only'),
+      (SELECT split_part(c.setting, '=', 2) FROM pg_db_role_setting s CROSS JOIN unnest(s.setconfig) c(setting)
+        WHERE s.setrole = r.oid AND s.setdatabase = 0 AND split_part(c.setting, '=', 1) = 'default_transaction_read_only'),
+      'off') NOT IN ('on', 'true', '1')
+  -- Nothing on the database but CONNECT, no ownership of it, no grant on a type.
+  UNION ALL SELECT 'holds ' || a.privilege_type || ' on the database' FROM pg_database d CROSS JOIN aclexplode(d.datacl) a
+    WHERE d.datname = current_database() AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+      AND (a.privilege_type <> 'CONNECT' OR a.is_grantable)
+  UNION ALL SELECT 'owns the database' FROM pg_database d
+    WHERE d.datname = current_database() AND d.datdba = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+  UNION ALL SELECT t.typname || ':' || a.privilege_type FROM pg_type t CROSS JOIN aclexplode(t.typacl) a
+    WHERE t.typnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
   UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
     WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
   UNION ALL SELECT c.relname || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END
@@ -184,6 +210,22 @@ export const BACKUP_ROLE_SQL = `SELECT coalesce(string_agg(DISTINCT entry, ', ')
   UNION ALL SELECT 'member of ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
     WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
 ) held`;
+
+/**
+ * Settings every session on this database starts with, for the runtime role, the job's role, every role, or the
+ * database itself. They cannot be compared with the reference: a role-wide setting is the cluster's and shows the same
+ * on both sides (Gemini 4 Hydrogen finding 1 and Argon finding 1, seventh review). So they are judged: only timeouts,
+ * which only narrow a session. session_replication_role, row_security, search_path or a read-write default would each
+ * change what the guards and the policies do.
+ */
+export const SESSION_TIMEOUTS = ["statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout", "idle_session_timeout"];
+export const SESSION_SETTINGS_SQL = `SELECT coalesce(string_agg(DISTINCT
+    CASE WHEN s.setrole = 0 THEN 'every role' ELSE pg_get_userbyid(s.setrole) END
+    || CASE WHEN s.setdatabase = 0 THEN ' everywhere' ELSE ' here' END || ': ' || c.setting, '; '), '')
+  FROM pg_db_role_setting s CROSS JOIN unnest(s.setconfig) c(setting)
+  WHERE s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
+    AND (s.setrole = 0 OR s.setrole IN (SELECT oid FROM pg_roles WHERE rolname IN ('app_user', 'luxia_retention')))
+    AND split_part(c.setting, '=', 1) NOT IN (${SESSION_TIMEOUTS.map((name) => `'${name}'`).join(", ")})`;
 
 /** The lines of the reference missing from the copy, and the copy's lines the reference does not have. */
 export function fingerprintFaults(copy, reference) {
@@ -302,6 +344,10 @@ export function refusedTarget(checks) {
   }
   return null;
 }
+
+/** How the daily job's connection must answer for itself: its role, and nothing that widens it. */
+export const runnerExpected = (role) =>
+  `${role} superuser=false bypassrls=false createrole=false createdb=false replication=false memberships=0 owns=0`;
 
 /**
  * The runtime role as it must answer for itself on the copy: no attribute that widens it, no role it can become, and

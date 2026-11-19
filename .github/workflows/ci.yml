@@ -279,6 +279,32 @@ jobs:
         # Used only once the copy has D8.4, whose job runs as its own role.
         LUXIA_RESTORE_RETENTION_URL: postgresql://luxia_retention:retention_password@localhost:5432/luxia_restored
 
+    # And it fails when it should, on the same copy: a tenant policy weakened, then a setting that silences the guards
+    # for every session. Each is undone afterwards; a pass on either is a failure of this step (seventh review).
+    - name: G4 post-restore command fails on a weakened copy
+      run: |
+        set -u
+        U="postgresql://prisma:prisma_password@localhost:5432/luxia_restored"
+        g4() { PATH="$PG_BIN:$PATH" node scripts/ops/g4-post-restore.mjs --release "$GITHUB_SHA" --backup-age-minutes 0 \
+          --started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --report "$RUNNER_TEMP/g4-negative.json" > "$RUNNER_TEMP/g4-negative.out" 2>&1; }
+        expect_fail() { if g4; then echo "FAIL: G4 passed $1"; exit 1; fi
+          grep -q "$2" "$RUNNER_TEMP/g4-negative.out" || { echo "FAIL: G4 refused $1 for another reason"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+          echo "ok: G4 refused $1"; }
+        policy="$("$PG_BIN/psql" -X -At "$U" -c "SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'Subject' LIMIT 1")"
+        qual="$("$PG_BIN/psql" -X -At "$U" -c "SELECT qual FROM pg_policies WHERE schemaname = 'public' AND tablename = 'Subject' AND policyname = '$policy'")"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER POLICY \"$policy\" ON \"Subject\" USING (true)"
+        expect_fail "a tenant policy weakened to USING (true)" "missing or changed: policy Subject $policy"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER POLICY \"$policy\" ON \"Subject\" USING ($qual)"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored SET session_replication_role = replica"
+        expect_fail "every session starting in replica mode" "session_replication_role=replica"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored RESET session_replication_role"
+        g4 || { echo "FAIL: the restored copy no longer passes after the reverts"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: the copy passes again once both are undone"
+      env:
+        LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
+        LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored
+        LUXIA_RESTORE_RETENTION_URL: postgresql://luxia_retention:retention_password@localhost:5432/luxia_restored
+
     - name: The application's PostgreSQL suites pass on the restored database
       run: |
         npm run test:resources

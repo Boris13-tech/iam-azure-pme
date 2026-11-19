@@ -169,20 +169,30 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     const direct = [...source.matchAll(/const \w+ = psql\(runner\.url, `([^`]+)`\)/g)].map((m) => m[1].trim());
     expect(source).not.toMatch(/psql\(owner\.url, `SELECT luxia_retention/);
     // And on the reference, only the release's gate grants, in one transaction.
-    expect([...source.matchAll(/psql\(reference\.url, `([^`]+)`\)/g)].map((m) => m[1])).toEqual(["BEGIN;\\n${gateGrantSql(gate, reference.database)}\\nCOMMIT;"]);
+    expect([...source.matchAll(/run\(reference\.url, `([^`]+)`\)/g)].map((m) => m[1])).toEqual(["BEGIN;\\n${gateGrantSql(gate, reference.database)}\\nCOMMIT;"]);
+    // Inside the reference's block every call throws rather than exits, so the finally that drops it always runs.
+    expect(source).toContain("const server = (sql) => run(owner.url, sql);");
+    expect(source).toContain("readOnlyOrThrow(reference.url, FINGERPRINT_SQL)");
+    // Every read pins its search path.
+    expect(source).toContain("SET LOCAL search_path = pg_catalog, public;");
     expect(direct).toEqual([
       "SELECT luxia_retention_purge_transactions(1000, false)::text",
       "SELECT luxia_retention_status()::text",
     ]);
     expect(source).toContain("wroteToTheCopy");
-    // The only statements sent to the server outside a transaction: the reference database, created and dropped, and
-    // never the copy. Both name the reference, which carries the copy's name plus "_ref".
+    // The only statements sent to the server outside a transaction: the reference database, created, then dropped only
+    // if this run created it — never cleared beforehand, so a name collision cannot drop someone else's (Codex F5).
     const toServer = [...source.matchAll(/server\(`([^`]+)`\)/g)].map((m) => m[1]);
     expect(toServer).toEqual([
-      "DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)",
       "CREATE DATABASE ${reference.database}",
-      "DROP DATABASE IF EXISTS ${reference.database} WITH (FORCE)",
+      "DROP DATABASE ${reference.database} WITH (FORCE)",
     ]);
+    expect(source).toContain("if (created) { try { server(`DROP DATABASE");
+    expect(source).not.toContain("DROP DATABASE IF EXISTS");
+    // The job's functions run only on a copy that has passed every check before them (Codex F4).
+    const gateOnFailures = source.indexOf("const failedSoFar = checks.filter((entry) => !entry.ok)");
+    expect(gateOnFailures).toBeGreaterThan(0);
+    expect(gateOnFailures).toBeLessThan(source.indexOf("luxia_retention_purge_transactions(1000, false)"));
     expect(source).toContain("wroteToTheServer");
     const sent = [...source.matchAll(/readOnly\([^,]+,\s*`\s*([A-Za-z]+)/g)].map((m) => m[1].toUpperCase());
     expect(sent.length).toBeGreaterThanOrEqual(8);
