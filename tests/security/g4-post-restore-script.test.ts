@@ -23,6 +23,19 @@ echo "$*" >> "${calls.replace(/\\/g, "/")}"
 echo stub
 `);
 chmodSync(join(dir, "psql"), 0o755);
+// A stand-in git too, since the runs see this directory alone: the checked-out commit is aaaa…, the release named
+// "rc-private-beta-1" or "HEAD" resolves to it and any other name to another commit; LUXIA_G4_STUB_DIRTY makes the
+// release's files look modified. The script refuses both before connecting (Argon finding 4, eighth review).
+writeFileSync(join(dir, "git"), `#!/bin/sh
+case "$*" in
+  "rev-parse HEAD") echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+  "rev-parse --verify --quiet HEAD^{commit}"|"rev-parse --verify --quiet rc-private-beta-1^{commit}") echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+  "rev-parse --verify --quiet"*) echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
+  status*) [ -n "$LUXIA_G4_STUB_DIRTY" ] && echo " M prisma/schema.prisma" ;;
+esac
+exit 0
+`);
+chmodSync(join(dir, "git"), 0o755);
 // The shebang is /bin/sh, not /usr/bin/env: the runs below see this directory alone, so env could not find bash.
 // A spawned command is resolved without a shell, so a file named `psql` with a shebang is reachable on Linux, where
 // CI runs, but not on Windows. Where it is unreachable, "it called no database" would hold for the wrong reason, so
@@ -53,6 +66,18 @@ function run(args: string[], overrides: Record<string, string | undefined> = {})
 describe("G4 post-restore script: it can reach nothing but a disposable local copy", () => {
   it.runIf(process.env.CI)("in CI the stand-in psql is reachable, so the assertions below mean what they say", () => {
     expect(stubReachable).toBe(true);
+  });
+
+  it.runIf(stubReachable)("refuses a release that is not the checked-out commit, or whose files are modified, before connecting", () => {
+    const other = run(["--release", "rc-private-beta-0", ...OK_ARGS.slice(2)]);
+    expect(other.code).toBe(1);
+    expect(other.out).toContain("REFUSED: --release rc-private-beta-0 is bbbbbbbb");
+    expect(other.out).toContain("check out the release first");
+    expect(other.calls).toBe("");
+    const dirty = run(OK_ARGS, { LUXIA_G4_STUB_DIRTY: "1" });
+    expect(dirty.code).toBe(1);
+    expect(dirty.out).toContain("REFUSED: the release's files are modified here: M prisma/schema.prisma");
+    expect(dirty.calls).toBe("");
   });
 
   it("refuses a target that is not loopback, before touching any database", () => {
