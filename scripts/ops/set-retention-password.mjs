@@ -34,7 +34,8 @@ const validation = from < 0 ? "" : migration.slice(from, migration.indexOf("END 
 if (!validation.includes("RETENTION_ROLE_UNSAFE")) fail("the release's worker-role validation was not found: run this from the release's checkout");
 const validated = psql(env, `BEGIN READ ONLY;\n${validation}\nCOMMIT;\n`, { allowFailure: true });
 if (!validated.ok) {
-  const reason = (validated.stderr ?? "").split("\n").find((line) => /DETAIL|RETENTION_ROLE_UNSAFE/.test(line)) ?? "validation failed";
+  // The refusal and its detail, which lists what is wrong (Gemini 4 Hydrogen F-03, thirteenth review).
+  const reason = (validated.stderr ?? "").split("\n").filter((line) => /DETAIL|RETENTION_ROLE_UNSAFE/.test(line)).join(" ") || "validation failed";
   fail(`luxia_retention is not the narrow role, so no login was enabled: ${reason}`);
 }
 
@@ -55,30 +56,42 @@ try {
   fail(`the output file could not be created, so the password was not changed: ${error instanceof Error ? error.code ?? error.message : error}`);
 }
 const set = psql(env, `ALTER ROLE luxia_retention LOGIN PASSWORD '${password}';\n`, { allowFailure: true });
-// A failed client result does not prove the server rolled back: the connection can drop after the change committed.
-// The new credential is tried before anything is discarded (Codex F3, twelfth review).
+// A failed client result does not prove the server rolled back: the connection can drop after the change committed
+// (Codex F3, twelfth review). Only an error the server itself returned proves nothing was applied; in every other case
+// the outcome is unknown, so the saved connection string is kept, never deleted on a guess (Codex F2, thirteenth review).
 if (!set.ok) {
-  const probe = psql(pgEnv(url.toString(), "luxia-retention-password-probe"), "SELECT 1;", { allowFailure: true });
-  if (probe.ok) {
-    console.error("The change was reported as failed, but the new credential logs in: it was applied. Continuing with the checks.");
-  } else {
+  const serverRefused = /(^|\n)(psql:[^\n]*)?ERROR:/.test(set.stderr ?? "");
+  if (serverRefused) {
     try { unlinkSync(output); } catch { /* reported below */ }
-    fail(`the login or the password was not set: the new credential does not log in (error output withheld because it may quote the statement); ${existsSync(output) ? `delete ${output} by hand` : "the output file was removed"}`);
+    fail(`the server refused the change, so the login and the password are unchanged (error output withheld because it may quote the statement); ${existsSync(output) ? `delete ${output} by hand` : "the output file was removed"}`);
   }
+  const probe = psql(pgEnv(url.toString(), "luxia-retention-password-probe"), "SELECT 1;", { allowFailure: true });
+  if (!probe.ok) {
+    fail(`the outcome of the change is unknown (the connection failed, and the new credential could not be tried): ${output} is kept. `
+      + "Try it again later, or rotate once more; do not delete it until one of the two credentials is known to work");
+  }
+  console.error("The change was reported as failed, but the new credential logs in: it was applied. Continuing with the checks.");
 }
 
+// Takes the new login back when the worker cannot be shown to be the narrow one: the saved credential is deleted only
+// once the login is known to be off; otherwise it is kept and the state reported (Codex F3, thirteenth review).
+const takeBack = (reason) => {
+  const revoked = psql(env, "ALTER ROLE luxia_retention NOLOGIN;\n", { allowFailure: true }).ok;
+  if (revoked) { try { unlinkSync(output); } catch { /* reported below */ } }
+  fail(`${reason}; its login was ${revoked ? "taken back" : `NOT taken back: disable it by hand (ALTER ROLE luxia_retention NOLOGIN), and keep ${output} until then`}`
+    + `${revoked ? `, and ${existsSync(output) ? `${output} must be deleted by hand` : "the output file removed"}` : ""}`);
+};
 // Proves the new credential works and is the expected, narrow role, without printing it.
-const check = psql(pgEnv(url.toString(), "luxia-retention-password-check"),
+const checked = psql(pgEnv(url.toString(), "luxia-retention-password-check"),
   "SELECT current_user || ' session=' || session_user || ' superuser=' || r.rolsuper || ' bypassrls=' || r.rolbypassrls || ' inherit=' || r.rolinherit"
   + " || ' replication_role=' || current_setting('session_replication_role') || ' row_security=' || current_setting('row_security')"
-  + " FROM pg_roles r WHERE r.rolname = current_user;").stdout.trim();
+  + " FROM pg_roles r WHERE r.rolname = current_user;", { allowFailure: true });
+if (!checked.ok) takeBack("the new login could not be checked");
+const check = checked.stdout.trim();
 // The worker's own session, as it really starts: a server value masked for the validating role shows here (Codex F2,
 // twelfth review).
 if (check !== "luxia_retention session=luxia_retention superuser=false bypassrls=false inherit=false replication_role=origin row_security=on") {
-  // Not a login to leave in place: it is taken back, and the saved credential removed.
-  const revoked = psql(env, "ALTER ROLE luxia_retention NOLOGIN;\n", { allowFailure: true }).ok;
-  try { unlinkSync(output); } catch { /* reported below */ }
-  fail(`the new login does not start as the narrow worker, so its login was ${revoked ? "taken back" : "NOT taken back: disable it by hand"} and ${existsSync(output) ? `${output} must be deleted by hand` : "the output file removed"}: ${check}`);
+  takeBack(`the new login does not start as the narrow worker (${check})`);
 }
 console.log(`luxia_retention login enabled and password set; login check: ${check}`);
 console.log(`Declare the content of ${output} as LUXIA_RETENTION_DATABASE_URL on Vercel's Production environment, then delete the file.`);

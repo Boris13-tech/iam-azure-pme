@@ -149,8 +149,11 @@ db "GRANT SELECT ON pg_catalog.pg_authid TO PUBLIC"
 refused "can select pg_authid" "pg_authid readable by PUBLIC"
 db "REVOKE SELECT ON pg_catalog.pg_authid FROM PUBLIC"
 db "GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO PUBLIC"
-refused "can read the column pg_subscription.subconninfo" "pg_subscription.subconninfo readable by PUBLIC"
+refused "can select the column pg_subscription.subconninfo" "pg_subscription.subconninfo readable by PUBLIC"
 db "REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM PUBLIC"
+db "GRANT UPDATE (rolpassword) ON pg_catalog.pg_authid TO PUBLIC"
+refused "can update the column pg_authid.rolpassword" "pg_authid.rolpassword writable by PUBLIC"
+db "REVOKE UPDATE (rolpassword) ON pg_catalog.pg_authid FROM PUBLIC"
 admin "ALTER SYSTEM SET session_replication_role = replica"; admin "SELECT pg_reload_conf()" >/dev/null
 refused "the server starts sessions with session_replication_role=replica" "replica mode for the whole server"
 admin "ALTER SYSTEM RESET session_replication_role"; admin "SELECT pg_reload_conf()" >/dev/null
@@ -195,9 +198,14 @@ admin "ALTER ROLE luxia_retention RESET search_path"
 admin "ALTER ROLE luxia_owner SET session_replication_role = origin"; admin "ALTER ROLE app_user SET session_replication_role = origin"
 admin "ALTER SYSTEM SET session_replication_role = replica"; admin "SELECT pg_reload_conf()" >/dev/null
 validate; echo "ok: the validation cannot see a server value hidden by the validating roles' own defaults"
-script_refused "replica mode hidden from the validating roles" "does not start as the narrow worker, so its login was taken back"
+script_refused "replica mode hidden from the validating roles" "does not start as the narrow worker (.*); its login was taken back"
 admin "ALTER SYSTEM RESET session_replication_role"; admin "SELECT pg_reload_conf()" >/dev/null
 admin "ALTER ROLE luxia_owner RESET session_replication_role"; admin "ALTER ROLE app_user RESET session_replication_role"
+# A check that cannot even run (here the worker may open no connection at all) takes the login back too, rather than
+# leaving it enabled unverified (Codex F3, thirteenth review).
+admin "ALTER ROLE luxia_retention CONNECTION LIMIT 0"
+script_refused "a new login that cannot be checked" "the new login could not be checked; its login was taken back"
+admin "ALTER ROLE luxia_retention CONNECTION LIMIT -1"
 LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/retention-url" >/dev/null
 [ "$(login)" = "t" ] || { echo "FAIL: the role cannot log in after the script"; exit 1; }
 [ "$(psql -X -At "$(cat "$work/retention-url")" -c 'SELECT current_user')" = "luxia_retention" ] || { echo "FAIL: the saved connection does not log in as the worker"; exit 1; }
