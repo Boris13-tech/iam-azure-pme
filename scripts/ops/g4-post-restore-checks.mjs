@@ -129,6 +129,10 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
     FROM pg_class c WHERE c.relnamespace IN ${SCHEMAS} AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
   UNION ALL SELECT 'column ' || c.oid::regclass::text || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
       || ' notnull=' || a.attnotnull::text || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-') || ' acl=' || ${ACL("a.attacl", "c.relnamespace")}
+      -- Collation, identity and generation change what equality and uniqueness mean or where a value comes from, and
+      -- the type alone does not show them (Gemini 4 Hydrogen finding 2, twelfth review).
+      || ' collation=' || coalesce((SELECT co.oid::regcollation::text FROM pg_collation co WHERE co.oid = a.attcollation), '-')
+      || ' identity=' || a.attidentity::text || ' generated=' || a.attgenerated::text
     FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
     WHERE c.relnamespace IN ${SCHEMAS} AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND a.attnum > 0 AND NOT a.attisdropped
   UNION ALL SELECT 'constraint ' || c.oid::regclass::text || ' ' || k.conname || ' ' || pg_get_constraintdef(k.oid)
@@ -167,6 +171,29 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
   -- Procedural languages: USAGE on an untrusted one lets a role write functions that run outside the database.
   -- Its whole row: owner, trust, handlers and rights (Gemini 4 Neon finding 2, eleventh review).
   UNION ALL SELECT 'language ' || l.lanname || ' ' || md5(l::text) FROM pg_language l
+  -- Inheritance: a table made to inherit another is read through the parent under the parent's policies, so a
+  -- protected child reached through an unprotected parent exposes its rows without any other line changing (Codex F1,
+  -- twelfth review). The owner of both tables can do this without superuser rights.
+  -- Objects a schema's owner can create without superuser rights that change how the application's statements resolve:
+  -- operators (an "=" for an enum backed by enum_ne inverts a comparison), casts, collations, operator classes and
+  -- families, conversions, text-search objects, extended statistics, and extensions and publications anywhere (Gemini
+  -- 4 Hydrogen finding 1, twelfth review). The release defines none of them, so any of them differs.
+  UNION ALL SELECT 'operator ' || o.oid::regoperator::text || ' function=' || o.oprcode::regproc::text FROM pg_operator o
+    WHERE o.oprnamespace IN ${SCHEMAS}
+  UNION ALL SELECT 'cast ' || format_type(k.castsource, NULL) || ' as ' || format_type(k.casttarget, NULL)
+      || ' function=' || coalesce(k.castfunc::regprocedure::text, '-') || ' context=' || k.castcontext::text || ' method=' || k.castmethod::text
+    FROM pg_cast k WHERE k.oid >= 16384
+  UNION ALL SELECT 'collation ' || co.oid::regcollation::text FROM pg_collation co WHERE co.collnamespace IN ${SCHEMAS}
+  UNION ALL SELECT 'operator-class ' || oc.opcname || ' ' || oc.opcnamespace::regnamespace::text FROM pg_opclass oc WHERE oc.opcnamespace IN ${SCHEMAS}
+  UNION ALL SELECT 'operator-family ' || of.opfname || ' ' || of.opfnamespace::regnamespace::text FROM pg_opfamily of WHERE of.opfnamespace IN ${SCHEMAS}
+  UNION ALL SELECT 'conversion ' || cv.conname || ' ' || cv.connamespace::regnamespace::text FROM pg_conversion cv WHERE cv.connamespace IN ${SCHEMAS}
+  UNION ALL SELECT 'text-search-config ' || tc.oid::regconfig::text FROM pg_ts_config tc WHERE tc.cfgnamespace IN ${SCHEMAS}
+  UNION ALL SELECT 'text-search-dictionary ' || td.oid::regdictionary::text FROM pg_ts_dict td WHERE td.dictnamespace IN ${SCHEMAS}
+  UNION ALL SELECT 'statistics ' || se.stxname || ' ' || se.stxnamespace::regnamespace::text FROM pg_statistic_ext se WHERE se.stxnamespace IN ${SCHEMAS}
+  UNION ALL SELECT 'extension ' || x.extname || ' ' || x.extversion || ' schema=' || x.extnamespace::regnamespace::text FROM pg_extension x
+  UNION ALL SELECT 'publication ' || pb.pubname FROM pg_publication pb
+  UNION ALL SELECT 'inherits ' || i.inhrelid::regclass::text || ' from ' || i.inhparent::regclass::text || ' seq=' || i.inhseqno::text
+    FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE c.relnamespace IN ${SCHEMAS}
   -- Event triggers fire on DDL and logins in the whole database, whatever schema their function is in.
   UNION ALL SELECT 'event-trigger ' || e.evtname || ' ' || e.evtevent || ' ' || e.evtfoid::regprocedure::text || ' state=' || e.evtenabled::text
       || ' tags=' || coalesce(array_to_string(e.evttags, ','), '-')
@@ -268,8 +295,16 @@ export const BACKUP_ROLE_SQL = `SELECT coalesce(string_agg(DISTINCT entry, ', ')
     WHERE d.datname = current_database() AND d.datdba = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
   UNION ALL SELECT t.typname || ':' || a.privilege_type FROM pg_type t CROSS JOIN aclexplode(t.typacl) a
     WHERE t.typnamespace IN ${SCHEMAS} AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+  -- One member is PostgreSQL's own doing: from version 16, a role created by a non-superuser is granted to its creator
+  -- with the admin option only, no SET and no INHERIT, as when the restore operator or Production's owner creates the
+  -- backup role. That grant, to the schema's owner or the role running this, is accepted; any other member, or that
+  -- grant with SET or INHERIT (columns absent before 16 count as granted), is not (Gemini 4 Neon finding 3, twelfth
+  -- review).
   UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
     WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+      AND NOT (m.admin_option AND NOT coalesce((to_jsonb(m) ->> 'set_option')::boolean, true)
+        AND NOT coalesce((to_jsonb(m) ->> 'inherit_option')::boolean, true)
+        AND (r.rolname = current_user OR m.member = (SELECT relowner FROM pg_class WHERE oid = to_regclass('public._prisma_migrations'))))
   UNION ALL SELECT c.relname || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END
     FROM pg_class c CROSS JOIN aclexplode(c.relacl) a
     WHERE c.relnamespace IN ${SCHEMAS} AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')

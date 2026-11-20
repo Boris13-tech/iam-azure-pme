@@ -323,6 +323,20 @@ jobs:
         expect_fail "an unlogged audit journal" 'table public."CanonicalAdminAuditEvent" r owner=owner'
         grep -q 'persistence=u' "$RUNNER_TEMP/g4-negative.out" || { echo "FAIL: the difference is not the persistence"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."CanonicalAdminAuditEvent" SET LOGGED'
+        # A protected table made to inherit an unprotected one, by the owner without superuser rights (Codex F1, twelfth
+        # review): the runtime role would read the child's rows through the parent.
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."Subject" INHERIT public."Tenant"'
+        expect_fail "a protected table inheriting an unprotected one" 'not in the release: inherits public."Subject" from public."Tenant"'
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."Subject" NO INHERIT public."Tenant"'
+        # An operator that flips an enum comparison, and a column given another collation, each by the owner without
+        # superuser rights (Gemini 4 Hydrogen findings 1 and 2, twelfth review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'CREATE OPERATOR public.= (LEFTARG = anyenum, RIGHTARG = anyenum, FUNCTION = pg_catalog.enum_ne)'
+        expect_fail "an operator added to schema public" 'not in the release: operator public.=(anyenum,anyenum)'
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'DROP OPERATOR public.= (anyenum, anyenum)'
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'CREATE COLLATION public.ci_c (locale = '"'"'C'"'"')' \
+          -c 'ALTER TABLE public."Organization" ALTER COLUMN "slug" TYPE text COLLATE public.ci_c'
+        expect_fail "a column given another collation" 'collation=public.ci_c'
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."Organization" ALTER COLUMN "slug" TYPE text COLLATE "default"' -c 'DROP COLLATION public.ci_c'
         # An event trigger, refused before any other connection or read (Gemini 4 Neon finding 1, eleventh review).
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "CREATE FUNCTION public.ci_evt() RETURNS event_trigger LANGUAGE plpgsql AS 'BEGIN END'" \
           -c "CREATE EVENT TRIGGER ci_evt ON ddl_command_start EXECUTE FUNCTION public.ci_evt()"

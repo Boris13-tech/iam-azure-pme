@@ -92,7 +92,8 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     // The target and the verified copy are told apart, and the copy is brought up as its own owner (Gemini 4 Hydrogen
     // finding 2 and Neon finding 3, eleventh review).
     expect(step).toContain("G4 runs on a disposable local copy, never on the target itself");
-    expect(step).toContain("as the same owner role");
+    expect(step).toContain("create Production's owner role by hand");
+    expect(step).toContain("CREATE DATABASE luxia_restore_<name> OWNER <owner>");
     expect(step).toContain("--production-owner <the target's owner>");
     expect(step).toContain("npx prisma migrate deploy");
     expect(step).toContain("Bootstrap least-privilege runtime grants");
@@ -256,6 +257,18 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
       "psql(runner.url, `SELECT luxia_retention_purge_transactions(",
       "psql(runner.url, `SELECT luxia_retention_status()::text`);",
     ]);
+    // And every spawned psql outside those helpers: the event-trigger probe only, read only (Gemini 4 Neon finding 5,
+    // twelfth review). Any other direct spawn changes this list.
+    const spawned = [...source.matchAll(/spawnSync\("psql", \[([^\]]*)\]/g)].map((m) => m[1].replace(/\s+/g, " ").trim());
+    expect(spawned).toEqual([
+      '"-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", connection, "-c", sql',
+      '"-X", "-q", "-At", owner.url, "-c", "BEGIN READ ONLY;\\nSELECT 1;\\nCOMMIT;"',
+    ]);
+    expect(source).not.toMatch(/exec(File)?Sync\(|spawn\(/);
+    // The owner's connections ask the server to fire no event trigger, and event triggers are refused before the
+    // runtime role connects (Gemini 4 Neon finding 6, twelfth review).
+    expect(source).toContain('PGOPTIONS: "-c event_triggers=off"');
+    expect(source.indexOf("FROM pg_event_trigger\")")).toBeLessThan(source.indexOf("const appIdentity = identity(app.url);"));
     // Both read helpers pin the search path, each on its own.
     expect(source).toContain("const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog, pg_temp;\\n${sql};\\nCOMMIT;`);");
     expect(source).toContain("const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog, pg_temp;\\n${sql};\\nCOMMIT;`);");
