@@ -149,14 +149,24 @@ node scripts/backup/verify-restored.mjs
 ```
 
    It checks that row-level security isolates every organization and that the journal stays append-only.
-6. **Recreate the backup role** on the new database (`luxia-backup-role.sql`, then `set-backup-password.mjs`), then update the GitHub secret.
-7. **Switch the application:**
+6. **Bring the copy to the deployed release, then verify it (G4).** The G4 command never migrates a copy itself: a copy behind the release Production runs, or holding a migration that release does not have, is refused with nothing written (operator decision, 2026-11-20). Bringing an older backup up to date is therefore this explicit step, done before the verification:
+   - check out the release Production runs (its tag or SHA), with no local change;
+   - if the restored copy is behind it, apply that release's migrations to the copy as its owner (`DATABASE_URL=<owner of the copy> npx prisma migrate deploy`), then that release's grant step: the block "Bootstrap least-privilege runtime grants" of `.github/workflows/production-activation-gate.yml`, run as the copy's owner with the copy's database name in place of `neondb`;
+   - then verify, on a disposable copy named `luxia_restore…` reached on a loopback address:
+
+```bash
+node scripts/ops/g4-post-restore.mjs --release <the release's tag or SHA> --backup-age-minutes <n> --started <T0, ISO> [--production-owner <role>]
+```
+
+   It must end with `G4 POST-RESTORE PASS`. Anything else: stop, keep the report in the private evidence store, and do not switch the application.
+7. **Recreate the backup role** on the new database (`luxia-backup-role.sql`, then `set-backup-password.mjs`), then update the GitHub secret.
+8. **Switch the application:**
    - set `DATABASE_URL` (runtime, `app_user`) and the migration URL in Vercel;
    - redeploy the current release;
    - check `/login`, the protected APIs, and an operator sign-in.
 
    This step has not been rehearsed yet (see the drill report).
-8. **Tell customers** whose data is older than the backup, following `docs/legal/INCIDENT-RESPONSE-AND-BREACH-NOTIFICATION.md`.
+9. **Tell customers** whose data is older than the backup, following `docs/legal/INCIDENT-RESPONSE-AND-BREACH-NOTIFICATION.md`.
 
 **Rules of a drill:**
 - the same steps, into a blank Neon branch with an expiry date, so that the copy deletes itself;

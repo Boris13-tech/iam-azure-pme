@@ -83,6 +83,19 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     expect(dirty.calls).toBe("");
   });
 
+  it("the recovery runbook brings an older backup to the release before G4, which never migrates a copy itself", () => {
+    // Operator decision, 2026-11-20: the upgrade is an explicit recovery step, run before the verification.
+    const runbook = readFileSync("docs/operations/BACKUP-RUNBOOK.md", "utf8").replace(/\r/g, "");
+    const step = runbook.slice(runbook.indexOf("6. **Bring the copy to the deployed release, then verify it (G4).**"), runbook.indexOf("7. **Recreate the backup role**"));
+    expect(step.length).toBeGreaterThan(200);
+    expect(step).toContain("The G4 command never migrates a copy itself");
+    expect(step).toContain("npx prisma migrate deploy");
+    expect(step).toContain("Bootstrap least-privilege runtime grants");
+    expect(step).toContain("node scripts/ops/g4-post-restore.mjs --release");
+    expect(step).toContain("do not switch the application");
+    expect(runbook.indexOf("6. **Bring the copy")).toBeLessThan(runbook.indexOf("8. **Switch the application:**"));
+  });
+
   it("refuses a target that is not loopback, before touching any database", () => {
     for (const host of ["ep-cool-forest-123.eu-central-1.aws.neon.tech", "10.0.0.5", "db.example.com"]) {
       for (const which of ["LUXIA_RESTORE_TARGET_URL", "LUXIA_RESTORE_APP_URL"]) {
@@ -204,7 +217,7 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     expect(source).toContain("const server = (sql) => run(owner.url, sql);");
     expect(source).toContain("readOnlyOrThrow(reference.url, FINGERPRINT_SQL)");
     // Every read pins its search path.
-    expect(source).toContain("SET LOCAL search_path = pg_catalog, public;");
+    expect(source).toContain("SET LOCAL search_path = pg_catalog;");
     expect(direct).toEqual([
       "SELECT luxia_retention_purge_transactions(1000, false)::text",
       "SELECT luxia_retention_status()::text",
@@ -214,7 +227,7 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     // if this run created it — never cleared beforehand, so a name collision cannot drop someone else's (Codex F5).
     const toServer = [...source.matchAll(/server\(`([^`]+)`\)/g)].map((m) => m[1]);
     expect(toServer).toEqual([
-      "CREATE DATABASE ${reference.database}",
+      "CREATE DATABASE ${reference.database} TEMPLATE template0",
       "DROP DATABASE ${reference.database} WITH (FORCE)",
     ]);
     expect(source).toContain("if (created) {\n    try { server(`DROP DATABASE");
@@ -228,15 +241,15 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
       "run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = p", // readOnlyOrThrow
       "psql(connection, `BEGIN READ ONLY;\\n${sql};\\nCOMMIT;`);", // readSessionStart: read only, nothing pinned
       "run(owner.url, sql); // CREATE and DROP DATABASE cannot run ", // server
-      "server(`CREATE DATABASE ${reference.database}`);",
+      "server(`CREATE DATABASE ${reference.database} TEMPLATE templ",
       "run(reference.url, `BEGIN;\\n${gateGrantSql(gate, reference.d",
       "server(`DROP DATABASE ${reference.database} WITH (FORCE)`); ",
       "psql(runner.url, `SELECT luxia_retention_purge_transactions(",
       "psql(runner.url, `SELECT luxia_retention_status()::text`);",
     ]);
     // Both read helpers pin the search path, each on its own.
-    expect(source).toContain("const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog, public;\\n${sql};\\nCOMMIT;`);");
-    expect(source).toContain("const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog, public;\\n${sql};\\nCOMMIT;`);");
+    expect(source).toContain("const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog;\\n${sql};\\nCOMMIT;`);");
+    expect(source).toContain("const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog;\\n${sql};\\nCOMMIT;`);");
     // The two job calls sit in the branch that runs only when nothing failed before them.
     const guard = source.indexOf("if (failedSoFar.length > 0) {\n  check(\"the daily job was not run on a copy that already failed\", false");
     expect(guard).toBeGreaterThan(0);

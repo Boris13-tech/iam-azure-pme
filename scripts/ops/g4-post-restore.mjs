@@ -17,7 +17,7 @@ import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 // What counts as a fault lives in its own module, so a test can drive each decision to its failing answer instead of
 // reading it in this source (Codex F5, review of #195).
-import { BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, DEFAULT_PRIVILEGES_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS,MIGRATOR_SQL, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, SESSION_SETTINGS_SQL,
+import { BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, DEFAULT_PRIVILEGES_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS, SEARCH_PATH_SQL,MIGRATOR_SQL, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, SESSION_SETTINGS_SQL,
   SESSION_TIMEOUTS, migratorFault, runnerExpected,EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateGrantSql,
   gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf, triggerFaults,
   unprotectedFault, validate } from "./g4-post-restore-checks.mjs";
@@ -71,10 +71,12 @@ const run = (connection, sql) => {
 const psql = (connection, sql) => { try { return run(connection, sql); } catch (error) { return fail(error.message); } };
 // Every read pins its search path: a tampered copy cannot shadow what the checks call with objects of its own
 // (Gemini 4 Hydrogen finding 5, seventh review).
-const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog, public;\n${sql};\nCOMMIT;`);
-const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog, public;\n${sql};\nCOMMIT;`);
-// What a session really starts with is read without pinning anything first, still read only (Gemini 4 Neon finding 5,
-// ninth review): every query in it names pg_catalog's objects explicitly.
+const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog;\n${sql};\nCOMMIT;`);
+const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog;\n${sql};\nCOMMIT;`);
+// Only the search path a session starts with is read without pinning anything first (Gemini 4 Neon finding 5, ninth
+// review), by one query that holds no operator and names pg_catalog's function (SEARCH_PATH_SQL); every other read pins
+// pg_catalog alone, since a public operator or function with a closer argument match would otherwise be chosen over
+// PostgreSQL's own even with pg_catalog first (Gemini 4 Neon finding 1, tenth review).
 const readSessionStart = (connection, sql) => psql(connection, `BEGIN READ ONLY;\n${sql};\nCOMMIT;`);
 
 const checks = [];
@@ -104,7 +106,7 @@ check("both connections reached the same copy", elsewhere === null, elsewhere ??
 // the failure and carrying on to the end would have written to it anyway (Antigravity finding 1, third review of #195).
 const targetRefused = refusedTarget(checks);
 if (targetRefused) {
-  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ release, reached, checks, passed: false, stoppedBeforeWriting: true }, null, 1));
+  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release, reached, checks, passed: false, stoppedBeforeWriting: true }, null, 1));
   fail(`${targetRefused}; nothing was migrated or written`);
 }
 
@@ -119,7 +121,8 @@ check("the schema belongs to the role running this or to Production's owner", mi
 const unsafeSettings = readOnly(owner.url, SESSION_SETTINGS_SQL);
 check("sessions start with no setting beyond timeouts (and the backup role's read only)", unsafeSettings === "",
   unsafeSettings || `only ${SESSION_TIMEOUTS.join(", ")}, if any`);
-const effective = `owner: ${readSessionStart(owner.url, EFFECTIVE_SETTINGS_SQL)}; app_user: ${readSessionStart(app.url, EFFECTIVE_SETTINGS_SQL)}`;
+const sessionStart = (connection) => `${readOnly(connection, EFFECTIVE_SETTINGS_SQL)} search_path=${readSessionStart(connection, SEARCH_PATH_SQL)}`;
+const effective = `owner: ${sessionStart(owner.url)}; app_user: ${sessionStart(app.url)}`;
 check("sessions really start with the guards on", effective === `owner: ${EXPECTED_EFFECTIVE_SETTINGS}; app_user: ${EXPECTED_EFFECTIVE_SETTINGS}`, effective);
 const parameterGrants = readOnly(owner.url, PARAMETER_GRANTS_SQL);
 check("no application role, nor PUBLIC, may change a protected setting", parameterGrants === "", parameterGrants || "none");
@@ -139,9 +142,9 @@ if (unsafeBeforeWriting.length > 0) {
 // had been compared (Codex F1, ninth review of #195). A drill restores a backup of the release Production runs, so
 // nothing is pending; a copy behind it, or with migrations the release does not have, is refused with nothing written.
 // Bringing an older backup up to a release is the recovery runbook's work, on a copy verified first, not this check's.
-const migrations = () => readOnly(owner.url, `SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`);
+const migrations = () => readOnly(owner.url, `SELECT count(*) FROM public."_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`);
 const before = migrations();
-const applied = new Set(readOnly(owner.url, `SELECT coalesce(string_agg(migration_name, chr(10)), '') FROM "_prisma_migrations"
+const applied = new Set(readOnly(owner.url, `SELECT coalesce(string_agg(migration_name, chr(10)), '') FROM public."_prisma_migrations"
   WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`).split("\n").filter(Boolean));
 const releaseMigrations = readdirSync("prisma/migrations").filter((name) => /^\d{14}_/.test(name));
 const pending = releaseMigrations.filter((name) => !applied.has(name));
@@ -174,7 +177,7 @@ let created = false;
 let referenceDropped = false;
 let dropError = null;
 try {
-  server(`CREATE DATABASE ${reference.database}`);
+  server(`CREATE DATABASE ${reference.database} TEMPLATE template0`);
   created = true;
   // The reference must answer from the copy's own server, like the copy (Gemini 4 Hydrogen finding 8).
   // Its own name too, not only the server: a proxy mapping the name elsewhere would migrate another database (Gemini 4
@@ -288,7 +291,7 @@ check("the guard triggers are on their own tables and operations, and fire for o
 // status only counts, but each records its own run in the copy's RetentionRun table (owner-only, counts only), so
 // neither can sit in a read-only transaction. These are the only two statements here that write, and only to the copy
 // step 12 destroys.
-const ownRole = readOnly(owner.url, `SELECT EXISTS (SELECT 1 FROM "_prisma_migrations" WHERE migration_name = '20261114120000_retention_worker_role'
+const ownRole = readOnly(owner.url, `SELECT EXISTS (SELECT 1 FROM public."_prisma_migrations" WHERE migration_name = '20261114120000_retention_worker_role'
   AND finished_at IS NOT NULL AND rolled_back_at IS NULL)::text`) === "true";
 const runner = ownRole ? job : app;
 // The job's functions run only on a copy that has passed everything above: once a function, a trigger or a grant is
@@ -308,7 +311,7 @@ if (failedSoFar.length > 0) {
   // and Gemini 4 Hydrogen finding 6, seventh review).
   // The same query as the runtime role's, database included (Argon finding 3 and Gemini 4 Neon finding 3, eighth review).
   const as = readOnly(runner.url, ROLE_SHAPE_SQL);
-  const runnerSettings = readSessionStart(runner.url, EFFECTIVE_SETTINGS_SQL);
+  const runnerSettings = sessionStart(runner.url);
   const runnerOk = as === runnerExpected(expected) && runnerSettings === EXPECTED_EFFECTIVE_SETTINGS && serverOf(runnerIdentity) === serverOf(ownerIdentity)
     && runnerIdentity.startsWith(`${owner.database} on `);
   check(`the daily job's connection is ${expected}, restricted, on the copy`, runnerOk, `${as}, ${runnerSettings}, at ${runnerIdentity}`);

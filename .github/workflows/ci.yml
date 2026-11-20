@@ -283,7 +283,7 @@ jobs:
     # for every session. Each is undone afterwards; a pass on either is a failure of this step (seventh review).
     - name: G4 post-restore command fails on a weakened copy
       run: |
-        set -u
+        set -eu
         U="postgresql://prisma:prisma_password@localhost:5432/luxia_restored"
         g4() { PATH="$PG_BIN:$PATH" node scripts/ops/g4-post-restore.mjs --release "$GITHUB_SHA" --backup-age-minutes 0 \
           --started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --report "$RUNNER_TEMP/g4-negative.json" > "$RUNNER_TEMP/g4-negative.out" 2>&1; }
@@ -333,6 +333,26 @@ jobs:
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored RESET session_replication_role"
         g4 || { echo "FAIL: the restored copy no longer passes after the reverts"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
         echo "ok: the copy passes again once both are undone"
+        # A copy owned as Production's is: every object of the schema handed to an owner that is not the role running
+        # this, as a backup restored as it is keeps it. It must pass, and an object handed back to the role running this
+        # must not (Gemini 4 Neon finding 5, tenth review).
+        P="postgresql://prisma:prisma_password@localhost:5432/postgres"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$P" -c "CREATE ROLE neondb_owner_ci NOLOGIN BYPASSRLS" -c "CREATE DATABASE luxia_restore_owned TEMPLATE luxia_restored"
+        O="postgresql://prisma:prisma_password@localhost:5432/luxia_restore_owned"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$O" -f scripts/ci/hand-schema-to-owner.sql -v owner=neondb_owner_ci
+        owned() { LUXIA_RESTORE_TARGET_URL="$O" LUXIA_RESTORE_APP_URL="postgresql://app_user:app_password@localhost:5432/luxia_restore_owned" \
+          LUXIA_RESTORE_RETENTION_URL="postgresql://luxia_retention:retention_password@localhost:5432/luxia_restore_owned" \
+          PATH="$PG_BIN:$PATH" node scripts/ops/g4-post-restore.mjs --release "$GITHUB_SHA" --backup-age-minutes 0 --production-owner neondb_owner_ci \
+          --started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --report "$RUNNER_TEMP/g4-owned.json" > "$RUNNER_TEMP/g4-negative.out" 2>&1; }
+        owned || { echo "FAIL: a copy owned as Production's is refused"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: a copy owned as Production's passes"
+        fn="$("$PG_BIN/psql" -X -q -At "$O" -c "SET search_path = pg_catalog" -c "SELECT p.oid::regprocedure::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef ORDER BY 1 LIMIT 1")"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$O" -c "ALTER FUNCTION $fn OWNER TO prisma"
+        if owned; then echo "FAIL: G4 passed a definer function handed to the role running it"; exit 1; fi
+        grep -q "missing or changed: function $fn owner=owner" "$RUNNER_TEMP/g4-negative.out" \
+          || { echo "FAIL: G4 refused the handed-over function for another reason"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: G4 refused a definer function handed to the role running it"
+        "$PG_BIN/psql" -X -q "$P" -c "DROP DATABASE luxia_restore_owned WITH (FORCE)"
       env:
         LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
         LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored

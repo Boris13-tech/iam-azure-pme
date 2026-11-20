@@ -2,9 +2,10 @@
 // exercises its refusals through a real process; this one exercises the verdicts, because reading the source cannot
 // show that a broken invariant is actually reported as a fault (Codex F5 and Antigravity finding 3, review of #195).
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
-  ALLOWED_PARAMETERS, BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, DEFAULT_PRIVILEGES_SQL, MIGRATOR_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS, EXPECTED_RUNTIME_ROLE, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, migratorFault, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
+  ALLOWED_PARAMETERS, SCOPE_SETTINGS, SEARCH_PATH_SQL, BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, DEFAULT_PRIVILEGES_SQL, MIGRATOR_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS, EXPECTED_RUNTIME_ROLE, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, migratorFault, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
   gateGrantSql, gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf,
   triggerFaults, unprotectedFault, validate,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
@@ -75,7 +76,7 @@ describe("G4 post-restore: the connection a drill may use", () => {
     expect(() => referenceOf(validated("U", "postgresql://o:p@127.0.0.1:5432/luxia_restore_ref_deadbeef"), "deadbeef")).toThrow("would be the copy");
   });
 
-  it("applies the gate's grants only to a disposable database (the reference, or a copy it brought to the release), with that database's own name", () => {
+  it("applies the gate's grants only to a disposable database (the reference; the copy is never written this way), with that database's own name", () => {
     const gate = readFileSync(".github/workflows/production-activation-gate.yml", "utf8");
     const sql = gateGrantSql(gate, "luxia_restore_ref_0a1b2c3d");
     expect(sql).toContain("GRANT CONNECT ON DATABASE luxia_restore_ref_0a1b2c3d TO app_user");
@@ -234,15 +235,20 @@ describe("G4 post-restore: the copy against a database migrated from the same re
   });
 
   it("refuses a schema owned by anyone but the role running this or Production's owner", () => {
-    expect(migratorFault('["neondb_owner","prisma"]', "neondb_owner")).toBeNull();
-    expect(migratorFault('["prisma","prisma"]', "neondb_owner")).toBeNull();
-    expect(migratorFault('["rogue_owner","prisma"]', "neondb_owner")).toContain("neither the role running this (prisma) nor Production's owner (neondb_owner)");
-    expect(migratorFault('["-","prisma"]', "neondb_owner")).toBe("the copy has no migration history");
-    expect(migratorFault('["neondb_owner","prisma"]', "x; DROP")).toContain("is not a role name");
+    expect(migratorFault('["neondb_owner","prisma","prisma"]', "neondb_owner")).toBeNull();
+    expect(migratorFault('["prisma","prisma","prisma"]', "neondb_owner")).toBeNull();
+    expect(migratorFault('["rogue_owner","prisma","prisma"]', "neondb_owner")).toContain("neither the role running this (prisma) nor Production's owner (neondb_owner)");
+    expect(migratorFault('["-","prisma","prisma"]', "neondb_owner")).toBe("the copy has no migration history");
+    expect(migratorFault('["neondb_owner","prisma","prisma"]', "x; DROP")).toContain("is not a role name");
     // A role name holding spaces cannot pass as another (Gemini 4 Neon finding 2, ninth review).
-    expect(migratorFault('["neondb_owner x","prisma"]', "neondb_owner")).toContain("the schema belongs to neondb_owner x");
-    expect(migratorFault('["prisma prisma","prisma"]', "neondb_owner")).toContain("the schema belongs to prisma prisma");
+    expect(migratorFault('["neondb_owner x","prisma","prisma"]', "neondb_owner")).toContain("the schema belongs to neondb_owner x");
+    expect(migratorFault('["prisma prisma","prisma","prisma"]', "neondb_owner")).toContain("the schema belongs to prisma prisma");
     expect(migratorFault("neondb_owner prisma", "neondb_owner")).toContain("unreadable owner answer");
+    // The database's owner is the schema's or the runner's: a third role would own schema public through
+    // pg_database_owner (Argon finding 1, tenth review).
+    expect(migratorFault('["neondb_owner","prisma","rogue_role"]', "neondb_owner")).toContain("the database belongs to rogue_role");
+    expect(migratorFault('["neondb_owner","prisma","neondb_owner"]', "neondb_owner")).toBeNull();
+    expect(migratorFault('["neondb_owner","prisma"]', "neondb_owner")).toContain("unreadable owner answer");
   });
 
   it("refuses what a session could switch on by itself, and what fires when step 9 writes", () => {
@@ -259,8 +265,25 @@ describe("G4 post-restore: the copy against a database migrated from the same re
     expect(FINGERPRINT_SQL).not.toMatch(/THEN 'owner'\s+ELSE (?!'role:')/);
     expect(EFFECTIVE_SETTINGS_SQL).toContain("current_setting('session_replication_role')");
     expect(EFFECTIVE_SETTINGS_SQL).toContain("current_setting('row_security')");
-    expect(EXPECTED_EFFECTIVE_SETTINGS).toBe('origin row_security=on search_path="$user", public scope=none');
-    expect(EFFECTIVE_SETTINGS_SQL).toContain("name LIKE 'app.%' OR name LIKE 'luxia.%'");
+    expect(EXPECTED_EFFECTIVE_SETTINGS).toBe('origin row_security=on scope=none search_path="$user", public');
+    // The search path is read alone, with no operator, before anything is pinned (Gemini 4 Neon finding 1, tenth review).
+    expect(SEARCH_PATH_SQL).toBe("SELECT pg_catalog.current_setting('search_path')");
+    expect(EFFECTIVE_SETTINGS_SQL).not.toContain("search_path");
+    // Each application setting is read by name: one set in the server's configuration file is effective but never
+    // listed in pg_settings (Codex F1, tenth review). The list holds every name the code reads with current_setting.
+    expect(EFFECTIVE_SETTINGS_SQL).not.toContain("pg_settings");
+    expect(EFFECTIVE_SETTINGS_SQL).toContain("pg_catalog.current_setting(n.name, true)");
+    const read = new Set<string>();
+    for (const dir of ["lib", "prisma/migrations"]) {
+      for (const file of readdirSync(dir, { recursive: true }) as string[]) {
+        if (!/\.(ts|sql|mjs)$/.test(file)) continue;
+        for (const m of readFileSync(join(dir, file), "utf8").matchAll(/current_setting\('([a-z_]+\.[a-z_]+)'/g)) read.add(m[1]);
+      }
+    }
+    expect(read.size).toBeGreaterThan(0);
+    expect([...read].filter((name) => !SCOPE_SETTINGS.includes(name))).toEqual([]);
+    // Operators are pg_catalog's by name, since this runs before the search path is pinned (Hydrogen finding 1).
+    expect(EFFECTIVE_SETTINGS_SQL.replace(/OPERATOR\(pg_catalog\.(\|\||<>)\)/g, "")).not.toMatch(/\|\||<>/);
     expect(ROLE_SHAPE_SQL).toContain("' session=' || session_user");
     expect(FINGERPRINT_SQL).toContain("'catalog-function ' || p.oid::regprocedure::text");
   });
@@ -271,7 +294,11 @@ describe("G4 post-restore: the copy against a database migrated from the same re
     expect(DEFAULT_PRIVILEGES_SQL).toContain("EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_backup' AND oid = a.grantee)");
     expect(DEFAULT_PRIVILEGES_SQL).toContain("EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user' AND oid = a.grantee)");
     expect(DEFAULT_PRIVILEGES_SQL).not.toContain("a.grantee = (SELECT oid");
-    expect(DEFAULT_PRIVILEGES_SQL).toContain("da.defaclnamespace NOT IN (0, 'public'::regnamespace)");
+    expect(DEFAULT_PRIVILEGES_SQL).toContain("da.defaclnamespace <> 'public'::regnamespace");
+    expect(DEFAULT_PRIVILEGES_SQL).not.toContain("NOT IN (0, 'public'::regnamespace)"); // a rule for every schema is wider (Neon finding 4)
+    // Given by the schema's owner only, and the release's own rules required (Argon finding 3, tenth review).
+    expect(DEFAULT_PRIVILEGES_SQL).toContain("da.defaclrole IS DISTINCT FROM (SELECT relowner FROM pg_class WHERE oid = to_regclass('public._prisma_migrations'))");
+    expect(DEFAULT_PRIVILEGES_SQL).toContain("'missing: the owner gives app_user '");
     expect(SESSION_SETTINGS_SQL).not.toContain("s.setrole = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')");
     // The owner is the migration history's owner only; pg_database_owner only for schemas (Hydrogen finding 2, Argon
     // finding 2).
