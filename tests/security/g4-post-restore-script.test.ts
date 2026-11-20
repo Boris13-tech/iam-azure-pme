@@ -187,8 +187,34 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
       "CREATE DATABASE ${reference.database}",
       "DROP DATABASE ${reference.database} WITH (FORCE)",
     ]);
-    expect(source).toContain("if (created) { try { server(`DROP DATABASE");
+    expect(source).toContain("if (created) {\n    try { server(`DROP DATABASE");
     expect(source).not.toContain("DROP DATABASE IF EXISTS");
+    // Every direct call to the database, whatever its target or form: the pattern-based lists above missed a new write
+    // to the copy (Gemini 4 Neon finding 6, eighth review). Any added call changes this list and has to be reviewed.
+    const calls = [...source.replace(/\r/g, "").matchAll(/\b(psql|run|server)\(([^\n]{0,90})/g)].map((m) => `${m[1]}(${m[2]}`.slice(0, 60));
+    expect(calls).toEqual([
+      "run(connection, sql); } catch (error) { return fail(error.me", // psql: run, exiting on failure
+      "psql(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = ", // readOnly
+      "run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = p", // readOnlyOrThrow
+      "psql(owner.url, `BEGIN;\\n${gateGrantSql(gateText, owner.data", // a copy brought to the release
+      "run(owner.url, sql); // CREATE and DROP DATABASE cannot run ", // server
+      "server(`CREATE DATABASE ${reference.database}`);",
+      "run(reference.url, `BEGIN;\\n${gateGrantSql(gate, reference.d",
+      "server(`DROP DATABASE ${reference.database} WITH (FORCE)`); ",
+      "psql(runner.url, `SELECT luxia_retention_purge_transactions(",
+      "psql(runner.url, `SELECT luxia_retention_status()::text`);",
+    ]);
+    // Both read helpers pin the search path, each on its own.
+    expect(source).toContain("const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog, public;\\n${sql};\\nCOMMIT;`);");
+    expect(source).toContain("const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog, public;\\n${sql};\\nCOMMIT;`);");
+    // The two job calls sit in the branch that runs only when nothing failed before them.
+    const guard = source.indexOf("if (failedSoFar.length > 0) {\n  check(\"the daily job was not run on a copy that already failed\", false");
+    expect(guard).toBeGreaterThan(0);
+    expect(source.indexOf("} else if (!runner) {", guard)).toBeLessThan(source.indexOf("luxia_retention_purge_transactions(1000, false)"));
+    // The checks that read what would act on the writing come before step 9, and stop the run when one fails.
+    const beforeWriting = source.indexOf("const unsafeBeforeWriting = checks.filter((entry) => !entry.ok)");
+    expect(beforeWriting).toBeGreaterThan(source.indexOf("readOnly(owner.url, BEFORE_WRITING_SQL)"));
+    expect(beforeWriting).toBeLessThan(source.indexOf("const deploy = migrate(owner)"));
     // The job's functions run only on a copy that has passed every check before them (Codex F4).
     const gateOnFailures = source.indexOf("const failedSoFar = checks.filter((entry) => !entry.ok)");
     expect(gateOnFailures).toBeGreaterThan(0);

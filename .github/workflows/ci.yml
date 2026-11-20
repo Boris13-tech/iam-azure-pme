@@ -293,8 +293,21 @@ jobs:
         policy="$("$PG_BIN/psql" -X -At "$U" -c "SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'Subject' LIMIT 1")"
         qual="$("$PG_BIN/psql" -X -At "$U" -c "SELECT qual FROM pg_policies WHERE schemaname = 'public' AND tablename = 'Subject' AND policyname = '$policy'")"
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER POLICY \"$policy\" ON \"Subject\" USING (true)"
-        expect_fail "a tenant policy weakened to USING (true)" "missing or changed: policy Subject $policy"
+        expect_fail "a tenant policy weakened to USING (true)" "missing or changed: policy public.Subject $policy"
+        # A copy that failed a check is not handed to the daily job (Gemini 4 Neon finding 6, eighth review).
+        grep -q "FAIL the daily job was not run on a copy that already failed" "$RUNNER_TEMP/g4-negative.out" \
+          || { echo "FAIL: the daily job ran on a copy that had failed"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: the daily job was not run on it"
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER POLICY \"$policy\" ON \"Subject\" USING ($qual)"
+        # The runtime role allowed to switch the guards off for its own session, with no attribute or setting to show it.
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "GRANT SET ON PARAMETER session_replication_role TO app_user"
+        expect_fail "SET on session_replication_role granted to app_user" "app_user may SET session_replication_role"
+        grep -q "nothing was migrated or written" "$RUNNER_TEMP/g4-negative.out" || { echo "FAIL: not stopped before writing"; exit 1; }
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "REVOKE SET ON PARAMETER session_replication_role FROM app_user"
+        # CONNECT that the runtime role may pass on.
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "GRANT CONNECT ON DATABASE luxia_restored TO app_user WITH GRANT OPTION"
+        expect_fail "CONNECT with the grant option for app_user" "database=CONNECT+grant"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "REVOKE GRANT OPTION FOR CONNECT ON DATABASE luxia_restored FROM app_user"
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored SET session_replication_role = replica"
         expect_fail "every session starting in replica mode" "session_replication_role=replica"
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored RESET session_replication_role"

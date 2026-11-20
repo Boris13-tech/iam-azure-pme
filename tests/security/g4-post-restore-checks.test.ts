@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
-  ALLOWED_PARAMETERS, BACKUP_ROLE_SQL, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
+  ALLOWED_PARAMETERS, BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS, EXPECTED_RUNTIME_ROLE, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, migratorFault, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
   gateGrantSql, gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf,
   triggerFaults, unprotectedFault, validate,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
@@ -75,13 +75,14 @@ describe("G4 post-restore: the connection a drill may use", () => {
     expect(() => referenceOf(validated("U", "postgresql://o:p@127.0.0.1:5432/luxia_restore_ref_deadbeef"), "deadbeef")).toThrow("would be the copy");
   });
 
-  it("applies the gate's grants only to a reference, with the reference's own database name", () => {
+  it("applies the gate's grants only to a disposable database (the reference, or a copy it brought to the release), with that database's own name", () => {
     const gate = readFileSync(".github/workflows/production-activation-gate.yml", "utf8");
     const sql = gateGrantSql(gate, "luxia_restore_ref_0a1b2c3d");
     expect(sql).toContain("GRANT CONNECT ON DATABASE luxia_restore_ref_0a1b2c3d TO app_user");
     expect(sql).not.toContain("neondb");
     expect(sql).toContain("REVOKE ALL ON \"SignupCode\"");
-    for (const database of ["luxia_restore_rc", "neondb", "luxia_restore_ref_x"]) expect(() => gateGrantSql(gate, database), database).toThrow("only ever applied to a reference");
+    expect(gateGrantSql(gate, "luxia_restore_rc")).toContain("GRANT CONNECT ON DATABASE luxia_restore_rc TO app_user");
+    for (const database of ["neondb", "postgres", "luxia-restore", "Luxia_restore_rc", "luxia_restore_rc; DROP"]) expect(() => gateGrantSql(gate, database), database).toThrow("only ever applied to a disposable restore");
     expect(serverOf("luxia_restore_ref_0a1b2c3d on 172.17.0.2/32:5432")).toBe(serverOf("luxia_restore_rc on 172.17.0.2/32:5432"));
     expect(serverOf("luxia_restore_ref_0a1b2c3d on 172.17.0.3/32:5432")).not.toBe(serverOf("luxia_restore_rc on 172.17.0.2/32:5432"));
   });
@@ -166,17 +167,21 @@ describe("G4 post-restore: the copy against a database migrated from the same re
     expect(fingerprintFaults([...reference, extra], reference)).toEqual([`not in the release: ${extra}`]);
   });
   it("reads every kind it compares", () => {
-    for (const fragment of ["FROM pg_policies WHERE schemaname = 'public'", "pg_get_triggerdef(t.oid)", "t.tgenabled::text",
+    for (const fragment of ["FROM pg_policies WHERE schemaname NOT LIKE 'pg\\_%'", "FROM pg_event_trigger e", "k.contypid <> 0",
+      "c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')", "array_to_string(c.reloptions, ',')", "nspname NOT LIKE 'pg\\_%'", "pg_get_triggerdef(t.oid)", "t.tgenabled::text",
       "c.relrowsecurity::text", "c.relforcerowsecurity::text", "p.prosecdef::text", "p.proconfig", "pg_get_functiondef(p.oid)",
       "has_function_privilege('public', p.oid, 'EXECUTE')",
       // Sixth review (Argon finding 3): rules, index state, types, settings, and the migration history with checksums.
       "pg_get_ruledef(r.oid)", "i.indisvalid::text", "i.indisready::text", "FROM pg_enum e", "aclexplode(t.typacl)",
       "' checksum=' || m.checksum", "FROM public._prisma_migrations m",
       // Fourth review (Hydrogen finding 1, Argon findings 1 to 3): grants, columns, constraints, indexes, views, owners.
-      "aclexplode(c.relacl)", "aclexplode(a.attacl)", "aclexplode(p.proacl)", "aclexplode(n.nspacl)", "aclexplode(da.defaclacl)",
+      "aclexplode(c.relacl)", "aclexplode(a.attacl)", "aclexplode(p.proacl)", "aclexplode(n.nspacl)",
       "format_type(a.atttypid, a.atttypmod)", "pg_get_expr(d.adbin, d.adrelid)", "pg_get_constraintdef(k.oid)", "pg_get_indexdef(i.indexrelid)",
-      "pg_get_viewdef(c.oid)", "pg_get_userbyid(c.relowner)", "pg_get_userbyid(p.proowner)", "FROM pg_default_acl da"])
+      "pg_get_viewdef(c.oid)", "pg_get_userbyid(c.relowner)", "pg_get_userbyid(p.proowner)"])
       expect(FINGERPRINT_SQL, fragment).toContain(fragment);
+    // Eighth review (Argon finding 2): default privileges depend on who owns Production, so they are judged on their own
+    // (DEFAULT_PRIVILEGES_SQL), not compared with a reference owned by another role.
+    expect(FINGERPRINT_SQL).not.toContain("pg_default_acl");
     // The role that migrated is "owner" on both sides, read as the owner of the migration history in each database, so a
     // Production backup restored as it is, owned by Production's owner, still compares (Argon finding 3, seventh review:
     // the previous version failed such a copy with 288 differences).
@@ -187,8 +192,8 @@ describe("G4 post-restore: the copy against a database migrated from the same re
     // Settings are judged, not compared (a role-wide one is the cluster's, the same on both sides).
     expect(FINGERPRINT_SQL).not.toContain("pg_db_role_setting");
     // The internal foreign-key triggers, read by their constraint (Codex F2, seventh review).
-    expect(FINGERPRINT_SQL).toContain("'constraint-trigger ' || c.relname || ' ' || k.conname");
-    expect(FINGERPRINT_SQL).toContain("WHERE t.tgisinternal AND c.relnamespace = 'public'::regnamespace");
+    expect(FINGERPRINT_SQL).toContain("'constraint-trigger ' || c.oid::regclass::text || ' ' || k.conname");
+    expect(FINGERPRINT_SQL).toContain("WHERE t.tgisinternal AND c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%')");
     // The backup role's read grants are the backup system's, not the release's: left out of the comparison, and judged
     // on their own as read only (found by running the command on CI's restored copy).
     expect(FINGERPRINT_SQL).toContain("WHERE a.grantee IS DISTINCT FROM (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')");
@@ -205,16 +210,58 @@ describe("G4 post-restore: the copy against a database migrated from the same re
   });
 
   it("judges the settings sessions start with, allowing timeouts only", () => {
-    for (const fragment of ["FROM pg_db_role_setting s", "s.setrole = 0", "'app_user', 'luxia_retention'", "s.setdatabase IN (0,"])
+    // Eighth review (Argon finding 1, Gemini 4 Neon finding 2): the backup role, the schema's owner and the role running
+    // this too, and names read without regard to case.
+    for (const fragment of ["FROM pg_db_role_setting s", "s.setrole = 0", "'app_user', 'luxia_retention', 'luxia_backup', current_user",
+      "s.setdatabase IN (0,", "relowner FROM pg_class WHERE oid = to_regclass('public._prisma_migrations')", "lower(split_part(c.setting, '=', 1))"])
       expect(SESSION_SETTINGS_SQL, fragment).toContain(fragment);
+    expect(BACKUP_ROLE_SQL).toContain("lower(split_part(c.setting, '=', 1)) = 'default_transaction_read_only'");
     expect(SESSION_TIMEOUTS).toEqual(["statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout", "idle_session_timeout"]);
     for (const timeout of SESSION_TIMEOUTS) expect(SESSION_SETTINGS_SQL).toContain(`'${timeout}'`);
   });
 
   it("expects the daily job's connection to be its role and nothing wider", () => {
     expect(runnerExpected("luxia_retention")).toBe(
-      "luxia_retention superuser=false bypassrls=false createrole=false createdb=false replication=false memberships=0 owns=0");
-    expect(runnerExpected("app_user")).toMatch(/^app_user .* memberships=0 owns=0$/);
+      "luxia_retention superuser=false bypassrls=false createrole=false createdb=false replication=false memberships=0 owns=0 database=none");
+    expect(EXPECTED_RUNTIME_ROLE).toBe(runnerExpected("app_user"));
+    // One query for both roles, with every part the expectation names (Argon finding 3 and Gemini 4 Neon findings 3
+    // and 6, eighth review): the database, CONNECT with the grant option, and types among what it owns.
+    for (const part of [" superuser=", " bypassrls=", " createrole=", " createdb=", " replication=", " memberships=", " owns=", " database="])
+      expect(ROLE_SHAPE_SQL, part).toContain(`'${part}'`);
+    for (const fragment of ["d.datdba = r.oid", "(a.privilege_type <> 'CONNECT' OR a.is_grantable)", "has_database_privilege(r.oid, current_database(), 'CREATE')",
+      "t.typowner = r.oid AND t.typrelid = 0"])
+      expect(ROLE_SHAPE_SQL, fragment).toContain(fragment);
+  });
+
+  it("refuses a schema owned by anyone but the role running this or Production's owner", () => {
+    expect(migratorFault("neondb_owner prisma", "neondb_owner")).toBeNull();
+    expect(migratorFault("prisma prisma", "neondb_owner")).toBeNull();
+    expect(migratorFault("rogue_owner prisma", "neondb_owner")).toContain("neither the role running this (prisma) nor Production's owner (neondb_owner)");
+    expect(migratorFault("- prisma", "neondb_owner")).toBe("the copy has no migration history");
+    expect(migratorFault("neondb_owner prisma", "x; DROP")).toContain("is not a role name");
+  });
+
+  it("refuses what a session could switch on by itself, and what fires when step 9 writes", () => {
+    expect(PARAMETER_GRANTS_SQL).toContain("FROM pg_parameter_acl p CROSS JOIN aclexplode(p.paracl) a");
+    expect(PARAMETER_GRANTS_SQL).toContain("a.grantee = 0 OR a.grantee IN (SELECT oid FROM pg_roles WHERE rolname IN ('app_user', 'luxia_retention', 'luxia_backup'))");
+    for (const fragment of ["FROM pg_trigger t", "FROM pg_rewrite r", "FROM pg_policy y", "FROM pg_event_trigger e"])
+      expect(BEFORE_WRITING_SQL, fragment).toContain(fragment);
+  });
+
+  it("tags every principal but the owner, and reads the settings sessions really start with", () => {
+    // Codex F1 and F2, eighth review: a real role named "owner" prints as role:owner; the server's own configuration
+    // is read through each connection.
+    expect(FINGERPRINT_SQL).toContain("THEN 'owner' ELSE 'role:' || ");
+    expect(FINGERPRINT_SQL).not.toMatch(/THEN 'owner' ELSE [a-z(]/);
+    expect(EFFECTIVE_SETTINGS_SQL).toContain("current_setting('session_replication_role')");
+    expect(EFFECTIVE_SETTINGS_SQL).toContain("current_setting('row_security')");
+    expect(EXPECTED_EFFECTIVE_SETTINGS).toBe("origin row_security=on");
+  });
+
+  it("counts lines, so a duplicate on one side is a difference", () => {
+    expect(fingerprintFaults(["a", "a", "b"], ["a", "b"])).toEqual(["not in the release: a"]);
+    expect(fingerprintFaults(["a", "b"], ["a", "a", "b"])).toEqual(["missing or changed: a"]);
+    expect(fingerprintFaults(["b", "a"], ["a", "b"])).toEqual([]);
   });
 });
 
