@@ -149,13 +149,14 @@ node scripts/backup/verify-restored.mjs
 ```
 
    It checks that row-level security isolates every organization and that the journal stays append-only.
-6. **Bring the copy to the deployed release, then verify it (G4).** The G4 command never migrates a copy itself: a copy behind the release Production runs, or holding a migration that release does not have, is refused with nothing written (operator decision, 2026-11-20). Bringing an older backup up to date is therefore this explicit step, done before the verification:
+6. **Bring the database to the deployed release, then verify a copy of it (G4).** The G4 command never migrates anything itself: a copy behind the release Production runs, or holding a migration that release does not have, is refused with nothing written (operator decision, 2026-11-20). Bringing an older backup up to date is therefore this explicit step, done before the verification:
    - check out the release Production runs (its tag or SHA), with no local change;
-   - if the restored copy is behind it, apply that release's migrations to the copy as its owner (`DATABASE_URL=<owner of the copy> npx prisma migrate deploy`), then that release's grant step: the block "Bootstrap least-privilege runtime grants" of `.github/workflows/production-activation-gate.yml`, run as the copy's owner with the copy's database name in place of `neondb`;
-   - then verify, on a disposable copy named `luxia_restore…` reached on a loopback address:
+   - **on the recovery target** (the Neon database of step 2), if it is behind that release: apply the release's migrations as the target's owner, Production's owner role (`DATABASE_URL=<owner of the target> npx prisma migrate deploy`), then the release's grant step, the block "Bootstrap least-privilege runtime grants" of `.github/workflows/production-activation-gate.yml`, run as the same owner;
+   - **G4 runs on a disposable local copy, never on the target itself**: it accepts only a loopback address and a database named `luxia_restore…`. Restore the same backup into it with `restore.mjs`, and bring it up exactly as the target, as the same owner role: `restore.mjs` creates that role without login, so on this local, disposable server only, give it a login with a throwaway password for the two commands above, then remove the login. Every object then keeps one owner, as on the target; a copy migrated by another role is refused by G4 for its mixed ownership;
+   - then run, against that local copy, naming the target's owner:
 
 ```bash
-node scripts/ops/g4-post-restore.mjs --release <the release's tag or SHA> --backup-age-minutes <n> --started <T0, ISO> [--production-owner <role>]
+node scripts/ops/g4-post-restore.mjs --release <the release's tag or SHA> --backup-age-minutes <n> --started <T0, ISO> --production-owner <the target's owner>
 ```
 
    It must end with `G4 POST-RESTORE PASS`. Anything else: stop, keep the report in the private evidence store, and do not switch the application.

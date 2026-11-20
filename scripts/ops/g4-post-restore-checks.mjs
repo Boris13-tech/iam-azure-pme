@@ -123,6 +123,9 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
   UNION ALL SELECT 'table ' || c.oid::regclass::text || ' ' || c.relkind::text || ' owner=' || ${owned("pg_get_userbyid(c.relowner)", "c.relnamespace")}
       || ' rls=' || c.relrowsecurity::text || ' forced=' || c.relforcerowsecurity::text || ' acl=' || ${ACL("c.relacl", "c.relnamespace")}
       || ' options=' || coalesce(array_to_string(c.reloptions, ','), '-')
+      -- Persistence: an unlogged table, the audit journal for one, loses its rows after a crash without any write the
+      -- guard triggers could stop (Codex F1, eleventh review).
+      || ' persistence=' || c.relpersistence::text
     FROM pg_class c WHERE c.relnamespace IN ${SCHEMAS} AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
   UNION ALL SELECT 'column ' || c.oid::regclass::text || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
       || ' notnull=' || a.attnotnull::text || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-') || ' acl=' || ${ACL("a.attacl", "c.relnamespace")}
@@ -151,9 +154,10 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
   -- whose body, security or settings changed, changes this digest; and PostgreSQL's own tables whose rights were
   -- changed from the defaults (pg_statistic holds samples of every table's data, pg_authid the password hashes) are
   -- compared one by one (Argon finding 2, tenth review). pg_dump carries none of these, so a faithful copy matches.
-  UNION ALL SELECT 'catalog-functions ' || count(*) || ' ' || md5(string_agg(p.oid::regprocedure::text || ' ' || p.prosecdef::text
-      || ' ' || coalesce(array_to_string(p.proconfig, ';'), '-') || ' ' || md5(coalesce(p.prosrc, '')) || ' ' || coalesce(p.proacl::text, 'default'),
-      chr(10) ORDER BY p.oid::regprocedure::text))
+  -- Each function's whole catalog row: leakproofness, cost, volatility, strictness, language, owner and every other
+  -- attribute, not a chosen few, since one marked leakproof that is not lets a forced policy leak through (Gemini 4
+  -- Neon finding 2, eleventh review).
+  UNION ALL SELECT 'catalog-functions ' || count(*) || ' ' || md5(string_agg(p::text, chr(10) ORDER BY p.oid))
     FROM pg_proc p WHERE p.pronamespace = 'pg_catalog'::regnamespace
   UNION ALL SELECT 'catalog-relation ' || c.oid::regclass::text || ' ' || c.relkind::text || ' acl=' || coalesce(c.relacl::text, 'default')
     FROM pg_class c WHERE c.relnamespace = 'pg_catalog'::regnamespace AND c.relkind IN ('r', 'v', 'm', 'p')
@@ -161,8 +165,8 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
     FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
     WHERE c.relnamespace = 'pg_catalog'::regnamespace AND a.attacl IS NOT NULL AND NOT a.attisdropped
   -- Procedural languages: USAGE on an untrusted one lets a role write functions that run outside the database.
-  UNION ALL SELECT 'language ' || l.lanname || ' trusted=' || l.lanpltrusted::text || ' acl=' || coalesce(l.lanacl::text, 'default')
-    FROM pg_language l
+  -- Its whole row: owner, trust, handlers and rights (Gemini 4 Neon finding 2, eleventh review).
+  UNION ALL SELECT 'language ' || l.lanname || ' ' || md5(l::text) FROM pg_language l
   -- Event triggers fire on DDL and logins in the whole database, whatever schema their function is in.
   UNION ALL SELECT 'event-trigger ' || e.evtname || ' ' || e.evtevent || ' ' || e.evtfoid::regprocedure::text || ' state=' || e.evtenabled::text
       || ' tags=' || coalesce(array_to_string(e.evttags, ','), '-')
@@ -182,8 +186,11 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
       || ' public=' || has_function_privilege('public', p.oid, 'EXECUTE')::text || ' acl=' || ${ACL("p.proacl", "p.pronamespace")}
     FROM pg_proc p WHERE p.pronamespace IN ${SCHEMAS}
   -- Rules rewrite what a statement does to a table; views keep theirs in the view line above.
-  UNION ALL SELECT 'rule ' || c.oid::regclass::text || ' ' || r.rulename || ' ' || md5(pg_get_ruledef(r.oid))
-    FROM pg_rewrite r JOIN pg_class c ON c.oid = r.ev_class WHERE c.relnamespace IN ${SCHEMAS} AND r.rulename <> '_RETURN'
+  -- A view's own ON SELECT rule is its definition, read above; any other rule counts, a table's named _RETURN included,
+  -- with its enabled state (Gemini 4 Hydrogen finding 1, eleventh review).
+  UNION ALL SELECT 'rule ' || c.oid::regclass::text || ' ' || r.rulename || ' ' || md5(pg_get_ruledef(r.oid)) || ' state=' || r.ev_enabled::text
+    FROM pg_rewrite r JOIN pg_class c ON c.oid = r.ev_class WHERE c.relnamespace IN ${SCHEMAS}
+      AND NOT (c.relkind IN ('v', 'm') AND r.rulename = '_RETURN' AND r.ev_type = '1')
   -- An index that is not valid or not ready enforces nothing, and prints the same definition.
   UNION ALL SELECT 'index-state ' || c.oid::regclass::text || ' valid=' || i.indisvalid::text || ' ready=' || i.indisready::text
     FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relnamespace IN ${SCHEMAS}

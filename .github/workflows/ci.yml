@@ -317,6 +317,21 @@ jobs:
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO PUBLIC"
         expect_fail "SELECT on new tables for PUBLIC by default" "gives PUBLIC SELECT on new tables"
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM PUBLIC"
+        # The audit journal made unlogged, which a crash empties without any write the guards could stop (Codex F1,
+        # eleventh review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."CanonicalAdminAuditEvent" SET UNLOGGED'
+        expect_fail "an unlogged audit journal" 'table public."CanonicalAdminAuditEvent" r owner=owner'
+        grep -q 'persistence=u' "$RUNNER_TEMP/g4-negative.out" || { echo "FAIL: the difference is not the persistence"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."CanonicalAdminAuditEvent" SET LOGGED'
+        # An event trigger, refused before any other connection or read (Gemini 4 Neon finding 1, eleventh review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "CREATE FUNCTION public.ci_evt() RETURNS event_trigger LANGUAGE plpgsql AS 'BEGIN END'" \
+          -c "CREATE EVENT TRIGGER ci_evt ON ddl_command_start EXECUTE FUNCTION public.ci_evt()"
+        expect_fail "an event trigger on the copy" "the copy has event triggers (ci_evt on ddl_command_start)"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "DROP EVENT TRIGGER ci_evt" -c "DROP FUNCTION public.ci_evt()"
+        # One of PostgreSQL's own restricted functions granted to the runtime role (Gemini 4 Hydrogen finding 3).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO app_user"
+        expect_fail "pg_read_file granted to app_user" "catalog-function pg_read_file(text)"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "REVOKE EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) FROM app_user"
         # A copy behind the release is refused, never migrated here (Codex F1, ninth review): a second copy, one
         # migration short.
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "postgresql://prisma:prisma_password@localhost:5432/postgres" -c "CREATE DATABASE luxia_restore_behind TEMPLATE luxia_restored"

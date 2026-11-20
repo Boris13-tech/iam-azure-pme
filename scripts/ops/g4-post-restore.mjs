@@ -63,16 +63,23 @@ const CLEAN_ENV = cleanEnvironment(process.env);
 
 // Throws rather than exits, so a failure inside the reference's block still reaches the finally that drops it
 // (Gemini 4 Hydrogen finding 8, seventh review); everywhere else the throw ends the run with the same refusal.
+// The owner's connections ask the server to fire no event trigger: on PostgreSQL 17 an ON login trigger restored with
+// the copy would otherwise run at connect time, before any check, with the owner's rights (Gemini 4 Neon finding 1,
+// eleventh review). The setting exists from PostgreSQL 17 and only a superuser may use it; where the server refuses
+// it, the connection is made without it, and the event triggers are read and refused before any other connection.
+let ownerOptions = null;
+const envFor = (connection) => (connection === owner.url && ownerOptions ? { ...CLEAN_ENV, PGOPTIONS: ownerOptions } : CLEAN_ENV);
 const run = (connection, sql) => {
-  const result = spawnSync("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", connection, "-c", sql], { encoding: "utf8", env: CLEAN_ENV });
+  const result = spawnSync("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", connection, "-c", sql], { encoding: "utf8", env: envFor(connection) });
   if (result.status !== 0) throw new Error(`psql failed: ${(result.stderr || result.error?.message || "").split("\n")[0]}`);
   return result.stdout.replace(/\r/g, "").trim();
 };
 const psql = (connection, sql) => { try { return run(connection, sql); } catch (error) { return fail(error.message); } };
 // Every read pins its search path: a tampered copy cannot shadow what the checks call with objects of its own
-// (Gemini 4 Hydrogen finding 5, seventh review).
-const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog;\n${sql};\nCOMMIT;`);
-const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog;\n${sql};\nCOMMIT;`);
+// (Gemini 4 Hydrogen finding 5, seventh review). pg_temp is named last: left out, it is searched first, and a temporary
+// view could stand in for a catalog (Gemini 4 Neon finding 1, eleventh review).
+const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog, pg_temp;\n${sql};\nCOMMIT;`);
+const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog, pg_temp;\n${sql};\nCOMMIT;`);
 // Only the search path a session starts with is read without pinning anything first (Gemini 4 Neon finding 5, ninth
 // review), by one query that holds no operator and names pg_catalog's function (SEARCH_PATH_SQL); every other read pins
 // pg_catalog alone, since a public operator or function with a closer argument match would otherwise be chosen over
@@ -87,6 +94,18 @@ const check = (name, ok, detail) => { checks.push({ name, ok, detail }); console
 // matched would otherwise have passed (Antigravity finding 1, review of #195).
 const IDENTITY_SQL = `SELECT current_database() || ' on ' || coalesce(inet_server_addr()::text, 'socket') || ':' || coalesce(inet_server_port()::text, 'none')`;
 const identity = (connection) => readOnly(connection, IDENTITY_SQL);
+{
+  const probe = spawnSync("psql", ["-X", "-q", "-At", owner.url, "-c", "SELECT 1"], { encoding: "utf8", env: { ...CLEAN_ENV, PGOPTIONS: "-c event_triggers=off" } });
+  if (probe.status === 0) ownerOptions = "-c event_triggers=off";
+}
+// Before any other connection, and before anything else is read: no event trigger. A login trigger fires on every
+// connection, the runtime role's included, and the release defines none.
+const eventTriggers = readOnly(owner.url, "SELECT coalesce(string_agg(evtname || ' on ' || evtevent, ', ' ORDER BY evtname), '') FROM pg_event_trigger");
+if (eventTriggers) {
+  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release,
+    checks: [{ name: "no event trigger on the copy", ok: false, detail: eventTriggers }], passed: false, stoppedBeforeWriting: true }, null, 1));
+  fail(`the copy has event triggers (${eventTriggers}), which the release never defines; nothing else was read or written`);
+}
 const ownerIdentity = identity(owner.url);
 const appIdentity = identity(app.url);
 const reached = `${ownerIdentity} as ${readOnly(owner.url, "SELECT current_user")}`;

@@ -86,14 +86,19 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
   it("the recovery runbook brings an older backup to the release before G4, which never migrates a copy itself", () => {
     // Operator decision, 2026-11-20: the upgrade is an explicit recovery step, run before the verification.
     const runbook = readFileSync("docs/operations/BACKUP-RUNBOOK.md", "utf8").replace(/\r/g, "");
-    const step = runbook.slice(runbook.indexOf("6. **Bring the copy to the deployed release, then verify it (G4).**"), runbook.indexOf("7. **Recreate the backup role**"));
+    const step = runbook.slice(runbook.indexOf("6. **Bring the database to the deployed release, then verify a copy of it (G4).**"), runbook.indexOf("7. **Recreate the backup role**"));
     expect(step.length).toBeGreaterThan(200);
-    expect(step).toContain("The G4 command never migrates a copy itself");
+    expect(step).toContain("The G4 command never migrates anything itself");
+    // The target and the verified copy are told apart, and the copy is brought up as its own owner (Gemini 4 Hydrogen
+    // finding 2 and Neon finding 3, eleventh review).
+    expect(step).toContain("G4 runs on a disposable local copy, never on the target itself");
+    expect(step).toContain("as the same owner role");
+    expect(step).toContain("--production-owner <the target's owner>");
     expect(step).toContain("npx prisma migrate deploy");
     expect(step).toContain("Bootstrap least-privilege runtime grants");
     expect(step).toContain("node scripts/ops/g4-post-restore.mjs --release");
     expect(step).toContain("do not switch the application");
-    expect(runbook.indexOf("6. **Bring the copy")).toBeLessThan(runbook.indexOf("8. **Switch the application:**"));
+    expect(runbook.indexOf("6. **Bring the database")).toBeLessThan(runbook.indexOf("8. **Switch the application:**"));
   });
 
   it("refuses a target that is not loopback, before touching any database", () => {
@@ -217,7 +222,7 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     expect(source).toContain("const server = (sql) => run(owner.url, sql);");
     expect(source).toContain("readOnlyOrThrow(reference.url, FINGERPRINT_SQL)");
     // Every read pins its search path.
-    expect(source).toContain("SET LOCAL search_path = pg_catalog;");
+    expect(source).toContain("SET LOCAL search_path = pg_catalog, pg_temp;");
     expect(direct).toEqual([
       "SELECT luxia_retention_purge_transactions(1000, false)::text",
       "SELECT luxia_retention_status()::text",
@@ -248,8 +253,8 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
       "psql(runner.url, `SELECT luxia_retention_status()::text`);",
     ]);
     // Both read helpers pin the search path, each on its own.
-    expect(source).toContain("const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog;\\n${sql};\\nCOMMIT;`);");
-    expect(source).toContain("const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog;\\n${sql};\\nCOMMIT;`);");
+    expect(source).toContain("const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog, pg_temp;\\n${sql};\\nCOMMIT;`);");
+    expect(source).toContain("const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = pg_catalog, pg_temp;\\n${sql};\\nCOMMIT;`);");
     // The two job calls sit in the branch that runs only when nothing failed before them.
     const guard = source.indexOf("if (failedSoFar.length > 0) {\n  check(\"the daily job was not run on a copy that already failed\", false");
     expect(guard).toBeGreaterThan(0);
