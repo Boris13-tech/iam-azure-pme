@@ -1,7 +1,7 @@
 // G4, steps 9 to 11 of the restore procedure (private record): once the operator has restored a real backup into a
 // DISPOSABLE copy (steps 4 to 7, which hold the backup credential and the private key and are the operator's alone),
-// this applies the release's migrations to that copy, checks the invariants Production must keep, and writes the
-// drill's report.
+// this checks that the copy is at the release (it never migrates it), compares it with a reference migrated from the
+// release, checks the invariants Production must keep, and writes the drill's report.
 //
 //   LUXIA_RESTORE_TARGET_URL=<owner of the copy> LUXIA_RESTORE_APP_URL=<app_user of the copy> \
 //     node scripts/ops/g4-post-restore.mjs --release <tag or sha> --backup-age-minutes <n> --started <ISO> [--report <file>]
@@ -73,6 +73,9 @@ const psql = (connection, sql) => { try { return run(connection, sql); } catch (
 // (Gemini 4 Hydrogen finding 5, seventh review).
 const readOnly = (connection, sql) => psql(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog, public;\n${sql};\nCOMMIT;`);
 const readOnlyOrThrow = (connection, sql) => run(connection, `BEGIN READ ONLY;\nSET LOCAL search_path = pg_catalog, public;\n${sql};\nCOMMIT;`);
+// What a session really starts with is read without pinning anything first, still read only (Gemini 4 Neon finding 5,
+// ninth review): every query in it names pg_catalog's objects explicitly.
+const readSessionStart = (connection, sql) => psql(connection, `BEGIN READ ONLY;\n${sql};\nCOMMIT;`);
 
 const checks = [];
 const check = (name, ok, detail) => { checks.push({ name, ok, detail }); console.log(`${ok ? "PASS" : "FAIL"} ${name}: ${detail}`); return ok; };
@@ -96,7 +99,7 @@ check("the connection reached the disposable copy, not a database beyond this ne
 // databases: the invariants are read as the owner, the runtime role's rights as app_user.
 const elsewhere = sameServer(ownerIdentity, appIdentity);
 check("both connections reached the same copy", elsewhere === null, elsewhere ?? appIdentity);
-// If either is wrong, stop here: everything after this applies migrations and writes two rows, and a command whose
+// If either is wrong, stop here: everything after this creates a reference and writes two rows, and a command whose
 // first duty is to touch nothing but the copy must not do that to a target it has just failed to recognise. Recording
 // the failure and carrying on to the end would have written to it anyway (Antigravity finding 1, third review of #195).
 const targetRefused = refusedTarget(checks);
@@ -111,16 +114,19 @@ if (targetRefused) {
 // 4 and 5, eighth review).
 const migrator = readOnly(owner.url, MIGRATOR_SQL);
 const migratorWrong = migratorFault(migrator, productionOwner);
-check("the schema belongs to the role running this or to Production's owner", migratorWrong === null, migratorWrong ?? `owner ${migrator.split(" ")[0]}`);
+const migratorName = migratorWrong === null ? JSON.parse(migrator)[0] : null;
+check("the schema belongs to the role running this or to Production's owner", migratorWrong === null, migratorWrong ?? `owner ${migratorName}`);
 const unsafeSettings = readOnly(owner.url, SESSION_SETTINGS_SQL);
 check("sessions start with no setting beyond timeouts (and the backup role's read only)", unsafeSettings === "",
   unsafeSettings || `only ${SESSION_TIMEOUTS.join(", ")}, if any`);
-const effective = `owner: ${readOnly(owner.url, EFFECTIVE_SETTINGS_SQL)}; app_user: ${readOnly(app.url, EFFECTIVE_SETTINGS_SQL)}`;
+const effective = `owner: ${readSessionStart(owner.url, EFFECTIVE_SETTINGS_SQL)}; app_user: ${readSessionStart(app.url, EFFECTIVE_SETTINGS_SQL)}`;
 check("sessions really start with the guards on", effective === `owner: ${EXPECTED_EFFECTIVE_SETTINGS}; app_user: ${EXPECTED_EFFECTIVE_SETTINGS}`, effective);
 const parameterGrants = readOnly(owner.url, PARAMETER_GRANTS_SQL);
 check("no application role, nor PUBLIC, may change a protected setting", parameterGrants === "", parameterGrants || "none");
 const firesOnWrite = readOnly(owner.url, BEFORE_WRITING_SQL);
-check("nothing fires by itself when the copy is migrated", firesOnWrite === "", firesOnWrite || "no trigger, rule or policy on the migration history, no event trigger");
+// The copy is never migrated here (step 9 below): this refuses what would still fire by itself on the reference's
+// creation or on the job's two writes.
+check("no event trigger, and nothing attached to the migration history", firesOnWrite === "", firesOnWrite || "none");
 const unsafeBeforeWriting = checks.filter((entry) => !entry.ok).map((entry) => entry.name);
 if (unsafeBeforeWriting.length > 0) {
   writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release, reached, checks,
@@ -128,43 +134,31 @@ if (unsafeBeforeWriting.length > 0) {
   fail(`${unsafeBeforeWriting.join("; ")}: nothing was migrated or written`);
 }
 
-// Step 9: the release's migrations, as the Production gate applies them, through the same validated URL.
+// Step 9: the copy must already be at the release. Migrating it here ran restored, still unverified code — a trigger
+// on any table a pending migration touches fires inside that migration, as the role running this — before anything
+// had been compared (Codex F1, ninth review of #195). A drill restores a backup of the release Production runs, so
+// nothing is pending; a copy behind it, or with migrations the release does not have, is refused with nothing written.
+// Bringing an older backup up to a release is the recovery runbook's work, on a copy verified first, not this check's.
 const migrations = () => readOnly(owner.url, `SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`);
 const before = migrations();
-// A copy behind the release, owned by another role than the one running this (a Production backup restored as it is,
-// owned by Production's owner), cannot be migrated faithfully here: new tables would belong to this role while the
-// replaced functions keep their owner, a mix Production never has, and the job then fails on its own tables. That
-// combination is refused before anything is migrated; restore a backup taken at the release Production runs, or run
-// this as the copy's owner (eighth review of #195).
 const applied = new Set(readOnly(owner.url, `SELECT coalesce(string_agg(migration_name, chr(10)), '') FROM "_prisma_migrations"
   WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`).split("\n").filter(Boolean));
-const pending = readdirSync("prisma/migrations").filter((name) => /^\d{14}_/.test(name) && !applied.has(name));
-const copyOwner = readOnly(owner.url, `SELECT pg_get_userbyid(relowner) || ' ' || current_user FROM pg_class WHERE oid = 'public._prisma_migrations'::regclass`).split(" ");
-if (pending.length > 0 && copyOwner[0] !== copyOwner[1]) {
-  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release, reached, checks, passed: false,
-    stoppedBeforeWriting: true, refused: `copy behind the release by ${pending.length} migrations and owned by ${copyOwner[0]}, not ${copyOwner[1]}` }, null, 1));
-  fail(`the copy is ${pending.length} migrations behind the release and owned by ${copyOwner[0]}, not ${copyOwner[1]}: migrating it here would mix owners `
-    + `as Production never does. Restore a backup taken at the release Production runs, or run this as ${copyOwner[0]}. Nothing was migrated or written`);
+const releaseMigrations = readdirSync("prisma/migrations").filter((name) => /^\d{14}_/.test(name));
+const pending = releaseMigrations.filter((name) => !applied.has(name));
+const foreign = [...applied].filter((name) => !releaseMigrations.includes(name));
+check("the copy is at the release: no migration pending, none the release does not have", pending.length === 0 && foreign.length === 0,
+  pending.length || foreign.length ? `${pending.length} pending (${pending.slice(0, 3).join(", ")}), ${foreign.length} not in the release (${foreign.slice(0, 3).join(", ")})`
+    : `${before} applied, the release's ${releaseMigrations.length}`);
+if (pending.length > 0 || foreign.length > 0) {
+  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release, reached, checks,
+    passed: false, stoppedBeforeWriting: true }, null, 1));
+  fail(`the copy is not at the release (${pending.length} pending, ${foreign.length} not in the release): restore a backup taken at the release `
+    + "Production runs. Nothing was migrated or written");
 }
-const deployStarted = Date.now();
+// The reference is migrated from the release by Prisma, as the activation gate migrates Production.
 const migrate = (target) => spawnSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"],
   { encoding: "utf8", env: { ...CLEAN_ENV, DATABASE_URL: target.prismaUrl } });
-const deploy = migrate(owner);
-const deploySeconds = Math.round((Date.now() - deployStarted) / 1000);
-check("migrate deploy", deploy.status === 0, deploy.status === 0 ? `${before} applied before, ${migrations()} after, ${deploySeconds} s`
-  : (deploy.stdout + deploy.stderr).split("\n").filter(Boolean).slice(-1)[0] ?? "failed");
-if (deploy.status !== 0) {
-  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release, reached, checks, passed: false }, null, 1));
-  process.exit(1);
-}
-// A backup older than the release is brought to it as a real recovery would be: its migrations, then the activation
-// gate's grant step, which is what gives the objects those migrations created their runtime grants in Production. A
-// copy already at the release is left as restored, so its grants are compared as they came back (Argon finding 2,
-// eighth review).
-const after = migrations();
 const gateText = readFileSync(".github/workflows/production-activation-gate.yml", "utf8");
-const broughtToRelease = Number(after) > Number(before);
-if (broughtToRelease) psql(owner.url, `BEGIN;\n${gateGrantSql(gateText, owner.database)}\nCOMMIT;`);
 
 // Step 10: the invariants Production must keep, on real restored data.
 // The copy against a reference: a second disposable database on the same server, migrated from the same release, read
@@ -314,7 +308,7 @@ if (failedSoFar.length > 0) {
   // and Gemini 4 Hydrogen finding 6, seventh review).
   // The same query as the runtime role's, database included (Argon finding 3 and Gemini 4 Neon finding 3, eighth review).
   const as = readOnly(runner.url, ROLE_SHAPE_SQL);
-  const runnerSettings = readOnly(runner.url, EFFECTIVE_SETTINGS_SQL);
+  const runnerSettings = readSessionStart(runner.url, EFFECTIVE_SETTINGS_SQL);
   const runnerOk = as === runnerExpected(expected) && runnerSettings === EXPECTED_EFFECTIVE_SETTINGS && serverOf(runnerIdentity) === serverOf(ownerIdentity)
     && runnerIdentity.startsWith(`${owner.database} on `);
   check(`the daily job's connection is ${expected}, restricted, on the copy`, runnerOk, `${as}, ${runnerSettings}, at ${runnerIdentity}`);
@@ -340,15 +334,14 @@ const report = {
   rtoMinutes: Math.round((Date.now() - Date.parse(started)) / 60_000),
   startedAt: new Date(started).toISOString(),
   finishedAt: new Date().toISOString(),
-  migrateDeploySeconds: deploySeconds,
-  migrationsApplied: { before: Number(before), after: Number(migrations()) },
+  migrationsApplied: Number(before),
   estimatedRowsPerTable: rows,
   tables: Object.keys(rows).length,
   checks,
   // What was really written, not what could have been (Gemini 4 Neon finding 5, eighth review).
-  migrator: migrator.split(" ")[0],
+  migrator: migratorName,
   wroteToTheCopy: [...(jobRan ? ["RetentionRun: one row for the R3 dry run, one for the status call"] : []),
-    ...(broughtToRelease ? [`the release's ${Number(after) - Number(before)} missing migrations, then the activation gate's grant step`] : [])],
+  ],
   wroteToTheServer: created ? [`${reference.database}: created empty, migrated from the release, given the release's gate grants, read, and `
     + (referenceDropped ? "dropped" : `NOT dropped (${dropError})`)] : [],
   limits: ["What keeps Production out is the loopback URL and a database name that marks a restore copy. The address the "

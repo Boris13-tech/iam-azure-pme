@@ -31,7 +31,9 @@ case "$*" in
   "rev-parse HEAD") echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
   "rev-parse --verify --quiet HEAD^{commit}"|"rev-parse --verify --quiet rc-private-beta-1^{commit}") echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
   "rev-parse --verify --quiet"*) echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
-  status*) [ -n "$LUXIA_G4_STUB_DIRTY" ] && echo " M prisma/schema.prisma" ;;
+  "status --porcelain -- prisma .github/workflows/production-activation-gate.yml scripts/ops")
+    [ -n "$LUXIA_G4_STUB_DIRTY" ] && echo " M prisma/schema.prisma" ;;
+  status*) echo "unexpected status paths: $*" ; exit 2 ;;
 esac
 exit 0
 `);
@@ -48,7 +50,8 @@ const LOCAL_APP = "postgresql://app_user:p@127.0.0.1:15560/luxia_restore_rc";
 // The report goes to the test's own directory, never into the repository (Gemini 4 Hydrogen finding 8).
 const OK_ARGS = ["--release", "rc-private-beta-1", "--backup-age-minutes", "42", "--started", new Date().toISOString(),
   "--report", join(dir, "report.json")];
-const source = readFileSync("scripts/ops/g4-post-restore.mjs", "utf8");
+// Line endings normalised, so a Windows checkout reads the same source as CI (Gemini 4 Neon finding 7, ninth review).
+const source = readFileSync("scripts/ops/g4-post-restore.mjs", "utf8").replace(/\r/g, "");
 
 /** A variable the stand-in must report back, so an empty recording is read as a broken recorder, not as a clean run. */
 const PROBE = "LUXIA_G4_STUB_PROBE";
@@ -154,10 +157,12 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     // Both tools are given the same cleaned environment, and the same validated URL.
     expect(source).toContain("const CLEAN_ENV = cleanEnvironment(process.env);");
     expect(source).toContain("{ encoding: \"utf8\", env: CLEAN_ENV }");
-    // Prisma gets the same validated target, its schema pinned to public; the copy and the reference both go through it.
+    // Prisma gets the same validated target, its schema pinned to public; only the reference is migrated, never the
+    // copy, whose restored code is unverified until compared (Codex F1, ninth review).
     expect(source).toContain("env: { ...CLEAN_ENV, DATABASE_URL: target.prismaUrl }");
-    expect(source).toContain("const deploy = migrate(owner);");
     expect(source).toContain("const migrated = migrate(reference);");
+    expect(source).not.toMatch(/migrate\(owner\)/);
+    expect([...source.matchAll(/\bmigrate\((\w+)\)/g)].map((m) => m[1])).toEqual(["reference"]);
   });
 
   it("refuses a missing or malformed URL, or a database name that is not plain", () => {
@@ -221,7 +226,7 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
       "run(connection, sql); } catch (error) { return fail(error.me", // psql: run, exiting on failure
       "psql(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = ", // readOnly
       "run(connection, `BEGIN READ ONLY;\\nSET LOCAL search_path = p", // readOnlyOrThrow
-      "psql(owner.url, `BEGIN;\\n${gateGrantSql(gateText, owner.data", // a copy brought to the release
+      "psql(connection, `BEGIN READ ONLY;\\n${sql};\\nCOMMIT;`);", // readSessionStart: read only, nothing pinned
       "run(owner.url, sql); // CREATE and DROP DATABASE cannot run ", // server
       "server(`CREATE DATABASE ${reference.database}`);",
       "run(reference.url, `BEGIN;\\n${gateGrantSql(gate, reference.d",
@@ -239,7 +244,11 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     // The checks that read what would act on the writing come before step 9, and stop the run when one fails.
     const beforeWriting = source.indexOf("const unsafeBeforeWriting = checks.filter((entry) => !entry.ok)");
     expect(beforeWriting).toBeGreaterThan(source.indexOf("readOnly(owner.url, BEFORE_WRITING_SQL)"));
-    expect(beforeWriting).toBeLessThan(source.indexOf("const deploy = migrate(owner)"));
+    expect(beforeWriting).toBeLessThan(source.indexOf("const migrated = migrate(reference)"));
+    // A copy not at the release stops the run before the reference is created or anything is written.
+    const notAtRelease = source.indexOf("if (pending.length > 0 || foreign.length > 0) {");
+    expect(notAtRelease).toBeGreaterThan(beforeWriting);
+    expect(notAtRelease).toBeLessThan(source.indexOf("server(`CREATE DATABASE"));
     // The job's functions run only on a copy that has passed every check before them (Codex F4).
     const gateOnFailures = source.indexOf("const failedSoFar = checks.filter((entry) => !entry.ok)");
     expect(gateOnFailures).toBeGreaterThan(0);

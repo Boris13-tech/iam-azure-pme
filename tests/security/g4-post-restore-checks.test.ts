@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
-  ALLOWED_PARAMETERS, BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS, EXPECTED_RUNTIME_ROLE, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, migratorFault, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
+  ALLOWED_PARAMETERS, BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, DEFAULT_PRIVILEGES_SQL, MIGRATOR_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS, EXPECTED_RUNTIME_ROLE, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, migratorFault, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
   gateGrantSql, gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf,
   triggerFaults, unprotectedFault, validate,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
@@ -222,7 +222,7 @@ describe("G4 post-restore: the copy against a database migrated from the same re
 
   it("expects the daily job's connection to be its role and nothing wider", () => {
     expect(runnerExpected("luxia_retention")).toBe(
-      "luxia_retention superuser=false bypassrls=false createrole=false createdb=false replication=false memberships=0 owns=0 database=none");
+      "luxia_retention session=luxia_retention superuser=false bypassrls=false createrole=false createdb=false replication=false memberships=0 owns=0 database=none");
     expect(EXPECTED_RUNTIME_ROLE).toBe(runnerExpected("app_user"));
     // One query for both roles, with every part the expectation names (Argon finding 3 and Gemini 4 Neon findings 3
     // and 6, eighth review): the database, CONNECT with the grant option, and types among what it owns.
@@ -234,11 +234,15 @@ describe("G4 post-restore: the copy against a database migrated from the same re
   });
 
   it("refuses a schema owned by anyone but the role running this or Production's owner", () => {
-    expect(migratorFault("neondb_owner prisma", "neondb_owner")).toBeNull();
-    expect(migratorFault("prisma prisma", "neondb_owner")).toBeNull();
-    expect(migratorFault("rogue_owner prisma", "neondb_owner")).toContain("neither the role running this (prisma) nor Production's owner (neondb_owner)");
-    expect(migratorFault("- prisma", "neondb_owner")).toBe("the copy has no migration history");
-    expect(migratorFault("neondb_owner prisma", "x; DROP")).toContain("is not a role name");
+    expect(migratorFault('["neondb_owner","prisma"]', "neondb_owner")).toBeNull();
+    expect(migratorFault('["prisma","prisma"]', "neondb_owner")).toBeNull();
+    expect(migratorFault('["rogue_owner","prisma"]', "neondb_owner")).toContain("neither the role running this (prisma) nor Production's owner (neondb_owner)");
+    expect(migratorFault('["-","prisma"]', "neondb_owner")).toBe("the copy has no migration history");
+    expect(migratorFault('["neondb_owner","prisma"]', "x; DROP")).toContain("is not a role name");
+    // A role name holding spaces cannot pass as another (Gemini 4 Neon finding 2, ninth review).
+    expect(migratorFault('["neondb_owner x","prisma"]', "neondb_owner")).toContain("the schema belongs to neondb_owner x");
+    expect(migratorFault('["prisma prisma","prisma"]', "neondb_owner")).toContain("the schema belongs to prisma prisma");
+    expect(migratorFault("neondb_owner prisma", "neondb_owner")).toContain("unreadable owner answer");
   });
 
   it("refuses what a session could switch on by itself, and what fires when step 9 writes", () => {
@@ -251,11 +255,40 @@ describe("G4 post-restore: the copy against a database migrated from the same re
   it("tags every principal but the owner, and reads the settings sessions really start with", () => {
     // Codex F1 and F2, eighth review: a real role named "owner" prints as role:owner; the server's own configuration
     // is read through each connection.
-    expect(FINGERPRINT_SQL).toContain("THEN 'owner' ELSE 'role:' || ");
-    expect(FINGERPRINT_SQL).not.toMatch(/THEN 'owner' ELSE [a-z(]/);
+    expect(FINGERPRINT_SQL).toMatch(/THEN 'owner'\s+ELSE 'role:' \|\| \(/);
+    expect(FINGERPRINT_SQL).not.toMatch(/THEN 'owner'\s+ELSE (?!'role:')/);
     expect(EFFECTIVE_SETTINGS_SQL).toContain("current_setting('session_replication_role')");
     expect(EFFECTIVE_SETTINGS_SQL).toContain("current_setting('row_security')");
-    expect(EXPECTED_EFFECTIVE_SETTINGS).toBe("origin row_security=on");
+    expect(EXPECTED_EFFECTIVE_SETTINGS).toBe('origin row_security=on search_path="$user", public scope=none');
+    expect(EFFECTIVE_SETTINGS_SQL).toContain("name LIKE 'app.%' OR name LIKE 'luxia.%'");
+    expect(ROLE_SHAPE_SQL).toContain("' session=' || session_user");
+    expect(FINGERPRINT_SQL).toContain("'catalog-function ' || p.oid::regprocedure::text");
+  });
+
+  it("holds each ninth-review control in place", () => {
+    // Default privileges: role matching that is never NULL, and allowances for schema public or global entries only
+    // (Codex F2, Gemini 4 Hydrogen finding 1, Argon finding 3).
+    expect(DEFAULT_PRIVILEGES_SQL).toContain("EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'luxia_backup' AND oid = a.grantee)");
+    expect(DEFAULT_PRIVILEGES_SQL).toContain("EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user' AND oid = a.grantee)");
+    expect(DEFAULT_PRIVILEGES_SQL).not.toContain("a.grantee = (SELECT oid");
+    expect(DEFAULT_PRIVILEGES_SQL).toContain("da.defaclnamespace NOT IN (0, 'public'::regnamespace)");
+    expect(SESSION_SETTINGS_SQL).not.toContain("s.setrole = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')");
+    // The owner is the migration history's owner only; pg_database_owner only for schemas (Hydrogen finding 2, Argon
+    // finding 2).
+    expect(FINGERPRINT_SQL).not.toContain("current_user, 'pg_database_owner'");
+    // pg_database_owner appears only in the schema line: once for its owner, twice in its ACL (entry and order).
+    const schemaLine = FINGERPRINT_SQL.slice(0, FINGERPRINT_SQL.indexOf("UNION ALL SELECT 'table '"));
+    expect(schemaLine.match(/'pg_database_owner'/g)?.length).toBe(3);
+    expect(FINGERPRINT_SQL.match(/'pg_database_owner'/g)?.length).toBe(3);
+    // information_schema's objects are the server's: its bootstrap superuser is written the same on both sides.
+    expect(FINGERPRINT_SQL).toContain("= 'information_schema'::regnamespace AND pg_get_userbyid(c.relowner) = pg_get_userbyid(10) THEN 'bootstrap'");
+    // An empty ACL is not the default; rows marked rolled back are left out (Argon finding 3).
+    expect(FINGERPRINT_SQL).toContain("'default' ELSE coalesce(");
+    expect(FINGERPRINT_SQL).toContain("'none') END");
+    expect(FINGERPRINT_SQL).toContain("FROM public._prisma_migrations m WHERE m.rolled_back_at IS NULL");
+    // The backup role is judged in every schema the comparison strips it from (Argon finding 1).
+    expect(BACKUP_ROLE_SQL).not.toContain("'public'::regnamespace");
+    expect(MIGRATOR_SQL).toContain("to_regclass('public._prisma_migrations')");
   });
 
   it("counts lines, so a duplicate on one side is a difference", () => {

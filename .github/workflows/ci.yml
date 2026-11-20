@@ -308,6 +308,26 @@ jobs:
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "GRANT CONNECT ON DATABASE luxia_restored TO app_user WITH GRANT OPTION"
         expect_fail "CONNECT with the grant option for app_user" "database=CONNECT+grant"
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "REVOKE GRANT OPTION FOR CONNECT ON DATABASE luxia_restored FROM app_user"
+        # A server started in replica mode, with nothing stored for any role: read as each connection really sees it
+        # (Codex F2, eighth review; Gemini 4 Neon finding 7, ninth review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER SYSTEM SET session_replication_role = replica" -c "SELECT pg_reload_conf()" >/dev/null
+        expect_fail "a server whose sessions start in replica mode" "owner: replica row_security=on"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER SYSTEM RESET session_replication_role" -c "SELECT pg_reload_conf()" >/dev/null
+        # Read access to every future table for PUBLIC, through default privileges (Codex F2, ninth review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO PUBLIC"
+        expect_fail "SELECT on new tables for PUBLIC by default" "gives PUBLIC SELECT on new tables"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM PUBLIC"
+        # A copy behind the release is refused, never migrated here (Codex F1, ninth review): a second copy, one
+        # migration short.
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "postgresql://prisma:prisma_password@localhost:5432/postgres" -c "CREATE DATABASE luxia_restore_behind TEMPLATE luxia_restored"
+        B="postgresql://prisma:prisma_password@localhost:5432/luxia_restore_behind"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$B" -c "DELETE FROM _prisma_migrations WHERE migration_name = (SELECT max(migration_name) FROM _prisma_migrations)"
+        if LUXIA_RESTORE_TARGET_URL="$B" LUXIA_RESTORE_APP_URL="postgresql://app_user:app_password@localhost:5432/luxia_restore_behind" \
+          LUXIA_RESTORE_RETENTION_URL= g4; then echo "FAIL: G4 passed a copy behind the release"; exit 1; fi
+        grep -q "the copy is not at the release (1 pending, 0 not in the release)" "$RUNNER_TEMP/g4-negative.out" \
+          || { echo "FAIL: G4 refused the copy behind the release for another reason"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: G4 refused a copy behind the release, with nothing written"
+        "$PG_BIN/psql" -X -q "postgresql://prisma:prisma_password@localhost:5432/postgres" -c "DROP DATABASE luxia_restore_behind WITH (FORCE)"
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored SET session_replication_role = replica"
         expect_fail "every session starting in replica mode" "session_replication_role=replica"
         "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored RESET session_replication_role"

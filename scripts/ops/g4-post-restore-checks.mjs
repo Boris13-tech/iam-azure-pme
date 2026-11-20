@@ -87,37 +87,45 @@ export const serverOf = (identity) => /\son (.+)$/.exec(identity)?.[1] ?? "";
  */
 const MIGRATOR = `pg_get_userbyid(coalesce((SELECT relowner FROM pg_class WHERE oid = to_regclass('public._prisma_migrations')),
   (SELECT oid FROM pg_roles WHERE rolname = current_user)))`;
-// Three names mean "the owner" here (Argon finding 2, eighth review): the migration history's owner (Production's, on a
-// copy restored as it is); the role running this, which owns whatever step 9's migrations create on the copy and
-// everything on the reference; and pg_database_owner, which owns schema public on a database created since PostgreSQL 15.
-// Every other principal is tagged, so a real role named "owner" can never print as the owner (Codex F1, eighth review).
-const OWNER = `CASE WHEN %s IN (${MIGRATOR}, current_user, 'pg_database_owner') THEN 'owner' ELSE 'role:' || %s::text END`;
-const owned = (expression) => OWNER.replaceAll("%s", expression);
+// "The owner" is the migration history's owner in each database and nobody else: Production's owner on a copy restored
+// as it is, the role running this on the reference, which it migrates. The copy is never migrated here, so the role
+// running this owns nothing on it, and an object handed to that role, a superuser perhaps, must show (Gemini 4 Hydrogen
+// finding 2, ninth review). For schemas only, pg_database_owner counts too: it owns schema public on a database created
+// since PostgreSQL 15. Every other principal is tagged, so a real role named "owner" never prints as the owner (Codex
+// F1, eighth review).
+// information_schema is the server's, created with every database by its bootstrap superuser, not by the migrations:
+// there that role is written "bootstrap" on both sides, whoever owns the copy's schema (a Production-owned copy failed
+// on it otherwise). Anywhere else, the bootstrap superuser is a role like any other.
+const owned = (expression, namespace, forSchema = false) => `CASE
+      WHEN ${namespace} = 'information_schema'::regnamespace AND ${expression} = pg_get_userbyid(10) THEN 'bootstrap'
+      WHEN ${expression} ${forSchema ? `IN (${MIGRATOR}, 'pg_database_owner')` : `= ${MIGRATOR}`} THEN 'owner'
+      ELSE 'role:' || (${expression})::text END`;
 // The backup role (scripts/backup/luxia-backup-role.sql) is the backup system's, not the release's: Production and any
 // copy restored from it carry its read grants, a reference migrated from the release does not. Its entries are left out
 // of the comparison and judged on their own instead: read only (BACKUP_ROLE_SQL below).
 // Ordered by the entry itself: "ORDER BY 1" inside an aggregate orders by the constant 1, which is no order at all, and
 // two identical lists could print differently (Gemini 4 Hydrogen finding 4, seventh review).
-const ACL_ENTRY = `${owned("CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END")} || ':' || a.privilege_type
-      || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END`;
+const ACL_ENTRY = (namespace, forSchema) => `${owned("CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END", namespace, forSchema)}
+      || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END`;
 // NULL is PostgreSQL's default rights, an empty list is every right revoked: two different states, printed apart
 // (Gemini 4 Neon finding 7, eighth review).
-const ACL = (column) => `CASE WHEN ${column} IS NULL THEN 'default' ELSE coalesce((SELECT string_agg(${ACL_ENTRY}, ',' ORDER BY ${ACL_ENTRY})
-      FROM aclexplode(${column}) a WHERE a.grantee IS DISTINCT FROM (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')), 'none') END`;
+const ACL = (column, namespace, forSchema = false) => `CASE WHEN ${column} IS NULL THEN 'default' ELSE coalesce((SELECT string_agg(${ACL_ENTRY(namespace, forSchema)},
+      ',' ORDER BY ${ACL_ENTRY(namespace, forSchema)}) FROM aclexplode(${column}) a
+      WHERE a.grantee IS DISTINCT FROM (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')), 'none') END`;
 // Every schema but PostgreSQL's own (pg_catalog, pg_toast, temporary ones), information_schema included: an object
 // placed anywhere else is as reachable as one in public (Argon finding 5, eighth review). Names are printed qualified
 // outside the search path, so two schemas cannot print the same line.
 const SCHEMAS = `(SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%')`;
 export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER BY line), '') FROM (
-  SELECT 'schema ' || n.nspname || ' owner=' || ${owned("pg_get_userbyid(n.nspowner)")} || ' acl=' || ${ACL("n.nspacl")} AS line
+  SELECT 'schema ' || n.nspname || ' owner=' || ${owned("pg_get_userbyid(n.nspowner)", "n.oid", true)} || ' acl=' || ${ACL("n.nspacl", "n.oid", true)} AS line
     FROM pg_namespace n WHERE n.nspname NOT LIKE 'pg\\_%'
   -- Foreign tables too, and the storage options, which carry a view's security_invoker and security_barrier.
-  UNION ALL SELECT 'table ' || c.oid::regclass::text || ' ' || c.relkind::text || ' owner=' || ${owned("pg_get_userbyid(c.relowner)")}
-      || ' rls=' || c.relrowsecurity::text || ' forced=' || c.relforcerowsecurity::text || ' acl=' || ${ACL("c.relacl")}
+  UNION ALL SELECT 'table ' || c.oid::regclass::text || ' ' || c.relkind::text || ' owner=' || ${owned("pg_get_userbyid(c.relowner)", "c.relnamespace")}
+      || ' rls=' || c.relrowsecurity::text || ' forced=' || c.relforcerowsecurity::text || ' acl=' || ${ACL("c.relacl", "c.relnamespace")}
       || ' options=' || coalesce(array_to_string(c.reloptions, ','), '-')
     FROM pg_class c WHERE c.relnamespace IN ${SCHEMAS} AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
   UNION ALL SELECT 'column ' || c.oid::regclass::text || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
-      || ' notnull=' || a.attnotnull::text || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-') || ' acl=' || ${ACL("a.attacl")}
+      || ' notnull=' || a.attnotnull::text || ' default=' || coalesce(pg_get_expr(d.adbin, d.adrelid), '-') || ' acl=' || ${ACL("a.attacl", "c.relnamespace")}
     FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
     WHERE c.relnamespace IN ${SCHEMAS} AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND a.attnum > 0 AND NOT a.attisdropped
   UNION ALL SELECT 'constraint ' || c.oid::regclass::text || ' ' || k.conname || ' ' || pg_get_constraintdef(k.oid)
@@ -134,6 +142,11 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
     FROM pg_policies WHERE schemaname NOT LIKE 'pg\\_%'
   UNION ALL SELECT 'trigger ' || pg_get_triggerdef(t.oid) || ' state=' || t.tgenabled::text
     FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE NOT t.tgisinternal AND c.relnamespace IN ${SCHEMAS}
+  -- PostgreSQL's own functions whose rights were changed from the defaults (pg_read_file, lo_export, pg_ls_dir and the
+  -- like start revoked from PUBLIC): a grant of one to an application role or PUBLIC differs here (Gemini 4 Neon
+  -- finding 6, ninth review). Read whole, the backup role included: nothing of PostgreSQL's is the backup's to hold.
+  UNION ALL SELECT 'catalog-function ' || p.oid::regprocedure::text || ' acl=' || p.proacl::text
+    FROM pg_proc p WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proacl IS NOT NULL
   -- Event triggers fire on DDL and logins in the whole database, whatever schema their function is in.
   UNION ALL SELECT 'event-trigger ' || e.evtname || ' ' || e.evtevent || ' ' || e.evtfoid::regprocedure::text || ' state=' || e.evtenabled::text
       || ' tags=' || coalesce(array_to_string(e.evttags, ','), '-')
@@ -146,11 +159,11 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
     WHERE t.tgisinternal AND c.relnamespace IN ${SCHEMAS}
   -- The whole definition, as PostgreSQL prints it: body, language, volatility, strictness, leakproofness, security
   -- and settings, not the body alone (Argon finding 3, sixth review).
-  UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' owner=' || ${owned("pg_get_userbyid(p.proowner)")}
+  UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' owner=' || ${owned("pg_get_userbyid(p.proowner)", "p.pronamespace")}
       || ' definer=' || p.prosecdef::text
       || ' config=' || coalesce(array_to_string(p.proconfig, ';'), '-')
       || ' definition=' || md5(CASE WHEN p.prokind IN ('f', 'p', 'w') THEN pg_get_functiondef(p.oid) ELSE coalesce(p.prosrc, '') END)
-      || ' public=' || has_function_privilege('public', p.oid, 'EXECUTE')::text || ' acl=' || ${ACL("p.proacl")}
+      || ' public=' || has_function_privilege('public', p.oid, 'EXECUTE')::text || ' acl=' || ${ACL("p.proacl", "p.pronamespace")}
     FROM pg_proc p WHERE p.pronamespace IN ${SCHEMAS}
   -- Rules rewrite what a statement does to a table; views keep theirs in the view line above.
   UNION ALL SELECT 'rule ' || c.oid::regclass::text || ' ' || r.rulename || ' ' || md5(pg_get_ruledef(r.oid))
@@ -158,9 +171,9 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
   -- An index that is not valid or not ready enforces nothing, and prints the same definition.
   UNION ALL SELECT 'index-state ' || c.oid::regclass::text || ' valid=' || i.indisvalid::text || ' ready=' || i.indisready::text
     FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relnamespace IN ${SCHEMAS}
-  UNION ALL SELECT 'type ' || t.oid::regtype::text || ' ' || t.typtype::text || ' owner=' || ${owned("pg_get_userbyid(t.typowner)")}
+  UNION ALL SELECT 'type ' || t.oid::regtype::text || ' ' || t.typtype::text || ' owner=' || ${owned("pg_get_userbyid(t.typowner)", "t.typnamespace")}
       || ' labels=' || coalesce((SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) FROM pg_enum e WHERE e.enumtypid = t.oid), '-')
-      || ' acl=' || ${ACL("t.typacl")}
+      || ' acl=' || ${ACL("t.typacl", "t.typnamespace")}
     FROM pg_type t WHERE t.typnamespace IN ${SCHEMAS} AND t.typtype IN ('e', 'd', 'c')
       AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.reltype = t.oid AND c.relkind <> 'c')
   -- The migration history: the same migrations, with the same checksums, finished. A row marked rolled back is the
@@ -177,8 +190,8 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
  * names Production's database; the reference's own name takes its place.
  */
 export function gateGrantSql(gate, database) {
-  // Applied to the reference always, and to the copy only when step 9 migrated it, as the activation gate does after
-  // migrating Production. Never to any other database.
+  // Applied to the reference only, as the activation gate does after migrating Production; the copy is never written
+  // to this way (ninth review of #195). Never to any database whose name does not mark it disposable.
   if (!DISPOSABLE_NAME.test(database)) throw new Error("gate grants are only ever applied to a disposable restore or its reference");
   const block = /Bootstrap least-privilege runtime grants[\s\S]*?<<'SQL'\n([\s\S]*?)\n\s*SQL\n/.exec(gate.replace(/\r/g, ""))?.[1];
   if (!block) throw new Error("the release's activation gate has no grant step");
@@ -189,6 +202,9 @@ export function gateGrantSql(gate, database) {
  * What the backup role holds on the copy beyond reading: it may connect, use the schema and read tables and sequences,
  * and nothing else, with no grant option. Empty when it holds no more, or does not exist.
  */
+// True or false, never NULL, whether the role exists or not: a comparison with a missing role's oid is NULL, and NULL
+// inside NOT (...) silently keeps or drops rows (Codex F2, ninth review of #195).
+const IS_ROLE = (column, role) => `EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${role}' AND oid = ${column})`;
 // A stored setting is "name=value", the name as it was written: PostgreSQL resolves it without regard to case, and a
 // quoted value keeps its quotes in the catalog.
 const SETTING_NAME = `lower(split_part(c.setting, '=', 1))`;
@@ -228,21 +244,21 @@ export const BACKUP_ROLE_SQL = `SELECT coalesce(string_agg(DISTINCT entry, ', ')
   UNION ALL SELECT 'owns the database' FROM pg_database d
     WHERE d.datname = current_database() AND d.datdba = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
   UNION ALL SELECT t.typname || ':' || a.privilege_type FROM pg_type t CROSS JOIN aclexplode(t.typacl) a
-    WHERE t.typnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+    WHERE t.typnamespace IN ${SCHEMAS} AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
   UNION ALL SELECT 'has the member ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
     WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
   UNION ALL SELECT c.relname || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END
     FROM pg_class c CROSS JOIN aclexplode(c.relacl) a
-    WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+    WHERE c.relnamespace IN ${SCHEMAS} AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
       AND (a.privilege_type <> 'SELECT' OR a.is_grantable)
   UNION ALL SELECT c.relname || '.' || t.attname || ':' || a.privilege_type || CASE WHEN a.is_grantable THEN '+grant' ELSE '' END
     FROM pg_attribute t JOIN pg_class c ON c.oid = t.attrelid CROSS JOIN aclexplode(t.attacl) a
-    WHERE c.relnamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+    WHERE c.relnamespace IN ${SCHEMAS} AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
       AND (a.privilege_type <> 'SELECT' OR a.is_grantable)
   UNION ALL SELECT n.nspname || ':' || a.privilege_type FROM pg_namespace n CROSS JOIN aclexplode(n.nspacl) a
     WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND (a.privilege_type <> 'USAGE' OR a.is_grantable)
   UNION ALL SELECT p.oid::regprocedure::text || ':' || a.privilege_type FROM pg_proc p CROSS JOIN aclexplode(p.proacl) a
-    WHERE p.pronamespace = 'public'::regnamespace AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
+    WHERE p.pronamespace IN ${SCHEMAS} AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup')
   UNION ALL SELECT 'default ' || da.defaclobjtype::text || ':' || a.privilege_type FROM pg_default_acl da CROSS JOIN aclexplode(da.defaclacl) a
     WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND (a.privilege_type <> 'SELECT' OR a.is_grantable)
   UNION ALL SELECT 'member of ' || r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
@@ -268,7 +284,7 @@ export const SESSION_SETTINGS_SQL = `SELECT coalesce(string_agg(DISTINCT
     AND (s.setrole = 0 OR s.setrole IN (SELECT oid FROM pg_roles WHERE rolname IN ('app_user', 'luxia_retention', 'luxia_backup', current_user))
       OR s.setrole = (SELECT relowner FROM pg_class WHERE oid = to_regclass('public._prisma_migrations')))
     AND ${SETTING_NAME} NOT IN (${SESSION_TIMEOUTS.map((name) => `'${name}'`).join(", ")})
-    AND NOT (s.setrole = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND ${SETTING_NAME} = 'default_transaction_read_only'
+    AND NOT (${IS_ROLE("s.setrole", "luxia_backup")} AND ${SETTING_NAME} = 'default_transaction_read_only'
       AND ${SETTING_VALUE} IN ${READ_ONLY_ON})`;
 
 /**
@@ -276,8 +292,14 @@ export const SESSION_SETTINGS_SQL = `SELECT coalesce(string_agg(DISTINCT
  * line. Read through each connection that acts on the copy, so a server started in replica mode is refused even with
  * nothing stored (Codex F2, eighth review).
  */
-export const EFFECTIVE_SETTINGS_SQL = `SELECT current_setting('session_replication_role') || ' row_security=' || current_setting('row_security')`;
-export const EXPECTED_EFFECTIVE_SETTINGS = "origin row_security=on";
+// Read without pinning the search path first, so the search path a session really starts with is what is read, and
+// with the application's own scope settings: one set on the server would place every unscoped session of the runtime
+// role in an organization (Gemini 4 Neon finding 5, ninth review).
+export const EFFECTIVE_SETTINGS_SQL = `SELECT pg_catalog.current_setting('session_replication_role')
+    || ' row_security=' || pg_catalog.current_setting('row_security') || ' search_path=' || pg_catalog.current_setting('search_path')
+    || ' scope=' || coalesce((SELECT pg_catalog.string_agg(name || '=' || setting, ',' ORDER BY name) FROM pg_catalog.pg_settings
+         WHERE (name LIKE 'app.%' OR name LIKE 'luxia.%') AND setting <> ''), 'none')`;
+export const EXPECTED_EFFECTIVE_SETTINGS = 'origin row_security=on search_path="$user", public scope=none';
 
 /**
  * Who may change a setting that a session normally cannot (PostgreSQL 15+ GRANT SET ON PARAMETER): nobody among the
@@ -309,10 +331,15 @@ export const BEFORE_WRITING_SQL = `SELECT coalesce(string_agg(entry, '; ' ORDER 
  * Production owner's name a backup restored as it is keeps. A copy handed to any other role would have every object
  * normalised to "owner" and pass, whoever that role is (Gemini 4 Neon finding 2, eighth review).
  */
-export const MIGRATOR_SQL = `SELECT coalesce(pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid = to_regclass('public._prisma_migrations'))), '-')
-  || ' ' || current_user`;
+// As JSON: a role name may hold spaces, so splitting a joined line let "neondb_owner x" pass as neondb_owner (Gemini 4
+// Neon finding 2, ninth review).
+export const MIGRATOR_SQL = `SELECT json_build_array(coalesce(pg_get_userbyid((SELECT relowner FROM pg_class
+  WHERE oid = to_regclass('public._prisma_migrations'))), '-'), current_user)::text`;
 export function migratorFault(line, productionOwner) {
-  const [migrator, self] = line.split(" ");
+  let parsed;
+  try { parsed = JSON.parse(line); } catch { return `unreadable owner answer: ${line}`; }
+  if (!Array.isArray(parsed) || parsed.length !== 2 || !parsed.every((name) => typeof name === "string")) return `unreadable owner answer: ${line}`;
+  const [migrator, self] = parsed;
   if (!/^[a-z_][a-z0-9_]{0,62}$/.test(productionOwner ?? "")) return `the Production owner's name ${productionOwner} is not a role name`;
   if (migrator === "-") return "the copy has no migration history";
   return migrator === self || migrator === productionOwner ? null
@@ -324,7 +351,9 @@ export function migratorFault(line, productionOwner) {
  * and what it holds on the database beyond connecting — ownership, CREATE through any grant, or CONNECT it may pass on
  * (Argon finding 3 and Gemini 4 Neon finding 3, eighth review). One query for the runtime role and the job's role.
  */
-export const ROLE_SHAPE_SQL = `SELECT current_user || ' superuser=' || r.rolsuper || ' bypassrls=' || r.rolbypassrls
+// session_user too: a privileged login whose stored setting switches it to app_user answers current_user = app_user,
+// and one RESET ROLE gives it back its own powers (Gemini 4 Neon finding 4, ninth review).
+export const ROLE_SHAPE_SQL = `SELECT current_user || ' session=' || session_user || ' superuser=' || r.rolsuper || ' bypassrls=' || r.rolbypassrls
     || ' createrole=' || r.rolcreaterole || ' createdb=' || r.rolcreatedb || ' replication=' || r.rolreplication
     || ' memberships=' || (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid)
     || ' owns=' || ((SELECT count(*) FROM pg_class c WHERE c.relowner = r.oid) + (SELECT count(*) FROM pg_proc p WHERE p.proowner = r.oid)
@@ -336,7 +365,7 @@ export const ROLE_SHAPE_SQL = `SELECT current_user || ' superuser=' || r.rolsupe
         UNION ALL SELECT 'CREATE' WHERE has_database_privilege(r.oid, current_database(), 'CREATE')) held), 'none')
   FROM pg_roles r WHERE r.rolname = current_user`;
 export const expectedRole = (role) =>
-  `${role} superuser=false bypassrls=false createrole=false createdb=false replication=false memberships=0 owns=0 database=none`;
+  `${role} session=${role} superuser=false bypassrls=false createrole=false createdb=false replication=false memberships=0 owns=0 database=none`;
 
 /**
  * Default privileges, judged rather than compared. Production carries rules a reference built from the release cannot
@@ -351,10 +380,14 @@ export const DEFAULT_PRIVILEGES_SQL = `SELECT coalesce(string_agg(DISTINCT pg_ge
     || CASE da.defaclobjtype WHEN 'r' THEN 'tables' WHEN 'S' THEN 'sequences' WHEN 'f' THEN 'functions' WHEN 'T' THEN 'types'
          WHEN 'n' THEN 'schemas' ELSE da.defaclobjtype::text END, '; '), '')
   FROM pg_default_acl da CROSS JOIN aclexplode(da.defaclacl) a
-  WHERE a.grantee <> da.defaclrole AND (a.is_grantable OR NOT (
-      (a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'app_user') AND da.defaclobjtype = 'r' AND a.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE'))
-   OR (a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'app_user') AND da.defaclobjtype = 'S' AND a.privilege_type IN ('USAGE', 'SELECT'))
-   OR (a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'luxia_backup') AND da.defaclobjtype IN ('r', 'S') AND a.privilege_type = 'SELECT')))`;
+  -- EXISTS, never "= (SELECT oid ...)": a role that does not exist made that NULL, and NOT (... OR NULL) dropped the
+  -- very grant it should have refused (Codex F2, ninth review of #195).
+  -- The release's allowances hold for schema public, or for every schema, only: the same grant in another schema is
+  -- not the release's (Argon finding 3, ninth review of #195).
+  WHERE a.grantee <> da.defaclrole AND (a.is_grantable OR da.defaclnamespace NOT IN (0, 'public'::regnamespace) OR NOT (
+      (${IS_ROLE("a.grantee", "app_user")} AND da.defaclobjtype = 'r' AND a.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE'))
+   OR (${IS_ROLE("a.grantee", "app_user")} AND da.defaclobjtype = 'S' AND a.privilege_type IN ('USAGE', 'SELECT'))
+   OR (${IS_ROLE("a.grantee", "luxia_backup")} AND da.defaclobjtype IN ('r', 'S') AND a.privilege_type = 'SELECT')))`;
 
 /** The lines of the reference missing from the copy, and the copy's lines the reference does not have. */
 export function fingerprintFaults(copy, reference) {
