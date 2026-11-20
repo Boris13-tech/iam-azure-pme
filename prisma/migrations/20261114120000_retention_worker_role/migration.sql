@@ -120,6 +120,27 @@ BEGIN
     UNION ALL SELECT 'may grant EXECUTE on ' || p.oid::regprocedure::text || ' to others'
       FROM pg_proc p CROSS JOIN aclexplode(p.proacl) a
       WHERE p.oid = ANY (v_allowed) AND a.grantee = v_role AND a.is_grantable
+    -- What it can really do, however it came by it: pg_shdepend records only what names the role, so a grant to
+    -- PUBLIC reached it unseen (GRANT TRUNCATE ON "Invitation" TO PUBLIC, Codex F1, ninth review of #196). The worker
+    -- touches no table, column or sequence itself, creates nothing, and runs no other definer function.
+    UNION ALL SELECT 'can ' || lower(p) || ' ' || c.oid::regclass::text FROM pg_class c
+      CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) p
+      WHERE c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema')
+        AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND has_table_privilege(v_role, c.oid, p)
+    UNION ALL SELECT 'can use columns of ' || c.oid::regclass::text FROM pg_class c
+      WHERE c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema')
+        AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND has_any_column_privilege(v_role, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES')
+    UNION ALL SELECT 'can ' || lower(p) || ' sequence ' || c.oid::regclass::text FROM pg_class c
+      CROSS JOIN unnest(ARRAY['USAGE', 'SELECT', 'UPDATE']) p
+      WHERE c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema')
+        AND c.relkind = 'S' AND has_sequence_privilege(v_role, c.oid, p)
+    UNION ALL SELECT 'can create in schema ' || n.nspname FROM pg_namespace n
+      WHERE n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema' AND has_schema_privilege(v_role, n.oid, 'CREATE')
+    UNION ALL SELECT 'can create in the database' WHERE has_database_privilege(v_role, v_database, 'CREATE')
+    UNION ALL SELECT 'can execute the definer function ' || p.oid::regprocedure::text FROM pg_proc p
+      WHERE p.prosecdef AND NOT p.oid = ANY (v_allowed)
+        AND p.pronamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema')
+        AND has_function_privilege(v_role, p.oid, 'EXECUTE')
   ) p;
   IF v_problems IS NOT NULL THEN
     RAISE EXCEPTION 'RETENTION_ROLE_UNSAFE' USING ERRCODE = '42501', DETAIL = v_problems;

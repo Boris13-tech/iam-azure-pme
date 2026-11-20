@@ -89,6 +89,13 @@ refused "has the member luxia_db_owner" "the database owner who owns no entry po
 admin "REVOKE luxia_retention FROM luxia_db_owner"
 admin "ALTER DATABASE neondb OWNER TO luxia_owner"
 admin "DROP ROLE luxia_db_owner"
+# A privilege through PUBLIC, which names no role: refused by what the worker can really do (Codex F1, ninth review).
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'GRANT TRUNCATE ON TABLE public."Invitation" TO PUBLIC'
+refused 'can truncate "Invitation"' "TRUNCATE granted to PUBLIC"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'REVOKE TRUNCATE ON TABLE public."Invitation" FROM PUBLIC'
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'GRANT CREATE ON SCHEMA public TO PUBLIC'
+refused "can create in schema public" "CREATE on schema public granted to PUBLIC"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'REVOKE CREATE ON SCHEMA public FROM PUBLIC'
 validate; echo "ok: the creator's admin-only grant alone passes"
 
 step "Rollback, as that owner; then the gate as for a release from before D8.4"
