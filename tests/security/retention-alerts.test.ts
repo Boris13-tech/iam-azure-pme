@@ -24,7 +24,7 @@ function database(status: unknown = STATUS) {
   queryRaw.mockImplementation((...args: unknown[]) => {
     switch (fn(args)) {
       // The job checks it is connected as its own role before anything else (D8.4).
-      case "role": return Promise.resolve([{ role: "luxia_retention" }]);
+      case "role": return Promise.resolve([{ role: "luxia_retention", login: "luxia_retention", replication: "origin", rowSecurity: "on" }]);
       case "purge_transactions": return Promise.resolve([{ counts: { localAuthChallenges: 0, authTransactions: 0, retentionRuns: 0, enforced: args[2] } }]);
       case "purge_invitations": return Promise.resolve([{ counts: { invitations: 0, enforced: false } }]);
       case "pseudonymize_retired": return Promise.resolve([{ counts: { subjects: 0, displayNames: 0, principalNames: 0, enforced: false } }]);

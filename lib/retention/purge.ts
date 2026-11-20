@@ -89,8 +89,13 @@ export async function runRetention(enforce = retentionEnforced(), db = retention
   // The connection must be the job's own role and no other. A URL naming the owner by mistake would run the job with
   // the owner's full rights, undoing the separation without any other sign; app_user's would fail on the first call,
   // but under a less clear name (Gemini 4 Hydrogen F-06, third review of #196).
-  const [connected] = await db.$queryRaw<Array<{ role: string }>>`SELECT current_user::text AS role`;
-  if (connected?.role !== RETENTION_ROLE) throw new Error("RETENTION_CONNECTION_WRONG_ROLE");
+  const [connected] = await db.$queryRaw<Array<{ role: string; login: string; replication: string; rowSecurity: string }>>`SELECT current_user::text AS role,
+    session_user::text AS login, current_setting('session_replication_role') AS replication, current_setting('row_security') AS "rowSecurity"`;
+  if (connected?.role !== RETENTION_ROLE || connected?.login !== RETENTION_ROLE) throw new Error("RETENTION_CONNECTION_WRONG_ROLE");
+  // Its own session, as it really starts, whatever the server, the database or a role default set: in replica mode the
+  // guard triggers would not fire for its writes. The validation reads another role's session and cannot see a server
+  // value masked for that role (Codex F2, twelfth review of #196).
+  if (connected.replication !== "origin" || connected.rowSecurity !== "on") throw new Error("RETENTION_SESSION_UNSAFE");
   const r3 = await purgeExpiredTransactions(enforce, db);
   const enforceR4R6 = enforce && R4_R6_ENFORCE_AVAILABLE;
   const [r4] = await db.$queryRaw<Array<{ counts: RetentionReport["r4"] }>>`

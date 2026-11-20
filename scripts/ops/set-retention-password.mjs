@@ -8,7 +8,7 @@
 //
 // LUXIA_OWNER_DATABASE_URL=<owner, direct endpoint> node scripts/ops/set-retention-password.mjs <new-output-file>
 import { randomBytes } from "node:crypto";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { fail, pgEnv, psql } from "../backup/pg.mjs";
 
 const output = process.argv[2];
@@ -25,14 +25,17 @@ const state = psql(env, `SELECT (SELECT count(*) FROM pg_roles WHERE rolname = '
   (SELECT count(*) FROM public._prisma_migrations WHERE migration_name = '20261114120000_retention_worker_role'
      AND finished_at IS NOT NULL AND rolled_back_at IS NULL);`).stdout.trim();
 if (state !== "1 1") fail("luxia_retention or its migration (20261114120000_retention_worker_role) is not in this database");
-// The role is the narrow one before it is given a login: never enable it on a role that has drifted (Gemini 4 Neon
-// F-02, eleventh review). The activation gate re-runs the full validation; this refuses the plain cases first.
-const posture = psql(env, `SELECT 'superuser=' || rolsuper || ' bypassrls=' || rolbypassrls || ' inherit=' || rolinherit
-  || ' createrole=' || rolcreaterole || ' createdb=' || rolcreatedb || ' replication=' || rolreplication
-  || ' memberships=' || (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid)
-  FROM pg_roles r WHERE r.rolname = 'luxia_retention';`).stdout.trim();
-if (posture !== "superuser=false bypassrls=false inherit=false createrole=false createdb=false replication=false memberships=0") {
-  fail(`luxia_retention is not the narrow role, so no login was enabled: ${posture}`);
+// The role is the narrow one before it is given a login: the release's own validation, the block the migration and the
+// activation gate run, is run here first, so every drift the gate refuses (an attribute, a grant to it or to PUBLIC, a
+// setting, a member, an ownership) also stops the login (Codex F1, twelfth review).
+const migration = readFileSync("prisma/migrations/20261114120000_retention_worker_role/migration.sql", "utf8");
+const from = migration.indexOf("DO $$");
+const validation = from < 0 ? "" : migration.slice(from, migration.indexOf("END $$;", from) + "END $$;".length);
+if (!validation.includes("RETENTION_ROLE_UNSAFE")) fail("the release's worker-role validation was not found: run this from the release's checkout");
+const validated = psql(env, `BEGIN READ ONLY;\n${validation}\nCOMMIT;\n`, { allowFailure: true });
+if (!validated.ok) {
+  const reason = (validated.stderr ?? "").split("\n").find((line) => /DETAIL|RETENTION_ROLE_UNSAFE/.test(line)) ?? "validation failed";
+  fail(`luxia_retention is not the narrow role, so no login was enabled: ${reason}`);
 }
 
 const password = randomBytes(32).toString("base64url"); // 256 bits, URL-safe, no quote to escape
@@ -52,16 +55,30 @@ try {
   fail(`the output file could not be created, so the password was not changed: ${error instanceof Error ? error.code ?? error.message : error}`);
 }
 const set = psql(env, `ALTER ROLE luxia_retention LOGIN PASSWORD '${password}';\n`, { allowFailure: true });
+// A failed client result does not prove the server rolled back: the connection can drop after the change committed.
+// The new credential is tried before anything is discarded (Codex F3, twelfth review).
 if (!set.ok) {
-  try { unlinkSync(output); } catch { /* reported below */ }
-  fail(`the login or the password could not be set, so it is unchanged (error output withheld because it may quote the statement); ${existsSync(output) ? `delete ${output} by hand` : "the output file was removed"}`);
+  const probe = psql(pgEnv(url.toString(), "luxia-retention-password-probe"), "SELECT 1;", { allowFailure: true });
+  if (probe.ok) {
+    console.error("The change was reported as failed, but the new credential logs in: it was applied. Continuing with the checks.");
+  } else {
+    try { unlinkSync(output); } catch { /* reported below */ }
+    fail(`the login or the password was not set: the new credential does not log in (error output withheld because it may quote the statement); ${existsSync(output) ? `delete ${output} by hand` : "the output file was removed"}`);
+  }
 }
 
 // Proves the new credential works and is the expected, narrow role, without printing it.
 const check = psql(pgEnv(url.toString(), "luxia-retention-password-check"),
-  "SELECT current_user || ' session=' || session_user || ' superuser=' || r.rolsuper || ' bypassrls=' || r.rolbypassrls || ' inherit=' || r.rolinherit FROM pg_roles r WHERE r.rolname = current_user;").stdout.trim();
-if (check !== "luxia_retention session=luxia_retention superuser=false bypassrls=false inherit=false") {
-  fail(`the new login answered as an unexpected role: ${check}`);
+  "SELECT current_user || ' session=' || session_user || ' superuser=' || r.rolsuper || ' bypassrls=' || r.rolbypassrls || ' inherit=' || r.rolinherit"
+  + " || ' replication_role=' || current_setting('session_replication_role') || ' row_security=' || current_setting('row_security')"
+  + " FROM pg_roles r WHERE r.rolname = current_user;").stdout.trim();
+// The worker's own session, as it really starts: a server value masked for the validating role shows here (Codex F2,
+// twelfth review).
+if (check !== "luxia_retention session=luxia_retention superuser=false bypassrls=false inherit=false replication_role=origin row_security=on") {
+  // Not a login to leave in place: it is taken back, and the saved credential removed.
+  const revoked = psql(env, "ALTER ROLE luxia_retention NOLOGIN;\n", { allowFailure: true }).ok;
+  try { unlinkSync(output); } catch { /* reported below */ }
+  fail(`the new login does not start as the narrow worker, so its login was ${revoked ? "taken back" : "NOT taken back: disable it by hand"} and ${existsSync(output) ? `${output} must be deleted by hand` : "the output file removed"}: ${check}`);
 }
 console.log(`luxia_retention login enabled and password set; login check: ${check}`);
 console.log(`Declare the content of ${output} as LUXIA_RETENTION_DATABASE_URL on Vercel's Production environment, then delete the file.`);

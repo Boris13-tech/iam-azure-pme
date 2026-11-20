@@ -144,6 +144,13 @@ db "DROP SCHEMA maintenance CASCADE"
 db "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO PUBLIC"
 refused "can execute pg_read_file(text)" "pg_read_file granted to PUBLIC"
 db "REVOKE EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) FROM PUBLIC"
+# PostgreSQL's own closed tables and columns, opened to PUBLIC (Gemini 4 Neon F-02, twelfth review).
+db "GRANT SELECT ON pg_catalog.pg_authid TO PUBLIC"
+refused "can select pg_authid" "pg_authid readable by PUBLIC"
+db "REVOKE SELECT ON pg_catalog.pg_authid FROM PUBLIC"
+db "GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO PUBLIC"
+refused "can read the column pg_subscription.subconninfo" "pg_subscription.subconninfo readable by PUBLIC"
+db "REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM PUBLIC"
 admin "ALTER SYSTEM SET session_replication_role = replica"; admin "SELECT pg_reload_conf()" >/dev/null
 refused "the server starts sessions with session_replication_role=replica" "replica mode for the whole server"
 admin "ALTER SYSTEM RESET session_replication_role"; admin "SELECT pg_reload_conf()" >/dev/null
@@ -171,6 +178,26 @@ grep -q "is not the narrow role, so no login was enabled" "$work/err" || { echo 
 [ "$(login)" = "f" ] && [ ! -e "$work/drifted-url" ] || { echo "FAIL: a drifted role was changed or its URL written"; exit 1; }
 admin "ALTER ROLE luxia_retention NOINHERIT"
 echo "ok: a drifted role is never given a login"
+# Any drift the gate refuses stops the login too: a grant to the role, a setting attached to it (Codex F1, twelfth review).
+script_refused() { if LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/drifted-url" 2>"$work/err"; then
+    echo "FAIL: the script enabled a login with $1"; exit 1; fi
+  grep -q "$2" "$work/err" || { echo "FAIL: $1 refused for another reason: $(cat "$work/err")"; exit 1; }
+  [ "$(login)" = "f" ] && [ ! -e "$work/drifted-url" ] || { echo "FAIL: $1: the role was changed or its URL kept"; exit 1; }
+  echo "ok: $1 stops the login"; }
+db 'GRANT SELECT ON TABLE public."Invitation" TO luxia_retention'
+script_refused "a table privilege granted to the worker" "is not the narrow role, so no login was enabled"
+db 'REVOKE SELECT ON TABLE public."Invitation" FROM luxia_retention'
+admin "ALTER ROLE luxia_retention SET search_path = public"
+script_refused "a setting attached to the worker" "is not the narrow role, so no login was enabled"
+admin "ALTER ROLE luxia_retention RESET search_path"
+# Replica mode for the whole server, hidden from the validating roles by their own protective defaults: the validation
+# cannot see it, the worker's own session does, and the login is taken back (Codex F2, twelfth review).
+admin "ALTER ROLE luxia_owner SET session_replication_role = origin"; admin "ALTER ROLE app_user SET session_replication_role = origin"
+admin "ALTER SYSTEM SET session_replication_role = replica"; admin "SELECT pg_reload_conf()" >/dev/null
+validate; echo "ok: the validation cannot see a server value hidden by the validating roles' own defaults"
+script_refused "replica mode hidden from the validating roles" "does not start as the narrow worker, so its login was taken back"
+admin "ALTER SYSTEM RESET session_replication_role"; admin "SELECT pg_reload_conf()" >/dev/null
+admin "ALTER ROLE luxia_owner RESET session_replication_role"; admin "ALTER ROLE app_user RESET session_replication_role"
 LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/retention-url" >/dev/null
 [ "$(login)" = "t" ] || { echo "FAIL: the role cannot log in after the script"; exit 1; }
 [ "$(psql -X -At "$(cat "$work/retention-url")" -c 'SELECT current_user')" = "luxia_retention" ] || { echo "FAIL: the saved connection does not log in as the worker"; exit 1; }

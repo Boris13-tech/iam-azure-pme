@@ -18,10 +18,10 @@ const STATUS = { R3: { eligible: 3, overdue: 0, oldestHours: 0 }, R4: { eligible
   R6: { eligible: 1, overdue: 0, oldestHours: 0, held: 0 }, holds: { active: 0, overdueReview: 0 } };
 const fn = (args: unknown[]) => (args[0] as string[]).join("?").includes("current_user") ? "role"
   : /luxia_retention_(\w+)\(/.exec((args[0] as string[]).join("?"))?.[1] ?? "?";
-function stubDatabase(status = STATUS, role = "luxia_retention") {
+function stubDatabase(status = STATUS, role = "luxia_retention", session: { login?: string; replication?: string; rowSecurity?: string } = {}) {
   queryRaw.mockImplementation((...args: unknown[]) => {
     switch (fn(args)) {
-      case "role": return Promise.resolve([{ role }]);
+      case "role": return Promise.resolve([{ role, login: session.login ?? role, replication: session.replication ?? "origin", rowSecurity: session.rowSecurity ?? "on" }]);
       case "purge_transactions": return Promise.resolve([{ counts: { localAuthChallenges: 2, authTransactions: 1, retentionRuns: 0, enforced: args[2] } }]);
       case "purge_invitations": return Promise.resolve([{ counts: { ...R4_COUNTS, enforced: args[2] } }]);
       case "pseudonymize_retired": return Promise.resolve([{ counts: { ...R6_COUNTS, enforced: args[2] } }]);
@@ -109,6 +109,22 @@ describe("R3 retention job: authorization", () => {
       expect(calls(), role).toEqual([]);
     }
     expect(read("lib/monitoring/error-reporter.ts")).toContain('"RETENTION_CONNECTION_WRONG_ROLE"');
+  });
+
+  // Codex F2, twelfth review of #196: the job reads its own session as it really starts, since the validation reads
+  // another role's and cannot see a server value masked for it; and a login that only switched to the role is refused.
+  it("refuses a session in replica mode or without row security, and a login that only switched to the role", async () => {
+    for (const session of [{ replication: "replica" }, { replication: "local" }, { rowSecurity: "off" }]) {
+      queryRaw.mockReset();
+      stubDatabase(STATUS, "luxia_retention", session);
+      await expect(runRetention(false)).rejects.toThrow("RETENTION_SESSION_UNSAFE");
+      expect(calls(), JSON.stringify(session)).toEqual([]);
+    }
+    queryRaw.mockReset();
+    stubDatabase(STATUS, "luxia_retention", { login: "neondb_owner" });
+    await expect(runRetention(false)).rejects.toThrow("RETENTION_CONNECTION_WRONG_ROLE");
+    expect(calls()).toEqual([]);
+    expect(read("lib/monitoring/error-reporter.ts")).toContain('"RETENTION_SESSION_UNSAFE"');
   });
 
   it("a record past its period plus 3 days is reported as the backlog alert, with counts and ages only", async () => {

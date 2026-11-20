@@ -151,6 +151,26 @@ BEGIN
       WHERE p.pronamespace = 'pg_catalog'::regnamespace
         AND NOT EXISTS (SELECT 1 FROM aclexplode(ip.initprivs) a WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE')
         AND has_function_privilege(v_role, p.oid, 'EXECUTE')
+    -- And PostgreSQL's own tables and columns that start closed to PUBLIC (pg_authid's password hashes, pg_statistic's
+    -- samples of every table's data, large objects) but that the worker can now read or write (Gemini 4 Neon F-02,
+    -- twelfth review).
+    UNION ALL SELECT 'can ' || lower(k) || ' ' || c.oid::regclass::text FROM pg_class c
+      JOIN pg_init_privs ip ON ip.objoid = c.oid AND ip.classoid = 'pg_class'::regclass AND ip.objsubid = 0
+      CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) k
+      WHERE c.relnamespace = 'pg_catalog'::regnamespace
+        AND NOT EXISTS (SELECT 1 FROM aclexplode(ip.initprivs) a WHERE a.grantee = 0 AND a.privilege_type = k)
+        AND has_table_privilege(v_role, c.oid, k)
+    -- A column closed to PUBLIC at the start, in a table closed to PUBLIC (pg_subscription.subconninfo, for one), that
+    -- the worker can now read.
+    UNION ALL SELECT 'can read the column ' || c.oid::regclass::text || '.' || att.attname FROM pg_attribute att
+      JOIN pg_class c ON c.oid = att.attrelid
+      JOIN pg_init_privs tp ON tp.objoid = c.oid AND tp.classoid = 'pg_class'::regclass AND tp.objsubid = 0
+      WHERE c.relnamespace = 'pg_catalog'::regnamespace AND att.attnum > 0 AND NOT att.attisdropped
+        AND NOT EXISTS (SELECT 1 FROM aclexplode(tp.initprivs) a WHERE a.grantee = 0 AND a.privilege_type = 'SELECT')
+        AND NOT EXISTS (SELECT 1 FROM pg_init_privs cp CROSS JOIN aclexplode(cp.initprivs) a
+          WHERE cp.objoid = c.oid AND cp.classoid = 'pg_class'::regclass AND cp.objsubid = att.attnum
+            AND a.grantee = 0 AND a.privilege_type = 'SELECT')
+        AND has_column_privilege(v_role, c.oid, att.attnum, 'SELECT')
     -- The same two settings changed for the whole server (ALTER SYSTEM, the configuration file), which no catalog row
     -- names: read as this session's defaults (Gemini 4 Neon F-03, eleventh review).
     UNION ALL SELECT 'the server starts sessions with ' || name || '=' || reset_val FROM pg_settings
