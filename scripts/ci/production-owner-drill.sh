@@ -128,12 +128,54 @@ db "REVOKE CREATE ON DATABASE neondb FROM PUBLIC"
 admin "ALTER DATABASE neondb SET session_replication_role = replica"
 refused "every session here starts with session_replication_role=replica" "replica mode set for the whole database"
 admin "ALTER DATABASE neondb RESET session_replication_role"
+# The protective values set explicitly are not a fault (Codex F3, eleventh review).
+admin "ALTER DATABASE neondb SET session_replication_role = origin"
+validate; echo "ok: session_replication_role = origin set for the whole database passes"
+admin "ALTER DATABASE neondb RESET session_replication_role"
+# A schema of the owner's other than public, open to PUBLIC, with a definer function in it (Codex F2, eleventh review).
+db "CREATE SCHEMA maintenance"
+db "GRANT USAGE ON SCHEMA maintenance TO PUBLIC"
+db "CREATE FUNCTION maintenance.drill_definer() RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS 'SELECT 1'"
+db "GRANT EXECUTE ON FUNCTION maintenance.drill_definer() TO PUBLIC"
+refused "can execute the definer function maintenance.drill_definer()" "a definer function outside public executable by PUBLIC"
+db "DROP SCHEMA maintenance CASCADE"
+# A function PostgreSQL keeps from PUBLIC, granted to PUBLIC; and replica mode for the whole server (Gemini 4 Neon
+# F-01 and F-03, eleventh review).
+db "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO PUBLIC"
+refused "can execute pg_read_file(text)" "pg_read_file granted to PUBLIC"
+db "REVOKE EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) FROM PUBLIC"
+admin "ALTER SYSTEM SET session_replication_role = replica"; admin "SELECT pg_reload_conf()" >/dev/null
+refused "the server starts sessions with session_replication_role=replica" "replica mode for the whole server"
+admin "ALTER SYSTEM RESET session_replication_role"; admin "SELECT pg_reload_conf()" >/dev/null
 definer="$(psql -X -At "${base}/neondb" -c "SELECT p.oid::regprocedure::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef AND p.proname NOT LIKE 'luxia_retention%' ORDER BY 1 LIMIT 1")"
 [ -n "$definer" ] || { echo "FAIL: no other definer function to test with"; exit 1; }
 db "GRANT EXECUTE ON FUNCTION $definer TO PUBLIC"
 refused "can execute the definer function $definer" "another definer function executable by PUBLIC"
 db "REVOKE EXECUTE ON FUNCTION $definer FROM PUBLIC"
 validate; echo "ok: the creator's admin-only grant alone passes"
+
+step "The operator's password script, as Production's owner"
+login() { psql -X -At "$OWNER_URL" -c "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'luxia_retention'"; }
+[ "$(login)" = "f" ] || { echo "FAIL: luxia_retention can log in before the script"; exit 1; }
+# An output file that cannot be created: nothing changes, the role still cannot log in (Codex F1, eleventh review).
+if LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/missing/dir/url" 2>"$work/err"; then
+  echo "FAIL: the script succeeded without its output file"; exit 1; fi
+grep -q "so the password was not changed" "$work/err" || { echo "FAIL: refused for another reason: $(cat "$work/err")"; exit 1; }
+[ "$(login)" = "f" ] || { echo "FAIL: the role was changed although its new password was not saved"; exit 1; }
+echo "ok: an output file that cannot be created changes nothing"
+# A role that has drifted is never given a login (Gemini 4 Neon F-02, eleventh review).
+admin "ALTER ROLE luxia_retention INHERIT"
+if LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/drifted-url" 2>"$work/err"; then
+  echo "FAIL: the script enabled a login on a drifted role"; exit 1; fi
+grep -q "is not the narrow role, so no login was enabled" "$work/err" || { echo "FAIL: refused for another reason: $(cat "$work/err")"; exit 1; }
+[ "$(login)" = "f" ] && [ ! -e "$work/drifted-url" ] || { echo "FAIL: a drifted role was changed or its URL written"; exit 1; }
+admin "ALTER ROLE luxia_retention NOINHERIT"
+echo "ok: a drifted role is never given a login"
+LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/retention-url" >/dev/null
+[ "$(login)" = "t" ] || { echo "FAIL: the role cannot log in after the script"; exit 1; }
+[ "$(psql -X -At "$(cat "$work/retention-url")" -c 'SELECT current_user')" = "luxia_retention" ] || { echo "FAIL: the saved connection does not log in as the worker"; exit 1; }
+validate; echo "ok: the script enables the login, saves a working connection, and the worker stays narrow"
+admin "ALTER ROLE luxia_retention NOLOGIN PASSWORD NULL"
 
 step "Rollback, as that owner; then the gate as for a release from before D8.4"
 # Production's role can log in (the operator enabled it), so the rollback must be seen to take that away: without
