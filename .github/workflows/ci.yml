@@ -267,6 +267,126 @@ jobs:
         LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
         LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored
 
+    # G4, steps 9 to 11, run for real on every change: the same command the operator runs after restoring a real
+    # backup, on this restored copy, against a reference migrated from this commit (Gemini 4 Hydrogen finding 6).
+    - name: G4 post-restore command passes on the restored copy
+      run: |
+        PATH="$PG_BIN:$PATH" node scripts/ops/g4-post-restore.mjs --release "$GITHUB_SHA" --backup-age-minutes 0 \
+          --started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --report "$RUNNER_TEMP/g4-post-restore-report.json"
+      env:
+        LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
+        LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored
+        # Used only once the copy has D8.4, whose job runs as its own role.
+        LUXIA_RESTORE_RETENTION_URL: postgresql://luxia_retention:retention_password@localhost:5432/luxia_restored
+
+    # And it fails when it should, on the same copy: a tenant policy weakened, then a setting that silences the guards
+    # for every session. Each is undone afterwards; a pass on either is a failure of this step (seventh review).
+    - name: G4 post-restore command fails on a weakened copy
+      run: |
+        set -eu
+        U="postgresql://prisma:prisma_password@localhost:5432/luxia_restored"
+        g4() { PATH="$PG_BIN:$PATH" node scripts/ops/g4-post-restore.mjs --release "$GITHUB_SHA" --backup-age-minutes 0 \
+          --started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --report "$RUNNER_TEMP/g4-negative.json" > "$RUNNER_TEMP/g4-negative.out" 2>&1; }
+        expect_fail() { if g4; then echo "FAIL: G4 passed $1"; exit 1; fi
+          grep -q "$2" "$RUNNER_TEMP/g4-negative.out" || { echo "FAIL: G4 refused $1 for another reason"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+          echo "ok: G4 refused $1"; }
+        policy="$("$PG_BIN/psql" -X -At "$U" -c "SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'Subject' LIMIT 1")"
+        qual="$("$PG_BIN/psql" -X -At "$U" -c "SELECT qual FROM pg_policies WHERE schemaname = 'public' AND tablename = 'Subject' AND policyname = '$policy'")"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER POLICY \"$policy\" ON \"Subject\" USING (true)"
+        expect_fail "a tenant policy weakened to USING (true)" "missing or changed: policy public.Subject $policy"
+        # A copy that failed a check is not handed to the daily job (Gemini 4 Neon finding 6, eighth review).
+        grep -q "FAIL the daily job was not run on a copy that already failed" "$RUNNER_TEMP/g4-negative.out" \
+          || { echo "FAIL: the daily job ran on a copy that had failed"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: the daily job was not run on it"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER POLICY \"$policy\" ON \"Subject\" USING ($qual)"
+        # The runtime role allowed to switch the guards off for its own session, with no attribute or setting to show it.
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "GRANT SET ON PARAMETER session_replication_role TO app_user"
+        expect_fail "SET on session_replication_role granted to app_user" "app_user may SET session_replication_role"
+        grep -q "nothing was migrated or written" "$RUNNER_TEMP/g4-negative.out" || { echo "FAIL: not stopped before writing"; exit 1; }
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "REVOKE SET ON PARAMETER session_replication_role FROM app_user"
+        # CONNECT that the runtime role may pass on.
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "GRANT CONNECT ON DATABASE luxia_restored TO app_user WITH GRANT OPTION"
+        expect_fail "CONNECT with the grant option for app_user" "database=CONNECT+grant"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "REVOKE GRANT OPTION FOR CONNECT ON DATABASE luxia_restored FROM app_user"
+        # A server started in replica mode, with nothing stored for any role: read as each connection really sees it
+        # (Codex F2, eighth review; Gemini 4 Neon finding 7, ninth review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER SYSTEM SET session_replication_role = replica" -c "SELECT pg_reload_conf()" >/dev/null
+        expect_fail "a server whose sessions start in replica mode" "owner: replica row_security=on"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER SYSTEM RESET session_replication_role" -c "SELECT pg_reload_conf()" >/dev/null
+        # Read access to every future table for PUBLIC, through default privileges (Codex F2, ninth review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO PUBLIC"
+        expect_fail "SELECT on new tables for PUBLIC by default" "gives PUBLIC SELECT on new tables"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM PUBLIC"
+        # The audit journal made unlogged, which a crash empties without any write the guards could stop (Codex F1,
+        # eleventh review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."CanonicalAdminAuditEvent" SET UNLOGGED'
+        expect_fail "an unlogged audit journal" 'table public."CanonicalAdminAuditEvent" r owner=owner'
+        grep -q 'persistence=u' "$RUNNER_TEMP/g4-negative.out" || { echo "FAIL: the difference is not the persistence"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."CanonicalAdminAuditEvent" SET LOGGED'
+        # A protected table made to inherit an unprotected one, by the owner without superuser rights (Codex F1, twelfth
+        # review): the runtime role would read the child's rows through the parent.
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."Subject" INHERIT public."Tenant"'
+        expect_fail "a protected table inheriting an unprotected one" 'not in the release: inherits public."Subject" from public."Tenant"'
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."Subject" NO INHERIT public."Tenant"'
+        # An operator that flips an enum comparison, and a column given another collation, each by the owner without
+        # superuser rights (Gemini 4 Hydrogen findings 1 and 2, twelfth review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'CREATE OPERATOR public.= (LEFTARG = anyenum, RIGHTARG = anyenum, FUNCTION = pg_catalog.enum_ne)'
+        expect_fail "an operator added to schema public" 'not in the release: operator public.=(anyenum,anyenum)'
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'DROP OPERATOR public.= (anyenum, anyenum)'
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'CREATE COLLATION public.ci_c (locale = '"'"'C'"'"')' \
+          -c 'ALTER TABLE public."Organization" ALTER COLUMN "slug" TYPE text COLLATE public.ci_c'
+        expect_fail "a column given another collation" 'collation=public.ci_c'
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c 'ALTER TABLE public."Organization" ALTER COLUMN "slug" TYPE text COLLATE "default"' -c 'DROP COLLATION public.ci_c'
+        # An event trigger, refused before any other connection or read (Gemini 4 Neon finding 1, eleventh review).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "CREATE FUNCTION public.ci_evt() RETURNS event_trigger LANGUAGE plpgsql AS 'BEGIN END'" \
+          -c "CREATE EVENT TRIGGER ci_evt ON ddl_command_start EXECUTE FUNCTION public.ci_evt()"
+        expect_fail "an event trigger on the copy" "the copy has event triggers (ci_evt on ddl_command_start)"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "DROP EVENT TRIGGER ci_evt" -c "DROP FUNCTION public.ci_evt()"
+        # One of PostgreSQL's own restricted functions granted to the runtime role (Gemini 4 Hydrogen finding 3).
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO app_user"
+        expect_fail "pg_read_file granted to app_user" "catalog-function pg_read_file(text)"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "REVOKE EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) FROM app_user"
+        # A copy behind the release is refused, never migrated here (Codex F1, ninth review): a second copy, one
+        # migration short.
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "postgresql://prisma:prisma_password@localhost:5432/postgres" -c "CREATE DATABASE luxia_restore_behind TEMPLATE luxia_restored"
+        B="postgresql://prisma:prisma_password@localhost:5432/luxia_restore_behind"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$B" -c "DELETE FROM _prisma_migrations WHERE migration_name = (SELECT max(migration_name) FROM _prisma_migrations)"
+        if LUXIA_RESTORE_TARGET_URL="$B" LUXIA_RESTORE_APP_URL="postgresql://app_user:app_password@localhost:5432/luxia_restore_behind" \
+          LUXIA_RESTORE_RETENTION_URL= g4; then echo "FAIL: G4 passed a copy behind the release"; exit 1; fi
+        grep -q "the copy is not at the release (1 pending, 0 not in the release)" "$RUNNER_TEMP/g4-negative.out" \
+          || { echo "FAIL: G4 refused the copy behind the release for another reason"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: G4 refused a copy behind the release, with nothing written"
+        "$PG_BIN/psql" -X -q "postgresql://prisma:prisma_password@localhost:5432/postgres" -c "DROP DATABASE luxia_restore_behind WITH (FORCE)"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored SET session_replication_role = replica"
+        expect_fail "every session starting in replica mode" "session_replication_role=replica"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$U" -c "ALTER ROLE ALL IN DATABASE luxia_restored RESET session_replication_role"
+        g4 || { echo "FAIL: the restored copy no longer passes after the reverts"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: the copy passes again once both are undone"
+        # A copy owned as Production's is: every object of the schema handed to an owner that is not the role running
+        # this, as a backup restored as it is keeps it. It must pass, and an object handed back to the role running this
+        # must not (Gemini 4 Neon finding 5, tenth review).
+        P="postgresql://prisma:prisma_password@localhost:5432/postgres"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$P" -c "CREATE ROLE neondb_owner_ci NOLOGIN BYPASSRLS" -c "CREATE DATABASE luxia_restore_owned TEMPLATE luxia_restored"
+        O="postgresql://prisma:prisma_password@localhost:5432/luxia_restore_owned"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$O" -f scripts/ci/hand-schema-to-owner.sql -v owner=neondb_owner_ci
+        owned() { LUXIA_RESTORE_TARGET_URL="$O" LUXIA_RESTORE_APP_URL="postgresql://app_user:app_password@localhost:5432/luxia_restore_owned" \
+          LUXIA_RESTORE_RETENTION_URL="postgresql://luxia_retention:retention_password@localhost:5432/luxia_restore_owned" \
+          PATH="$PG_BIN:$PATH" node scripts/ops/g4-post-restore.mjs --release "$GITHUB_SHA" --backup-age-minutes 0 --production-owner neondb_owner_ci \
+          --started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --report "$RUNNER_TEMP/g4-owned.json" > "$RUNNER_TEMP/g4-negative.out" 2>&1; }
+        owned || { echo "FAIL: a copy owned as Production's is refused"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: a copy owned as Production's passes"
+        fn="$("$PG_BIN/psql" -X -q -At "$O" -c "SET search_path = pg_catalog" -c "SELECT p.oid::regprocedure::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef ORDER BY 1 LIMIT 1")"
+        "$PG_BIN/psql" -X -q -v ON_ERROR_STOP=1 "$O" -c "ALTER FUNCTION $fn OWNER TO prisma"
+        if owned; then echo "FAIL: G4 passed a definer function handed to the role running it"; exit 1; fi
+        grep -q "missing or changed: function $fn owner=owner" "$RUNNER_TEMP/g4-negative.out" \
+          || { echo "FAIL: G4 refused the handed-over function for another reason"; cat "$RUNNER_TEMP/g4-negative.out"; exit 1; }
+        echo "ok: G4 refused a definer function handed to the role running it"
+        "$PG_BIN/psql" -X -q "$P" -c "DROP DATABASE luxia_restore_owned WITH (FORCE)"
+      env:
+        LUXIA_RESTORE_TARGET_URL: postgresql://prisma:prisma_password@localhost:5432/luxia_restored
+        LUXIA_RESTORE_APP_URL: postgresql://app_user:app_password@localhost:5432/luxia_restored
+        LUXIA_RESTORE_RETENTION_URL: postgresql://luxia_retention:retention_password@localhost:5432/luxia_restored
+
     - name: The application's PostgreSQL suites pass on the restored database
       run: |
         npm run test:resources

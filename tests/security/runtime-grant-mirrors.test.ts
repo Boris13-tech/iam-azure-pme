@@ -21,16 +21,25 @@ function narrowing(text: string): string[] {
 }
 
 describe("runtime grants: the CI bootstrap and the Production activation gate narrow the same way", () => {
-  const bootstrap = narrowing(read("scripts/ci/bootstrap-app-user.sql"));
+  // The default privileges for future tables are not a narrowing; both sides set them and are compared below.
+  const isDefault = (line: string) => line.startsWith("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES") || line.startsWith("GRANT USAGE, SELECT ON SEQUENCES");
+  const bootstrapText = read("scripts/ci/bootstrap-app-user.sql");
+  const bootstrap = narrowing(bootstrapText).filter((line) => !isDefault(line));
   const gateText = read(".github/workflows/production-activation-gate.yml");
   const block = /Bootstrap least-privilege runtime grants[\s\S]*?<<'SQL'\n([\s\S]*?)\n\s*SQL\n/.exec(gateText)?.[1] ?? "";
-  // The gate's default privileges for future tables are its own (CI creates app_user after the migrations).
-  const gate = narrowing(block).filter((line) => !line.startsWith("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES")
-    && !line.startsWith("GRANT USAGE, SELECT ON SEQUENCES"));
+  const gate = narrowing(block).filter((line) => !isDefault(line));
 
   it("the same table and sequence narrowing, statement for statement", () => {
     expect(bootstrap.length).toBeGreaterThan(5);
     expect(gate).toEqual(bootstrap);
+  });
+
+  // The G4 post-restore command compares a restored copy with a reference given the gate's grants; CI's copy only
+  // matched once the bootstrap set the same default privileges (review of #195).
+  it("the same default privileges for tables and sequences created later", () => {
+    const defaults = (text: string) => text.replace(/\s+/g, " ").match(/ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT [A-Z, ]+ ON (TABLES|SEQUENCES) TO app_user;/g)?.sort() ?? [];
+    expect(defaults(bootstrapText)).toHaveLength(2);
+    expect(defaults(bootstrapText)).toEqual(defaults(block));
   });
 
   it("every owner-only table, the erasure record included, is taken back from the runtime role", () => {
