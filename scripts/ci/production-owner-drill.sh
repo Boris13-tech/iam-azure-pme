@@ -105,6 +105,34 @@ psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'REVOKE TRUNCATE ON TABLE publ
 psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'GRANT CREATE ON SCHEMA public TO PUBLIC'
 refused "can create in schema public" "CREATE on schema public granted to PUBLIC"
 psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'REVOKE CREATE ON SCHEMA public FROM PUBLIC'
+# PostgreSQL 17's MAINTAIN, and a protected setting, both through PUBLIC (Codex F1 and F2, tenth review).
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'GRANT MAINTAIN ON TABLE public."Invitation" TO PUBLIC'
+refused 'can maintain "Invitation"' "MAINTAIN granted to PUBLIC"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'REVOKE MAINTAIN ON TABLE public."Invitation" FROM PUBLIC'
+admin "GRANT SET ON PARAMETER session_replication_role TO PUBLIC"
+refused "can set the parameter session_replication_role" "SET on session_replication_role granted to PUBLIC"
+admin "REVOKE SET ON PARAMETER session_replication_role FROM PUBLIC"
+# Each remaining effective check, through PUBLIC: a column, a sequence, CREATE on the database, and another definer
+# function (Gemini 4 Hydrogen F-03, tenth review).
+db() { psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "$1"; }
+db 'GRANT SELECT ("id") ON TABLE public."Invitation" TO PUBLIC'
+refused 'can use columns of "Invitation"' "a column privilege granted to PUBLIC"
+db 'REVOKE SELECT ("id") ON TABLE public."Invitation" FROM PUBLIC'
+seq="$(psql -X -At "${base}/neondb" -c "SELECT c.oid::regclass::text FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'S' ORDER BY 1 LIMIT 1")"
+if [ -n "$seq" ]; then db "GRANT USAGE ON SEQUENCE $seq TO PUBLIC"; refused "can usage sequence $seq" "a sequence privilege granted to PUBLIC"
+  db "REVOKE USAGE ON SEQUENCE $seq FROM PUBLIC"; else db "CREATE SEQUENCE public.luxia_drill_seq"; db "GRANT USAGE ON SEQUENCE public.luxia_drill_seq TO PUBLIC"
+  refused "can usage sequence luxia_drill_seq" "a sequence privilege granted to PUBLIC"; db "DROP SEQUENCE public.luxia_drill_seq"; fi
+db "GRANT CREATE ON DATABASE neondb TO PUBLIC"
+refused "can create in the database" "CREATE on the database granted to PUBLIC"
+db "REVOKE CREATE ON DATABASE neondb FROM PUBLIC"
+admin "ALTER DATABASE neondb SET session_replication_role = replica"
+refused "every session here starts with session_replication_role=replica" "replica mode set for the whole database"
+admin "ALTER DATABASE neondb RESET session_replication_role"
+definer="$(psql -X -At "${base}/neondb" -c "SELECT p.oid::regprocedure::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef AND p.proname NOT LIKE 'luxia_retention%' ORDER BY 1 LIMIT 1")"
+[ -n "$definer" ] || { echo "FAIL: no other definer function to test with"; exit 1; }
+db "GRANT EXECUTE ON FUNCTION $definer TO PUBLIC"
+refused "can execute the definer function $definer" "another definer function executable by PUBLIC"
+db "REVOKE EXECUTE ON FUNCTION $definer FROM PUBLIC"
 validate; echo "ok: the creator's admin-only grant alone passes"
 
 step "Rollback, as that owner; then the gate as for a release from before D8.4"

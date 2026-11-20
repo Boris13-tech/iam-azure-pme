@@ -9,8 +9,8 @@
 -- luxia_retention holds EXECUTE on those four functions and nothing else of its own: no table, no sequence, no other
 -- definer function, whether granted to it or to PUBLIC (the validation below reads what it can really do). Like every
 -- role it keeps what PUBLIC holds by PostgreSQL's defaults: CONNECT and TEMPORARY, and EXECUTE on ordinary functions.
--- It is created NOLOGIN here; the operator enables its login, sets its password with psql's \password, and declares LUXIA_RETENTION_DATABASE_URL on the
--- Production environment, which the job's own connection uses. app_user keeps no EXECUTE on any of them, and the
+-- It is created NOLOGIN here; the operator enables its login and sets its password with
+-- scripts/ops/set-retention-password.mjs, and declares LUXIA_RETENTION_DATABASE_URL on the Production environment, which the job's own connection uses. app_user keeps no EXECUTE on any of them, and the
 -- activation gate's posture check refuses a Production where it does.
 -- Lifting the dry run of R4 and R6 is a separate reviewed change, which this one and the lifecycle guard (#148) unblock.
 SET lock_timeout = '5s';
@@ -125,23 +125,38 @@ BEGIN
     -- What it can really do, however it came by it: pg_shdepend records only what names the role, so a grant to
     -- PUBLIC reached it unseen (GRANT TRUNCATE ON "Invitation" TO PUBLIC, Codex F1, ninth review of #196). The worker
     -- touches no table, column or sequence itself, creates nothing, and runs no other definer function.
+    -- Read in schema public, where the application's objects are: other schemas, such as Neon's own neon_auth in
+    -- Production, are the platform's, whose grants to PUBLIC no release controls (Gemini 4 Hydrogen F-02, tenth review).
     UNION ALL SELECT 'can ' || lower(p) || ' ' || c.oid::regclass::text FROM pg_class c
-      CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) p
-      WHERE c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema')
+      -- MAINTAIN exists from PostgreSQL 17 (Production's version); naming it on 15 would raise (Codex F1, tenth review).
+      CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']
+        || CASE WHEN current_setting('server_version_num')::int >= 170000 THEN ARRAY['MAINTAIN'] ELSE ARRAY[]::text[] END) p
+      WHERE c.relnamespace = 'public'::regnamespace
         AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND has_table_privilege(v_role, c.oid, p)
     UNION ALL SELECT 'can use columns of ' || c.oid::regclass::text FROM pg_class c
-      WHERE c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema')
+      WHERE c.relnamespace = 'public'::regnamespace
         AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND has_any_column_privilege(v_role, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES')
     UNION ALL SELECT 'can ' || lower(p) || ' sequence ' || c.oid::regclass::text FROM pg_class c
       CROSS JOIN unnest(ARRAY['USAGE', 'SELECT', 'UPDATE']) p
-      WHERE c.relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema')
+      WHERE c.relnamespace = 'public'::regnamespace
         AND c.relkind = 'S' AND has_sequence_privilege(v_role, c.oid, p)
     UNION ALL SELECT 'can create in schema ' || n.nspname FROM pg_namespace n
-      WHERE n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema' AND has_schema_privilege(v_role, n.oid, 'CREATE')
+      WHERE n.nspname = 'public' AND has_schema_privilege(v_role, n.oid, 'CREATE')
     UNION ALL SELECT 'can create in the database' WHERE has_database_privilege(v_role, v_database, 'CREATE')
+    -- The same silencing set for every role or for the whole database, which names no role: only the two settings that
+    -- switch the guards or the row policies off, so a platform's own database settings never refuse a Production
+    -- (Gemini 4 Neon F-05, tenth review).
+    UNION ALL SELECT 'every session here starts with ' || c.setting FROM pg_db_role_setting rs
+      CROSS JOIN unnest(rs.setconfig) c(setting)
+      WHERE rs.setrole = 0 AND rs.setdatabase IN (0, v_database)
+        AND lower(split_part(c.setting, '=', 1)) IN ('session_replication_role', 'row_security')
+    -- A setting a session normally cannot change, granted to PUBLIC or to the worker (GRANT SET ON PARAMETER, from
+    -- PostgreSQL 15): session_replication_role alone would let it silence every guard trigger (Codex F2, tenth review).
+    UNION ALL SELECT 'can ' || lower(k) || ' the parameter ' || pa.parname FROM pg_parameter_acl pa
+      CROSS JOIN unnest(ARRAY['SET', 'ALTER SYSTEM']) k WHERE has_parameter_privilege(v_role, pa.parname, k)
     UNION ALL SELECT 'can execute the definer function ' || p.oid::regprocedure::text FROM pg_proc p
       WHERE p.prosecdef AND NOT p.oid = ANY (v_allowed)
-        AND p.pronamespace IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema')
+        AND p.pronamespace = 'public'::regnamespace
         AND has_function_privilege(v_role, p.oid, 'EXECUTE')
   ) p;
   IF v_problems IS NOT NULL THEN

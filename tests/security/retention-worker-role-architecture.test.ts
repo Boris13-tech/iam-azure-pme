@@ -129,6 +129,23 @@ describe("D8.4: the retention job's own role", () => {
     expect(ci.match(/LUXIA_RETENTION_DATABASE_URL: postgresql:\/\/luxia_retention:/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
+  it("the operator sets the worker's password by script, as for the backup role: generated, never printed, never typed", () => {
+    // Neon refuses a SCRAM verifier, so psql's \password cannot work there (Codex F3, tenth review).
+    const script = read("scripts/ops/set-retention-password.mjs");
+    expect(script).toContain("randomBytes(32).toString(\"base64url\")");
+    expect(script).toContain("ALTER ROLE luxia_retention LOGIN PASSWORD '${password}';");
+    expect(script).toContain("{ allowFailure: true }");
+    expect(script).toContain("error output withheld");
+    expect(script).toContain("writeFileSync(output, url.toString(), { flag: \"wx\", mode: 0o600 });");
+    expect(script).toContain("luxia_retention session=luxia_retention superuser=false bypassrls=false inherit=false");
+    // The password is never printed: no console line names it, and the only file written is the new one.
+    for (const line of script.split("\n").filter((l) => /console\.(log|error)/.test(l))) expect(line).not.toMatch(/password\b(?!\s+set)/i);
+    expect(script).not.toContain("process.argv[3]");
+    const design = read("docs/architecture/RETENTION-AND-MINIMIZATION-DESIGN.md");
+    expect(design).toContain("scripts/ops/set-retention-password.mjs");
+    expect(design).not.toContain("WITH LOGIN PASSWORD '<generated>'");
+  });
+
   it("the job has no fallback to the application's connection, and its refusal is a listed code", () => {
     // The job's default connection is its own role's; nothing in the retention path imports the application's client.
     expect(purge).toContain(`import { retentionPrisma } from "@/lib/db/retention-prisma";`);

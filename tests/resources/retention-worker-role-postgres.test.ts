@@ -58,7 +58,8 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
   it("the role holds nothing else: no table, no sequence, not even a read", async () => {
     const [reach] = await owner.$queryRaw<Array<{ tables: string; sequences: string }>>`
       SELECT coalesce((SELECT string_agg(c.relname || ':' || p, ',' ORDER BY c.relname) FROM pg_class c
-          CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
+          CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']
+            || CASE WHEN current_setting('server_version_num')::int >= 170000 THEN ARRAY['MAINTAIN'] ELSE ARRAY[]::text[] END) p
           WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p')
             AND has_table_privilege('luxia_retention', c.oid, p)), '') AS tables,
         coalesce((SELECT string_agg(c.relname || ':' || p, ',' ORDER BY c.relname) FROM pg_class c
@@ -161,6 +162,9 @@ describe.runIf(enabled)("D8.4: the retention job has its own role (PostgreSQL)",
       [["CREATE FUNCTION public.luxia_retention_status(probe text) RETURNS integer LANGUAGE sql AS 'SELECT 1'",
         "GRANT EXECUTE ON FUNCTION public.luxia_retention_status(text) TO luxia_retention"],
         ["DROP FUNCTION public.luxia_retention_status(text)"], "function luxia_retention_status(text)"],
+      // The same through PUBLIC, which names no role (Codex F2, tenth review).
+      [["GRANT SET ON PARAMETER session_replication_role TO PUBLIC"],
+        ["REVOKE SET ON PARAMETER session_replication_role FROM PUBLIC"], "can set the parameter session_replication_role"],
       [["GRANT SET ON PARAMETER session_replication_role TO luxia_retention"],
         ["REVOKE SET ON PARAMETER session_replication_role FROM luxia_retention"], "parameter session_replication_role"],
       [["ALTER ROLE luxia_retention BYPASSRLS"], ["ALTER ROLE luxia_retention NOBYPASSRLS"], "bypassrls"],
