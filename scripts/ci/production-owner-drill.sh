@@ -132,6 +132,11 @@ admin "ALTER DATABASE neondb RESET session_replication_role"
 admin "ALTER DATABASE neondb SET session_replication_role = origin"
 validate; echo "ok: session_replication_role = origin set for the whole database passes"
 admin "ALTER DATABASE neondb RESET session_replication_role"
+# A large object of the owner's, opened to PUBLIC, without superuser rights (Codex F2, fourteenth review).
+lo="$(psql -X -At "$OWNER_URL" -c "SELECT lo_from_bytea(0, 'x')")"
+psql -X -q -v ON_ERROR_STOP=1 "$OWNER_URL" -c "GRANT SELECT, UPDATE ON LARGE OBJECT $lo TO PUBLIC"
+refused "the large object $lo" "a large object opened to PUBLIC by its non-superuser owner"
+psql -X -q -v ON_ERROR_STOP=1 "$OWNER_URL" -c "SELECT lo_unlink($lo)" >/dev/null
 # A schema of the owner's other than public, open to PUBLIC, with a definer function in it (Codex F2, eleventh review).
 db "CREATE SCHEMA maintenance"
 db "GRANT USAGE ON SCHEMA maintenance TO PUBLIC"

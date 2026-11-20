@@ -144,6 +144,11 @@ BEGIN
     UNION ALL SELECT 'can create in schema ' || n.nspname FROM pg_namespace n
       WHERE n.oid IN (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname NOT IN ('information_schema', 'neon_auth')) AND has_schema_privilege(v_role, n.oid, 'CREATE')
     UNION ALL SELECT 'can create in the database' WHERE has_database_privilege(v_role, v_database, 'CREATE')
+    -- Large objects carry their own rights, which a non-superuser can open to PUBLIC on one of its own: none may reach
+    -- the worker, which uses none (Codex F2, fourteenth review). The release stores no large object.
+    UNION ALL SELECT 'can ' || lower(a.privilege_type) || ' the large object ' || lo.oid::text
+      FROM pg_largeobject_metadata lo CROSS JOIN aclexplode(lo.lomacl) a
+      WHERE a.grantee = 0 OR a.grantee = v_role OR pg_has_role(v_role, a.grantee, 'USAGE')
     -- PostgreSQL's own functions that start revoked from PUBLIC (pg_read_file, lo_export and the like, per
     -- pg_init_privs) but that the worker can execute now, through any grant (Gemini 4 Neon F-01, eleventh review).
     UNION ALL SELECT 'can execute ' || p.oid::regprocedure::text FROM pg_proc p
