@@ -6,8 +6,10 @@
 -- could call R3 or R4 and delete eligible rows early, with no plan and no operator. That privilege becomes material
 -- the day R4 or R6 enforces, which is why #150 gates that.
 --
--- luxia_retention holds EXECUTE on those four functions and nothing else: no table, no sequence, no other function. It
--- is created NOLOGIN here; the operator gives it a password in Neon and declares LUXIA_RETENTION_DATABASE_URL on the
+-- luxia_retention holds EXECUTE on those four functions and nothing else of its own: no table, no sequence, no other
+-- definer function, whether granted to it or to PUBLIC (the validation below reads what it can really do). Like every
+-- role it keeps what PUBLIC holds by PostgreSQL's defaults: CONNECT and TEMPORARY, and EXECUTE on ordinary functions.
+-- It is created NOLOGIN here; the operator enables its login, sets its password with psql's \password, and declares LUXIA_RETENTION_DATABASE_URL on the
 -- Production environment, which the job's own connection uses. app_user keeps no EXECUTE on any of them, and the
 -- activation gate's posture check refuses a Production where it does.
 -- Lifting the dry run of R4 and R6 is a separate reviewed change, which this one and the lifecycle guard (#148) unblock.

@@ -80,6 +80,15 @@ refused "has the member luxia_status_owner" "the owner of one entry point only"
 admin "REVOKE luxia_retention FROM luxia_status_owner"
 psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_status() OWNER TO luxia_owner"
 admin "DROP ROLE luxia_status_owner"
+# The same with the owner of one destructive purge, so the exception is not keyed to any single entry point (Claude
+# Opus F-7, ninth review).
+admin "CREATE ROLE luxia_purge_owner NOLOGIN"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_purge_invitations(integer, boolean) OWNER TO luxia_purge_owner"
+admin "GRANT luxia_retention TO luxia_purge_owner WITH ADMIN OPTION, SET FALSE, INHERIT FALSE"
+refused "has the member luxia_purge_owner" "the owner of one purge only"
+admin "REVOKE luxia_retention FROM luxia_purge_owner"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_purge_invitations(integer, boolean) OWNER TO luxia_owner"
+admin "DROP ROLE luxia_purge_owner"
 # The database's owner, when it owns no entry point, with the same narrow grant: refused too (Neon, eighth review: the
 # seventh round dropped the database-owner exception, and nothing showed it).
 admin "CREATE ROLE luxia_db_owner NOLOGIN"

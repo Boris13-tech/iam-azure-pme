@@ -40,9 +40,11 @@ describe("D8.4: the retention job's own role", () => {
       expect(migration, fn).toContain(`REVOKE EXECUTE ON FUNCTION ${fn} FROM app_user;`);
     }
     // Nothing else is granted to it: no table, no sequence, no other function.
-    // Every GRANT statement outside a string, whatever its case or form (a table grant needs no TABLE keyword, a role
-    // grant has no ON), must be one of these two kinds; the one inside a string is the database grant checked above
-    // (Neon, eighth review of #196). The PostgreSQL suite checks the catalog itself.
+    // A reading aid, not the control: every plain GRANT statement outside a string, in any case and with or without
+    // ON, must be one of these two kinds; the one inside a string is the database grant checked above (Neon, eighth
+    // review of #196). A grant assembled in dynamic SQL, or power given without a GRANT (ownership, a policy), is out
+    // of a text test's reach (Claude Opus F-1, ninth review): the catalog validation, re-run by the PostgreSQL suite
+    // and by the activation gate, is what refuses them.
     const statements = code.replace(/'[^']*'/g, "''");
     const kinds = [...statements.matchAll(/\bGRANT\b[^;]*/gi)].map((m) => m[0].replace(/\s+/g, " ").trim()).map((g) =>
       /^GRANT EXECUTE ON FUNCTION luxia_retention_\w+\([a-z, ]*\) TO luxia_retention$/.test(g) ? "EXECUTE FUNCTION"
