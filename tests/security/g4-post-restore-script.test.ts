@@ -171,10 +171,14 @@ describe("G4 post-restore script: it can reach nothing but a disposable local co
     expect(made).not.toBe("");          // it did call psql
     // The recorder works: a variable that is not libpq's came through. Without this, an empty log would prove nothing.
     expect(recorded).toContain(`${PROBE}=recorded`);
-    expect(pgEnv).toBe("");              // and psql saw no PG variable at all, in any case
+    // psql saw no inherited PG variable, in any case: the only one is the command's own request that the server fire
+    // no event trigger on the owner's connections (Gemini 4 Neon finding 1, eleventh review), never the inherited one.
+    expect(pgEnv.split("\n").filter(Boolean).filter((entry) => entry !== "PGOPTIONS=-c event_triggers=off")).toEqual([]);
+    expect(pgEnv).not.toContain("-c x=y");
     // Both tools are given the same cleaned environment, and the same validated URL.
     expect(source).toContain("const CLEAN_ENV = cleanEnvironment(process.env);");
-    expect(source).toContain("{ encoding: \"utf8\", env: CLEAN_ENV }");
+    expect(source).toContain("{ encoding: \"utf8\", env: envFor(connection) }");
+    expect(source).toContain("const envFor = (connection) => (connection === owner.url && ownerOptions ? { ...CLEAN_ENV, PGOPTIONS: ownerOptions } : CLEAN_ENV);");
     // Prisma gets the same validated target, its schema pinned to public; only the reference is migrated, never the
     // copy, whose restored code is unverified until compared (Codex F1, ninth review).
     expect(source).toContain("env: { ...CLEAN_ENV, DATABASE_URL: target.prismaUrl }");

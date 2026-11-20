@@ -98,16 +98,7 @@ const identity = (connection) => readOnly(connection, IDENTITY_SQL);
   const probe = spawnSync("psql", ["-X", "-q", "-At", owner.url, "-c", "SELECT 1"], { encoding: "utf8", env: { ...CLEAN_ENV, PGOPTIONS: "-c event_triggers=off" } });
   if (probe.status === 0) ownerOptions = "-c event_triggers=off";
 }
-// Before any other connection, and before anything else is read: no event trigger. A login trigger fires on every
-// connection, the runtime role's included, and the release defines none.
-const eventTriggers = readOnly(owner.url, "SELECT coalesce(string_agg(evtname || ' on ' || evtevent, ', ' ORDER BY evtname), '') FROM pg_event_trigger");
-if (eventTriggers) {
-  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release,
-    checks: [{ name: "no event trigger on the copy", ok: false, detail: eventTriggers }], passed: false, stoppedBeforeWriting: true }, null, 1));
-  fail(`the copy has event triggers (${eventTriggers}), which the release never defines; nothing else was read or written`);
-}
 const ownerIdentity = identity(owner.url);
-const appIdentity = identity(app.url);
 const reached = `${ownerIdentity} as ${readOnly(owner.url, "SELECT current_user")}`;
 // What the server answers is its own address for this connection, so a copy in a container answers the container's
 // private address, not 127.0.0.1; the check refuses a globally routable one, which is what a managed database behind
@@ -116,6 +107,20 @@ const reached = `${ownerIdentity} as ${readOnly(owner.url, "SELECT current_user"
 const routable = publicAddress(ownerIdentity);
 check("the connection reached the disposable copy, not a database beyond this network",
   ownerIdentity.startsWith(`${owner.database} on `) && routable === null, routable ?? reached);
+// A target not recognised stops the run before anything more is read (the check for the second connection follows).
+if (!checks[checks.length - 1].ok) {
+  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release, reached, checks, passed: false, stoppedBeforeWriting: true }, null, 1));
+  fail(`the target is not established: ${checks[checks.length - 1].detail}; nothing was migrated or written`);
+}
+// Once the owner's connection is known to reach the copy, and before any other connection: no event trigger. A login
+// trigger fires on every connection, the runtime role's included, and the release defines none.
+const eventTriggers = readOnly(owner.url, "SELECT coalesce(string_agg(evtname || ' on ' || evtevent, ', ' ORDER BY evtname), '') FROM pg_event_trigger");
+if (eventTriggers) {
+  writeFileSync(arg("report") ?? "g4-post-restore-report.json", JSON.stringify({ kind: "LUXIA_G4_POST_RESTORE_REPORT", release,
+    checks: [{ name: "no event trigger on the copy", ok: false, detail: eventTriggers }], passed: false, stoppedBeforeWriting: true }, null, 1));
+  fail(`the copy has event triggers (${eventTriggers}), which the release never defines; nothing else was read or written`);
+}
+const appIdentity = identity(app.url);
 // Both connections must answer the same server, whatever the two URLs say, or the checks below would describe two
 // databases: the invariants are read as the owner, the runtime role's rights as app_user.
 const elsewhere = sameServer(ownerIdentity, appIdentity);
