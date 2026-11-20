@@ -95,7 +95,9 @@ const check = (name, ok, detail) => { checks.push({ name, ok, detail }); console
 const IDENTITY_SQL = `SELECT current_database() || ' on ' || coalesce(inet_server_addr()::text, 'socket') || ':' || coalesce(inet_server_port()::text, 'none')`;
 const identity = (connection) => readOnly(connection, IDENTITY_SQL);
 {
-  const probe = spawnSync("psql", ["-X", "-q", "-At", owner.url, "-c", "SELECT 1"], { encoding: "utf8", env: { ...CLEAN_ENV, PGOPTIONS: "-c event_triggers=off" } });
+  // Read only, like every statement here.
+  const probe = spawnSync("psql", ["-X", "-q", "-At", owner.url, "-c", "BEGIN READ ONLY;\nSELECT 1;\nCOMMIT;"],
+    { encoding: "utf8", env: { ...CLEAN_ENV, PGOPTIONS: "-c event_triggers=off" } });
   if (probe.status === 0) ownerOptions = "-c event_triggers=off";
 }
 const ownerIdentity = identity(owner.url);
