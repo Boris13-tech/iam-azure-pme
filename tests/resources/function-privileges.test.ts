@@ -23,13 +23,17 @@ const functions = ["luxia_sod_scope_contains", "luxia_sod_assignment_guard", "lu
 // (the daily job), SECURITY DEFINER with fixed predicates and bounded batches. R7's organization erasure and its
 // guard gate are owner-only (an operator procedure), never executable by app_user, not definer. R4 and R6 add two
 // runtime entry points (the daily retention job), SECURITY DEFINER with fixed predicates and bounded batches. The
-// retention status (D8.1) is a runtime entry point too: SECURITY DEFINER, counts and ages only. The hold register
+// retention status (D8.1) is a definer entry point too, counts and ages only. Since D8.4 the four retention entry
+// points are the job's role's, not app_user's. The hold register
 // (D8.2) adds owner-only functions: two guard triggers (the register, its history), the hold check and the three operator
 // functions (place, renew, release), none definer, none executable by app_user. The subject lifecycle guard (#148) is
 // a trigger: owner-only, not definer, never executable by app_user.
 const runtime = ["luxia_sod_scope_contains", "luxia_rate_limit_hit", "luxia_signup_reserve", "luxia_signup_consume", "luxia_invitation_resolve", "luxia_login_decoy",
-  "luxia_organization_lock_active", "luxia_session_resolve", "luxia_provider_connection_lock_active", "luxia_retention_purge_transactions",
-  "luxia_retention_purge_invitations", "luxia_retention_pseudonymize_retired", "luxia_retention_status"];
+  "luxia_organization_lock_active", "luxia_session_resolve", "luxia_provider_connection_lock_active"];
+// D8.4 (issue #150): the four retention entry points are executable by luxia_retention, the job's own role, and by no
+// other role but their owner. app_user, which serves every web request, holds none of them.
+const retentionWorker = ["luxia_retention_purge_transactions", "luxia_retention_purge_invitations",
+  "luxia_retention_pseudonymize_retired", "luxia_retention_status"];
 const triggerDefiners = ["luxia_provider_connection_effects"];
 describe("LUXIA SQL function privilege architecture", () => {
   it("every function introduced by these migrations explicitly revokes PUBLIC", () => {
@@ -48,7 +52,7 @@ describe("LUXIA SQL function privilege architecture", () => {
         const segment = sql.slice(declarations[i].index, declarations[i + 1]?.index);
         // First statement after the function body, before any trigger or grant.
         expect(segment).toMatch(new RegExp(`\\$\\$;\\s*REVOKE ALL ON FUNCTION ${name}\\([^;]*\\) FROM PUBLIC;`));
-        if (!runtime.includes(name)) expect(sql).not.toMatch(new RegExp(`GRANT EXECUTE ON FUNCTION ${name}\\(`));
+        if (!runtime.includes(name) && !retentionWorker.includes(name)) expect(sql).not.toMatch(new RegExp(`GRANT EXECUTE ON FUNCTION ${name}\\(`));
       }
     }
     expect(names.sort()).toEqual([...functions].sort());
@@ -56,17 +60,20 @@ describe("LUXIA SQL function privilege architecture", () => {
 });
 
 type Privilege = { nspname: string; proname: string; owner: string; proacl: string | null;
-  public_execute: boolean; runtime_execute: boolean; owner_execute: boolean; unrelated_execute: boolean; unexpected_acl: boolean };
+  public_execute: boolean; runtime_execute: boolean; worker_execute: boolean; owner_execute: boolean; unrelated_execute: boolean; unexpected_acl: boolean };
 describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LUXIA function privilege gate", () => {
   it("PUBLIC/anonymous/unrelated execute NONE; runtime helper only; owner retains EXECUTE", async () => {
     const rows = await rawPrisma.$queryRaw<Privilege[]>`
       SELECT n.nspname,p.proname,pg_get_userbyid(p.proowner) AS owner,p.proacl::text,
         EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE') AS public_execute,
         has_function_privilege('app_user',p.oid,'EXECUTE') AS runtime_execute,
+        has_function_privilege('luxia_retention',p.oid,'EXECUTE') AS worker_execute,
         has_function_privilege(p.proowner,p.oid,'EXECUTE') AS owner_execute,
         has_function_privilege('pg_read_all_data',p.oid,'EXECUTE') AS unrelated_execute,
         EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-          WHERE a.grantee<>p.proowner AND NOT(a.grantee=(SELECT oid FROM pg_roles WHERE rolname='app_user') AND p.proname::text=ANY(${runtime}::text[]))) AS unexpected_acl
+          WHERE a.grantee<>p.proowner
+            AND NOT(a.grantee=(SELECT oid FROM pg_roles WHERE rolname='app_user') AND p.proname::text=ANY(${runtime}::text[]))
+            AND NOT(a.grantee=(SELECT oid FROM pg_roles WHERE rolname='luxia_retention') AND p.proname::text=ANY(${retentionWorker}::text[]))) AS unexpected_acl
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='public' AND p.proname LIKE 'luxia_%' ORDER BY p.proname`;
     // There is no PUBLIC whitelist: a newly introduced function is fail-closed.
@@ -77,6 +84,7 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LU
       expect(row.unexpected_acl, row.proname).toBe(false);
       expect(row.owner_execute, row.proname).toBe(true);
       expect(row.runtime_execute, row.proname).toBe(runtime.includes(row.proname));
+      expect(row.worker_execute, row.proname).toBe(retentionWorker.includes(row.proname));
     }
     const anonymous = await rawPrisma.$queryRaw<Array<{ allowed: boolean }>>`
       SELECT has_function_privilege(r.oid,p.oid,'EXECUTE') AS allowed FROM pg_roles r CROSS JOIN pg_proc p
@@ -109,7 +117,8 @@ describe.runIf(process.env.LUXIA_RESOURCE_RLS === "true")("Generic PostgreSQL LU
       SELECT p.proname,p.prosecdef,p.proconfig FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='public' AND p.proname LIKE 'luxia_%' ORDER BY p.proname`;
     for (const row of definer) {
-      expect(row.prosecdef, row.proname).toBe((runtime.includes(row.proname) && row.proname !== "luxia_sod_scope_contains") || triggerDefiners.includes(row.proname));
+      expect(row.prosecdef, row.proname).toBe((runtime.includes(row.proname) && row.proname !== "luxia_sod_scope_contains")
+        || retentionWorker.includes(row.proname) || triggerDefiners.includes(row.proname));
       if (row.prosecdef) expect(row.proconfig, row.proname).toContain("search_path=public, pg_temp");
     }
   });

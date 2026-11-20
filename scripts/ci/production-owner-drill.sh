@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# CI only: the migrations and the activation gate, run the way Production runs them — by an owner that is NOT a
+# superuser, on PostgreSQL 17 — then a D8.4 rollback and redeploy. CI's other jobs migrate as the container's
+# superuser, which hid that PostgreSQL 16+ makes a role's non-superuser creator a member of it (Claude Opus and
+# Gemini 4 Hydrogen, fourth review of #196): the migration refused its own role, which only a run like this one shows.
+#
+#   ADMIN_URL=postgresql://<superuser>@<host>:<port>/postgres bash scripts/ci/production-owner-drill.sh
+#
+# Creates its own roles and database; uses only throwaway test credentials. Fails on the first deviation.
+set -euo pipefail
+: "${ADMIN_URL:?set ADMIN_URL to a superuser URL of a disposable PostgreSQL 17 server}"
+base="${ADMIN_URL%/*}"; host="${base#*@}"
+OWNER_URL="postgresql://luxia_owner:owner_password@${host}/neondb"
+APP_URL="postgresql://app_user:app_password@${host}/neondb"
+work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+step() { printf '\n== %s\n' "$*"; }
+state() { psql -X -At "$OWNER_URL" -c "SELECT 'app_user=' || count(*) FILTER (WHERE has_function_privilege('app_user', p.oid, 'EXECUTE'))
+  || ' retention=' || count(*) FILTER (WHERE has_function_privilege('luxia_retention', p.oid, 'EXECUTE'))
+  FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'luxia_retention%'"; }
+expect() { local got; got="$(state)"; [ "$got" = "$1" ] || { echo "FAIL: $2: expected $1, got $got"; exit 1; }; echo "ok: $2 ($got)"; }
+
+step "Production-like cluster: a non-superuser owner with CREATEROLE, and the runtime role"
+psql -X -v ON_ERROR_STOP=1 "$ADMIN_URL" -q \
+  -c "CREATE ROLE luxia_owner LOGIN PASSWORD 'owner_password' CREATEROLE CREATEDB BYPASSRLS NOSUPERUSER" \
+  -c "CREATE ROLE app_user LOGIN PASSWORD 'app_password' NOSUPERUSER NOINHERIT NOBYPASSRLS" \
+  -c "CREATE DATABASE neondb OWNER luxia_owner"
+psql -X -v ON_ERROR_STOP=1 "${base}/neondb" -q -c "ALTER SCHEMA public OWNER TO luxia_owner"
+# The least favourable setting Production could have: a creator that also gets SET and INHERIT on the roles it makes.
+# The migration must narrow its own grant and pass anyway (sixth review of #196).
+psql -X -v ON_ERROR_STOP=1 "$ADMIN_URL" -q -c "ALTER ROLE luxia_owner SET createrole_self_grant = 'set, inherit'"
+[ "$(psql -X -At "$OWNER_URL" -c 'SELECT rolsuper FROM pg_roles WHERE rolname = current_user')" = "f" ] || { echo "FAIL: owner is a superuser"; exit 1; }
+
+# The activation gate's grant step and the migration's role validation, extracted from the files under test.
+node -e '
+const fs = require("fs");
+const gate = fs.readFileSync(".github/workflows/production-activation-gate.yml", "utf8").replace(/\r/g, "");
+const block = /Bootstrap least-privilege runtime grants[\s\S]*?<<\x27SQL\x27\n([\s\S]*?)\n\s*SQL\n/.exec(gate)[1].replace(/^ {10}/gm, "");
+fs.writeFileSync(process.argv[1] + "/gate.sql", block);
+const m = fs.readFileSync("prisma/migrations/20261114120000_retention_worker_role/migration.sql", "utf8");
+const a = m.indexOf("DO $$");
+fs.writeFileSync(process.argv[1] + "/validate.sql", m.slice(a, m.indexOf("END $$;", a) + 7) + "\n");' "$work"
+gate() { psql -X -q -v ON_ERROR_STOP=1 --single-transaction "$OWNER_URL" -f "$work/gate.sql" >/dev/null; }
+# The re-check runs where the activation gate runs it: as app_user, the posture step's connection. Running it as the
+# owner hid that the creator exception was keyed to whoever ran it (fifth review of #196).
+validate() { psql -X -q -v ON_ERROR_STOP=1 "$APP_URL" -f "$work/validate.sql"; }
+# Refused, and for the reason given: a refusal for anything else is a failure of the drill.
+refused() { if validate 2>"$work/err"; then echo "FAIL: $2 passed the re-check"; exit 1; fi
+  grep -q "$1" "$work/err" || { echo "FAIL: $2 refused for another reason: $(cat "$work/err")"; exit 1; }; echo "ok: $2 refused"; }
+
+step "Every migration, as that owner"
+DATABASE_URL="${OWNER_URL}?schema=public" npx prisma migrate deploy
+grant="$(psql -X -At "$OWNER_URL" -c "SELECT r.rolname || ' admin=' || m.admin_option || ' set=' || m.set_option || ' inherit=' || m.inherit_option FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE m.roleid = 'luxia_retention'::regrole")"
+[ "$grant" = "luxia_owner admin=true set=false inherit=false" ] || { echo "FAIL: creator grant is '$grant'"; exit 1; }
+echo "ok: the creator's grant is admin only, despite createrole_self_grant ($grant)"
+
+step "The activation gate, as that owner, then its re-check of the worker role"
+gate; validate; expect "app_user=0 retention=4" "after the gate"
+
+step "Drift is refused at the next activation"
+admin() { psql -X -q -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "$1"; }
+admin "ALTER ROLE luxia_retention SET session_replication_role = replica"
+refused "carries the setting session_replication_role" "a setting that silences the guards"
+admin "ALTER ROLE luxia_retention RESET session_replication_role"
+# The creator's own grant is accepted only as PostgreSQL 16+ makes it: admin, no SET, no INHERIT.
+admin "GRANT luxia_retention TO luxia_owner WITH SET TRUE"
+refused "has the member luxia_owner" "the creator's grant with SET"
+admin "GRANT luxia_retention TO luxia_owner WITH SET FALSE"
+admin "GRANT luxia_retention TO luxia_owner WITH INHERIT TRUE"
+refused "has the member luxia_owner" "the creator's grant with INHERIT"
+admin "GRANT luxia_retention TO luxia_owner WITH INHERIT FALSE"
+admin "GRANT luxia_retention TO app_user"
+refused "has the member app_user" "another member"
+admin "REVOKE luxia_retention FROM app_user"
+# The owner of one entry point only, with the narrow admin grant: refused, since it could reach the other purges
+# through the worker (Codex F1, eighth review).
+admin "CREATE ROLE luxia_status_owner NOLOGIN"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_status() OWNER TO luxia_status_owner"
+admin "GRANT luxia_retention TO luxia_status_owner WITH ADMIN OPTION, SET FALSE, INHERIT FALSE"
+refused "has the member luxia_status_owner" "the owner of one entry point only"
+admin "REVOKE luxia_retention FROM luxia_status_owner"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_status() OWNER TO luxia_owner"
+admin "DROP ROLE luxia_status_owner"
+# The same with the owner of one destructive purge, so the exception is not keyed to any single entry point (Claude
+# Opus F-7, ninth review).
+admin "CREATE ROLE luxia_purge_owner NOLOGIN"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_purge_invitations(integer, boolean) OWNER TO luxia_purge_owner"
+admin "GRANT luxia_retention TO luxia_purge_owner WITH ADMIN OPTION, SET FALSE, INHERIT FALSE"
+refused "has the member luxia_purge_owner" "the owner of one purge only"
+admin "REVOKE luxia_retention FROM luxia_purge_owner"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "ALTER FUNCTION public.luxia_retention_purge_invitations(integer, boolean) OWNER TO luxia_owner"
+admin "DROP ROLE luxia_purge_owner"
+# The database's owner, when it owns no entry point, with the same narrow grant: refused too (Neon, eighth review: the
+# seventh round dropped the database-owner exception, and nothing showed it).
+admin "CREATE ROLE luxia_db_owner NOLOGIN"
+admin "ALTER DATABASE neondb OWNER TO luxia_db_owner"
+admin "GRANT luxia_retention TO luxia_db_owner WITH ADMIN OPTION, SET FALSE, INHERIT FALSE"
+refused "has the member luxia_db_owner" "the database owner who owns no entry point"
+admin "REVOKE luxia_retention FROM luxia_db_owner"
+admin "ALTER DATABASE neondb OWNER TO luxia_owner"
+admin "DROP ROLE luxia_db_owner"
+# A privilege through PUBLIC, which names no role: refused by what the worker can really do (Codex F1, ninth review).
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'GRANT TRUNCATE ON TABLE public."Invitation" TO PUBLIC'
+refused 'can truncate "Invitation"' "TRUNCATE granted to PUBLIC"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'REVOKE TRUNCATE ON TABLE public."Invitation" FROM PUBLIC'
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'GRANT CREATE ON SCHEMA public TO PUBLIC'
+refused "can create in schema public" "CREATE on schema public granted to PUBLIC"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'REVOKE CREATE ON SCHEMA public FROM PUBLIC'
+# PostgreSQL 17's MAINTAIN, and a protected setting, both through PUBLIC (Codex F1 and F2, tenth review).
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'GRANT MAINTAIN ON TABLE public."Invitation" TO PUBLIC'
+refused 'can maintain "Invitation"' "MAINTAIN granted to PUBLIC"
+psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c 'REVOKE MAINTAIN ON TABLE public."Invitation" FROM PUBLIC'
+admin "GRANT SET ON PARAMETER session_replication_role TO PUBLIC"
+refused "can set the parameter session_replication_role" "SET on session_replication_role granted to PUBLIC"
+admin "REVOKE SET ON PARAMETER session_replication_role FROM PUBLIC"
+# Each remaining effective check, through PUBLIC: a column, a sequence, CREATE on the database, and another definer
+# function (Gemini 4 Hydrogen F-03, tenth review).
+db() { psql -X -q -v ON_ERROR_STOP=1 "${base}/neondb" -c "$1"; }
+db 'GRANT SELECT ("id") ON TABLE public."Invitation" TO PUBLIC'
+refused 'can use columns of "Invitation"' "a column privilege granted to PUBLIC"
+db 'REVOKE SELECT ("id") ON TABLE public."Invitation" FROM PUBLIC'
+seq="$(psql -X -At "${base}/neondb" -c "SELECT c.oid::regclass::text FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'S' ORDER BY 1 LIMIT 1")"
+if [ -n "$seq" ]; then db "GRANT USAGE ON SEQUENCE $seq TO PUBLIC"; refused "can usage sequence $seq" "a sequence privilege granted to PUBLIC"
+  db "REVOKE USAGE ON SEQUENCE $seq FROM PUBLIC"; else db "CREATE SEQUENCE public.luxia_drill_seq"; db "GRANT USAGE ON SEQUENCE public.luxia_drill_seq TO PUBLIC"
+  refused "can usage sequence luxia_drill_seq" "a sequence privilege granted to PUBLIC"; db "DROP SEQUENCE public.luxia_drill_seq"; fi
+db "GRANT CREATE ON DATABASE neondb TO PUBLIC"
+refused "can create in the database" "CREATE on the database granted to PUBLIC"
+db "REVOKE CREATE ON DATABASE neondb FROM PUBLIC"
+admin "ALTER DATABASE neondb SET session_replication_role = replica"
+refused "every session here starts with session_replication_role=replica" "replica mode set for the whole database"
+admin "ALTER DATABASE neondb RESET session_replication_role"
+# The protective values set explicitly are not a fault (Codex F3, eleventh review).
+admin "ALTER DATABASE neondb SET session_replication_role = origin"
+validate; echo "ok: session_replication_role = origin set for the whole database passes"
+admin "ALTER DATABASE neondb RESET session_replication_role"
+# A large object of the owner's, opened to PUBLIC, without superuser rights (Codex F2, fourteenth review).
+lo="$(psql -X -At "$OWNER_URL" -c "SELECT lo_from_bytea(0, 'x')")"
+psql -X -q -v ON_ERROR_STOP=1 "$OWNER_URL" -c "GRANT SELECT, UPDATE ON LARGE OBJECT $lo TO PUBLIC"
+refused "the large object $lo" "a large object opened to PUBLIC by its non-superuser owner"
+psql -X -q -v ON_ERROR_STOP=1 "$OWNER_URL" -c "SELECT lo_unlink($lo)" >/dev/null
+# A schema of the owner's other than public, open to PUBLIC, with a definer function in it (Codex F2, eleventh review).
+db "CREATE SCHEMA maintenance"
+db "GRANT USAGE ON SCHEMA maintenance TO PUBLIC"
+db "CREATE FUNCTION maintenance.drill_definer() RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS 'SELECT 1'"
+db "GRANT EXECUTE ON FUNCTION maintenance.drill_definer() TO PUBLIC"
+refused "can execute the definer function maintenance.drill_definer()" "a definer function outside public executable by PUBLIC"
+db "DROP SCHEMA maintenance CASCADE"
+# A function PostgreSQL keeps from PUBLIC, granted to PUBLIC; and replica mode for the whole server (Gemini 4 Neon
+# F-01 and F-03, eleventh review).
+db "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO PUBLIC"
+refused "can execute pg_read_file(text)" "pg_read_file granted to PUBLIC"
+db "REVOKE EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) FROM PUBLIC"
+# PostgreSQL's own closed tables and columns, opened to PUBLIC (Gemini 4 Neon F-02, twelfth review).
+db "GRANT SELECT ON pg_catalog.pg_authid TO PUBLIC"
+refused "can select pg_authid" "pg_authid readable by PUBLIC"
+db "REVOKE SELECT ON pg_catalog.pg_authid FROM PUBLIC"
+db "GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO PUBLIC"
+refused "can select the column pg_subscription.subconninfo" "pg_subscription.subconninfo readable by PUBLIC"
+db "REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM PUBLIC"
+db "GRANT UPDATE (rolpassword) ON pg_catalog.pg_authid TO PUBLIC"
+refused "can update the column pg_authid.rolpassword" "pg_authid.rolpassword writable by PUBLIC"
+db "REVOKE UPDATE (rolpassword) ON pg_catalog.pg_authid FROM PUBLIC"
+admin "ALTER SYSTEM SET session_replication_role = replica"; admin "SELECT pg_reload_conf()" >/dev/null
+refused "the server starts sessions with session_replication_role=replica" "replica mode for the whole server"
+admin "ALTER SYSTEM RESET session_replication_role"; admin "SELECT pg_reload_conf()" >/dev/null
+definer="$(psql -X -At "${base}/neondb" -c "SELECT p.oid::regprocedure::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef AND p.proname NOT LIKE 'luxia_retention%' ORDER BY 1 LIMIT 1")"
+[ -n "$definer" ] || { echo "FAIL: no other definer function to test with"; exit 1; }
+db "GRANT EXECUTE ON FUNCTION $definer TO PUBLIC"
+refused "can execute the definer function $definer" "another definer function executable by PUBLIC"
+db "REVOKE EXECUTE ON FUNCTION $definer FROM PUBLIC"
+validate; echo "ok: the creator's admin-only grant alone passes"
+
+step "The operator's password script, as Production's owner"
+login() { psql -X -At "$OWNER_URL" -c "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'luxia_retention'"; }
+[ "$(login)" = "f" ] || { echo "FAIL: luxia_retention can log in before the script"; exit 1; }
+# An output file that cannot be created: nothing changes, the role still cannot log in (Codex F1, eleventh review).
+if LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/missing/dir/url" 2>"$work/err"; then
+  echo "FAIL: the script succeeded without its output file"; exit 1; fi
+grep -q "so the password was not changed" "$work/err" || { echo "FAIL: refused for another reason: $(cat "$work/err")"; exit 1; }
+[ "$(login)" = "f" ] || { echo "FAIL: the role was changed although its new password was not saved"; exit 1; }
+echo "ok: an output file that cannot be created changes nothing"
+# A role that has drifted is never given a login (Gemini 4 Neon F-02, eleventh review).
+admin "ALTER ROLE luxia_retention INHERIT"
+if LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/drifted-url" 2>"$work/err"; then
+  echo "FAIL: the script enabled a login on a drifted role"; exit 1; fi
+grep -q "is not the narrow role, so no login was enabled" "$work/err" || { echo "FAIL: refused for another reason: $(cat "$work/err")"; exit 1; }
+[ "$(login)" = "f" ] && [ ! -e "$work/drifted-url" ] || { echo "FAIL: a drifted role was changed or its URL written"; exit 1; }
+admin "ALTER ROLE luxia_retention NOINHERIT"
+echo "ok: a drifted role is never given a login"
+# Any drift the gate refuses stops the login too: a grant to the role, a setting attached to it (Codex F1, twelfth review).
+script_refused() { if LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/drifted-url" 2>"$work/err"; then
+    echo "FAIL: the script enabled a login with $1"; exit 1; fi
+  grep -q "$2" "$work/err" || { echo "FAIL: $1 refused for another reason: $(cat "$work/err")"; exit 1; }
+  [ "$(login)" = "f" ] && [ ! -e "$work/drifted-url" ] || { echo "FAIL: $1: the role was changed or its URL kept"; exit 1; }
+  echo "ok: $1 stops the login"; }
+db 'GRANT SELECT ON TABLE public."Invitation" TO luxia_retention'
+script_refused "a table privilege granted to the worker" "is not the narrow role, so no login was enabled"
+db 'REVOKE SELECT ON TABLE public."Invitation" FROM luxia_retention'
+admin "ALTER ROLE luxia_retention SET search_path = public"
+script_refused "a setting attached to the worker" "is not the narrow role, so no login was enabled"
+admin "ALTER ROLE luxia_retention RESET search_path"
+# Replica mode for the whole server, hidden from the validating roles by their own protective defaults: the validation
+# cannot see it, the worker's own session does, and the login is taken back (Codex F2, twelfth review).
+admin "ALTER ROLE luxia_owner SET session_replication_role = origin"; admin "ALTER ROLE app_user SET session_replication_role = origin"
+admin "ALTER SYSTEM SET session_replication_role = replica"; admin "SELECT pg_reload_conf()" >/dev/null
+validate; echo "ok: the validation cannot see a server value hidden by the validating roles' own defaults"
+script_refused "replica mode hidden from the validating roles" "does not start as the narrow worker (.*); its login was taken back"
+admin "ALTER SYSTEM RESET session_replication_role"; admin "SELECT pg_reload_conf()" >/dev/null
+admin "ALTER ROLE luxia_owner RESET session_replication_role"; admin "ALTER ROLE app_user RESET session_replication_role"
+# A check that cannot even run (here the worker may open no connection at all) takes the login back too, rather than
+# leaving it enabled unverified (Codex F3, thirteenth review).
+admin "ALTER ROLE luxia_retention CONNECTION LIMIT 0"
+script_refused "a new login that cannot be checked" "the new login could not be checked; its login was taken back"
+admin "ALTER ROLE luxia_retention CONNECTION LIMIT -1"
+LUXIA_OWNER_DATABASE_URL="$OWNER_URL" node scripts/ops/set-retention-password.mjs "$work/retention-url" >/dev/null
+[ "$(login)" = "t" ] || { echo "FAIL: the role cannot log in after the script"; exit 1; }
+[ "$(psql -X -At "$(cat "$work/retention-url")" -c 'SELECT current_user')" = "luxia_retention" ] || { echo "FAIL: the saved connection does not log in as the worker"; exit 1; }
+validate; echo "ok: the script enables the login, saves a working connection, and the worker stays narrow"
+admin "ALTER ROLE luxia_retention NOLOGIN PASSWORD NULL"
+
+step "Rollback, as that owner; then the gate as for a release from before D8.4"
+# Production's role can log in (the operator enabled it), so the rollback must be seen to take that away: without
+# this, the check below held whatever the rollback did (fifth review of #196).
+admin "ALTER ROLE luxia_retention LOGIN"
+psql -X -q -1 -v ON_ERROR_STOP=1 "$OWNER_URL" -f docs/operations/RETENTION-WORKER-ROLE-ROLLBACK.sql
+[ "$(psql -X -At "$OWNER_URL" -c "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'luxia_retention'")" = "f" ] || { echo "FAIL: role can still log in"; exit 1; }
+gate; expect "app_user=4 retention=0" "after the rollback and the gate"
+
+step "Login back (the operator, in Neon), migrate deploy, the gate"
+psql -X -q -v ON_ERROR_STOP=1 "$OWNER_URL" -c "ALTER ROLE luxia_retention LOGIN"
+DATABASE_URL="${OWNER_URL}?schema=public" npx prisma migrate deploy
+gate; validate; expect "app_user=0 retention=4" "after redeploy and the gate"
+echo; echo "PRODUCTION-OWNER DRILL PASS"

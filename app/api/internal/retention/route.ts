@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { cronAuthorized, runRetention } from "@/lib/retention/purge";
 import { isRetentionAlertDrill, reportRetentionFailure, reportRetentionOutcome, retentionAlertDrill } from "@/lib/retention/alerts";
 
+// It runs as its own database role (D8.4, issue #150): runRetention opens the connection named by
+// LUXIA_RETENTION_DATABASE_URL, which alone may execute the retention functions, and refuses with
+// RETENTION_CONNECTION_NOT_CONFIGURED when it is absent. There is no fallback to the application's own connection.
+//
 // Daily retention run: R3 purge of expired sign-in challenges and Microsoft sign-in transactions; R4 and R6 (dry runs,
 // held organizations skipped); then the status of every mechanism and of the holds (counts and ages only). Its alerts
 // (D8.3) go through the error reporter: a failed run, the daily check-in whose absence is the silence alert, a backlog,

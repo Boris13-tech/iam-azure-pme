@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const queryRaw = vi.fn();
-vi.mock("@/lib/db/raw-prisma", () => ({ rawPrisma: { $queryRaw: (...args: unknown[]) => queryRaw(...args) } }));
+// The job connects as its own role (D8.4): this stands in for that client, not for the application's.
+vi.mock("@/lib/db/retention-prisma", () => ({ RETENTION_CONNECTION_VARIABLE: "LUXIA_RETENTION_DATABASE_URL",
+  retentionPrisma: () => ({ $queryRaw: (...args: unknown[]) => queryRaw(...args) }) }));
 
 const { CHECK_IN_MONITORS, KNOWN_ERROR_CODES, buildCheckIn, reportCheckIn, reportError } = await import("../../lib/monitoring/error-reporter");
 const { RETENTION_ALERT_DRILLS, reportRetentionFailure, reportRetentionOutcome } = await import("../../lib/retention/alerts");
@@ -16,10 +18,13 @@ const saved = { ...process.env };
 const fetchMock = vi.fn();
 const STATUS = { R3: { eligible: 0, overdue: 0, oldestHours: 0 }, R4: { eligible: 0, overdue: 0, oldestHours: 0, held: 0 },
   R6: { eligible: 0, overdue: 0, oldestHours: 0, held: 0 }, holds: { active: 0, overdueReview: 0 } };
-const fn = (args: unknown[]) => /luxia_retention_(\w+)\(/.exec((args[0] as string[]).join("?"))?.[1] ?? "?";
+const fn = (args: unknown[]) => (args[0] as string[]).join("?").includes("current_user") ? "role"
+  : /luxia_retention_(\w+)\(/.exec((args[0] as string[]).join("?"))?.[1] ?? "?";
 function database(status: unknown = STATUS) {
   queryRaw.mockImplementation((...args: unknown[]) => {
     switch (fn(args)) {
+      // The job checks it is connected as its own role before anything else (D8.4).
+      case "role": return Promise.resolve([{ role: "luxia_retention", login: "luxia_retention", replication: "origin", rowSecurity: "on" }]);
       case "purge_transactions": return Promise.resolve([{ counts: { localAuthChallenges: 0, authTransactions: 0, retentionRuns: 0, enforced: args[2] } }]);
       case "purge_invitations": return Promise.resolve([{ counts: { invitations: 0, enforced: false } }]);
       case "pseudonymize_retired": return Promise.resolve([{ counts: { subjects: 0, displayNames: 0, principalNames: 0, enforced: false } }]);

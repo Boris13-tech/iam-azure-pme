@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { rawPrisma } from "@/lib/db/raw-prisma";
+import { retentionPrisma } from "@/lib/db/retention-prisma";
 
 // R3 daily job (docs/architecture/RETENTION-AND-MINIMIZATION-DESIGN.md). The platform's cron calls the
 // endpoint with "Authorization: Bearer <CRON_SECRET>". Without a configured secret of at least 32
@@ -26,7 +26,7 @@ export type RetentionCounts = CallCounts & { rounds: number; backlog: boolean };
  * Bounded calls through the database function (each records its own counts), repeated while a call comes back full.
  * A dry run deletes nothing, so it makes one call: a full count there means a backlog. Counts are summed.
  */
-export async function purgeExpiredTransactions(enforce = retentionEnforced(), db = rawPrisma,
+export async function purgeExpiredTransactions(enforce = retentionEnforced(), db = retentionPrisma(),
   limits = { rounds: RETENTION_MAX_ROUNDS, budgetMs: RETENTION_TIME_BUDGET_MS }): Promise<RetentionCounts> {
   const started = Date.now();
   const total: RetentionCounts = { localAuthChallenges: 0, authTransactions: 0, retentionRuns: 0, enforced: enforce, rounds: 0, backlog: false };
@@ -82,7 +82,20 @@ export type RetentionReport = {
  * alert (Beta scope, section 4.1). A hold past its review date stays in effect and raises the overdue-review alert
  * (section 4.3). Their delivery to the operator is wired with the error reporter (D8.3).
  */
-export async function runRetention(enforce = retentionEnforced(), db = rawPrisma): Promise<RetentionReport> {
+/** The role the job must be connected as. */
+export const RETENTION_ROLE = "luxia_retention";
+
+export async function runRetention(enforce = retentionEnforced(), db = retentionPrisma()): Promise<RetentionReport> {
+  // The connection must be the job's own role and no other. A URL naming the owner by mistake would run the job with
+  // the owner's full rights, undoing the separation without any other sign; app_user's would fail on the first call,
+  // but under a less clear name (Gemini 4 Hydrogen F-06, third review of #196).
+  const [connected] = await db.$queryRaw<Array<{ role: string; login: string; replication: string; rowSecurity: string }>>`SELECT current_user::text AS role,
+    session_user::text AS login, current_setting('session_replication_role') AS replication, current_setting('row_security') AS "rowSecurity"`;
+  if (connected?.role !== RETENTION_ROLE || connected?.login !== RETENTION_ROLE) throw new Error("RETENTION_CONNECTION_WRONG_ROLE");
+  // Its own session, as it really starts, whatever the server, the database or a role default set: in replica mode the
+  // guard triggers would not fire for its writes. The validation reads another role's session and cannot see a server
+  // value masked for that role (Codex F2, twelfth review of #196).
+  if (connected.replication !== "origin" || connected.rowSecurity !== "on") throw new Error("RETENTION_SESSION_UNSAFE");
   const r3 = await purgeExpiredTransactions(enforce, db);
   const enforceR4R6 = enforce && R4_R6_ENFORCE_AVAILABLE;
   const [r4] = await db.$queryRaw<Array<{ counts: RetentionReport["r4"] }>>`

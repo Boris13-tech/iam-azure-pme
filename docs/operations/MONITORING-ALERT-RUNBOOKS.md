@@ -114,6 +114,9 @@ In the error tracker, each of the three event codes and the check-in monitor nee
 | `RETENTION_ALREADY_RUNNING` | Two calls overlapped | None; the next run continues |
 | `RETENTION_OWNER_REQUIRES_BYPASSRLS` | The function's owner cannot see every row | Configuration fault: the migration ran under the wrong role. Stop and review; do not grant bypass to the runtime |
 | `RETENTION_ARGUMENT_OUT_OF_RANGE` | Code fault | Fix in a reviewed change |
+| `RETENTION_CONNECTION_NOT_CONFIGURED` | `LUXIA_RETENTION_DATABASE_URL` is not set (D8.4) | Set it on the Production environment from `scripts/ops/set-retention-password.mjs`; the job never falls back to the application's connection |
+| `RETENTION_CONNECTION_WRONG_ROLE` | The job's connection is not `luxia_retention`, or only switched to it | Configuration fault: the URL names another role. Replace it with the worker's; do not grant the job's functions to that role |
+| `RETENTION_SESSION_UNSAFE` | The worker's session starts with replica mode or without row security | Configuration fault on the server, the database or the role: find and remove the setting; the job stays stopped until then |
 | No row for 3 days, no error | The cron did not call: missing `CRON_SECRET`, plan change, or the cron removed | Check the platform's cron page and the environment variable (names only) |
 
 **Recovery and verification.** The next run records its counts. Nothing urgent: a missed day only delays the purge by a day.

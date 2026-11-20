@@ -100,8 +100,12 @@ describe("activation gate: the authorized release, not main's tip", () => {
   });
 
   it("functions that came after rc-private-beta-1 are granted only when the release has them; the posture check covers owner-only tables", () => {
+    // Since D8.4 (issue #150) the four are granted in one loop, each skipped when the release does not have it, and
+    // given to the job's role or to app_user according to whether D8.4 is applied.
     for (const fn of ["luxia_retention_purge_invitations(integer,boolean)", "luxia_retention_pseudonymize_retired(integer,boolean)", "luxia_retention_status()"])
-      expect(text).toContain(`DO $$ BEGIN IF to_regprocedure('public.${fn}') IS NOT NULL THEN`);
+      expect(text, fn).toContain(`'public.${fn}'`);
+    expect(text).toContain("CONTINUE WHEN to_regprocedure(v_function) IS NULL;");
     expect(text).toContain("Runtime role holds privileges on owner-only tables");
+    expect(text).toContain("Runtime role can reach retention functions:");
   });
 });
