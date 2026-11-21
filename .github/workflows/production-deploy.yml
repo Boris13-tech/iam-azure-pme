@@ -86,7 +86,7 @@ jobs:
       REASON: ${{ inputs.reason }}
       TEAM: ${{ vars.VERCEL_TEAM_ID }}
       PROJECT: ${{ vars.VERCEL_PROJECT_ID }}
-      REPO_ID: ${{ vars.GITHUB_REPOSITORY_ID_FOR_VERCEL }}
+      REPO_ID: ${{ vars.VERCEL_GITHUB_REPO_ID }}
       BASE: https://iam-azure-pme.vercel.app
     steps:
       - name: The approval of this run is recorded for Production
