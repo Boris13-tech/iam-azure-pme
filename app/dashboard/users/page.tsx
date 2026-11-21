@@ -31,7 +31,7 @@ export default function IdentitiesPage() {
   async function createJoiner(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setMessage("");
     const response = await fetch("/api/canonical/subjects", {
-      method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+      method: "POST", headers: { "Content-Type": "application/json", "x-luxia-change-id": `users-ui:subject-create:${crypto.randomUUID()}` },
       body: JSON.stringify({ name, type: "HUMAN", lifecycleState: "PROVISIONING" }),
     });
     setBusy(false);
@@ -42,7 +42,7 @@ export default function IdentitiesPage() {
   async function transition(subject: Subject, lifecycleState: string) {
     setBusy(true); setMessage("");
     const response = await fetch(`/api/canonical/subjects/${subject.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+      method: "PATCH", headers: { "Content-Type": "application/json", "x-luxia-change-id": `users-ui:subject-lifecycle:${crypto.randomUUID()}` },
       body: JSON.stringify({ lifecycleState }),
     });
     setBusy(false);
