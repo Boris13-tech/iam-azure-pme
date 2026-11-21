@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Ban, Scale, ShieldAlert } from "lucide-react";
 import { EmptyState, ErrorState, LoadingState, PageHeader, RestrictedState } from "@/components/ui/states";
+import { REFUSAL_LABELS } from "@/lib/ui/activity-labels";
 
 // Separation of duties: an administrator chooses a scope and two entitlements from lists (never types identifiers),
 // activates the policy, and sees blocked assignments in words. Same API as before (/api/canonical/sod).
@@ -77,6 +78,7 @@ export default function SoDConsole() {
         const code = (await response.json().catch(() => ({}))).error;
         throw new Error(code === "SOD_CONFLICT"
           ? "Activation impossible : des personnes détiennent déjà les deux droits incompatibles. Retirez l’un des deux accès à ces personnes, puis réessayez."
+          : REFUSAL_LABELS[code] ? `${REFUSAL_LABELS[code]}.`
           : response.status === 403 ? "Vous n’avez pas le droit d’effectuer cette action." : "Opération refusée. Vérifiez les éléments choisis, puis réessayez.");
       }
       setMessage({ tone: "ok", text: success });
