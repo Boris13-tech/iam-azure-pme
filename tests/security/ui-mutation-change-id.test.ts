@@ -29,6 +29,17 @@ function routeFor(url: string): string | null {
   try { statSync(route); return route; } catch { return null; }
 }
 
+// The fetch call's own options object, from its "{" to the matching "}": a fixed window would read into the next
+// statement (a plain GET followed by a POST elsewhere was flagged, depending on line endings).
+function optionsObject(source: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}" && --depth === 0) return source.slice(open, i + 1);
+  }
+  return source.slice(open);
+}
+
 const pages = files("app", (path) => path.endsWith(".tsx") && !path.split(/[\\/]/).includes("api"));
 
 describe("UI mutations send the change header the API requires", () => {
@@ -38,7 +49,7 @@ describe("UI mutations send the change header the API requires", () => {
     for (const page of pages) {
       const source = readFileSync(page, "utf8");
       for (const match of source.matchAll(/fetch\(\s*([`"])(\/api\/[^`"]+)\1\s*,\s*\{/g)) {
-        const options = source.slice(match.index! + match[0].length, match.index! + match[0].length + 400);
+        const options = optionsObject(source, match.index! + match[0].length - 1);
         if (!/method:\s*"(POST|PATCH|PUT|DELETE)"/.test(options)) continue;
         const route = routeFor(match[2]);
         if (!route || !routeNeedsHeader(route)) continue;
