@@ -5,8 +5,9 @@
 //
 // Environment:
 //   LUXIA_BACKUP_DATABASE_URL    luxia_backup on the direct endpoint (secret)
-//   LUXIA_BACKUP_CONTAINER_URL   blob container URL with a create+read SAS (secret). Without it, --out <dir> keeps
-//                                the encrypted files locally (CI round trip).
+//   LUXIA_BACKUP_CONTAINER_URL   blob container URL with a create+read SAS (secret). On Azure Container Apps, the plain
+//                                container URL: the job's managed identity authorizes it (azure-token.mjs). Without it,
+//                                --out <dir> keeps the encrypted files locally (CI round trip).
 //   LUXIA_BACKUP_RECIPIENT_FILE  default scripts/backup/recipient.txt
 //   LUXIA_BACKUP_PREFIX          default "prod"
 import { spawn, spawnSync } from "node:child_process";
@@ -17,6 +18,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { PLATFORM_SCHEMAS, summarize, takeInventory } from "./inventory.mjs";
 import { bin, fail, holdSnapshot, pgEnv, psql, toolMajor } from "./pg.mjs";
+import { storageAuthorization } from "./azure-token.mjs";
 
 const started = Date.now();
 const args = process.argv.slice(2);
@@ -124,7 +126,10 @@ writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2));
 if (containerUrl) {
   const base = new URL(containerUrl);
   const blobUrl = name => `${base.origin}${base.pathname.replace(/\/$/, "")}/${path}/${name}${base.search}`;
-  const headers = { "x-ms-version": "2023-11-03" };
+  // A SAS in the URL, or else the managed identity of the Azure job; never both, never neither.
+  const authorization = base.search ? null : await storageAuthorization().catch(error => fail(error.message));
+  if (!base.search && !authorization) fail("the container URL carries no SAS and no managed identity is available");
+  const headers = { "x-ms-version": "2023-11-03", ...(authorization ? { authorization } : {}) };
   mark = Date.now();
   for (const file of [...files, { name: "manifest.json", contentType: "application/json" }]) {
     const body = readFileSync(join(outDir, file.name));
