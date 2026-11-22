@@ -2,12 +2,13 @@
 // exercises its refusals through a real process; this one exercises the verdicts, because reading the source cannot
 // show that a broken invariant is actually reported as a fault (Codex F5 and Antigravity finding 3, review of #195).
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ALLOWED_PARAMETERS, SCOPE_SETTINGS, SEARCH_PATH_SQL, BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, DEFAULT_PRIVILEGES_SQL, MIGRATOR_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS, EXPECTED_RUNTIME_ROLE, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, migratorFault, SESSION_SETTINGS_SQL, SESSION_TIMEOUTS, runnerExpected, EXPECTED_OWNER_ONLY, EXPECTED_TRIGGERS, FINGERPRINT_SQL, TARGET_CHECKS, cleanEnvironment, fingerprintFaults,
   gateGrantSql, gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf,
-  triggerFaults, unprotectedFault, validate,
+  triggerFaults, unprotectedFault, validate, crlfMigrations, CRLF_FUNCTIONS_SQL,
 } from "../../scripts/ops/g4-post-restore-checks.mjs";
 
 /** `validate` calls `fail` and must not return; here it throws so a refusal is visible as one. */
@@ -416,3 +417,34 @@ describe("G4 post-restore: the guard triggers of the restored copy", () => {
     }
   });
 });
+
+// Eight migrations reached Production from a Windows checkout in October 2026, before SQL was LF everywhere: their
+// recorded checksum is the release file's with CRLF line endings. Only that exact pair is read as the release's.
+describe("migrations applied with CRLF line endings", () => {
+  const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+  const file = Buffer.from("CREATE TABLE a (id int);\nCREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;\n");
+  const crlf = Buffer.from(file.toString("latin1").replace(/\n/g, "\r\n"), "latin1");
+  const ref = [`migration 20261011180000_x checksum=${sha(file)} finished=true`, "table public.a r"];
+  const release = (name: string) => (name === "20261011180000_x" ? file : null);
+  it("reads the CRLF checksum of the release file as the release's, and names the migration", () => {
+    const copy = [`migration 20261011180000_x checksum=${sha(crlf)} finished=true`, "table public.a r"];
+    expect(crlfMigrations(copy, ref, release, sha)).toEqual({ lines: ref, explained: ["20261011180000_x"] });
+    expect(fingerprintFaults(crlfMigrations(copy, ref, release, sha).lines, ref)).toEqual([]);
+  });
+  it("keeps every other difference: another text, an unfinished row, a file not LF, no release file, a wrong reference", () => {
+    const other = [`migration 20261011180000_x checksum=${sha(Buffer.from("DROP TABLE a;\r\n"))} finished=true`, "table public.a r"];
+    expect(crlfMigrations(other, ref, release, sha).explained).toEqual([]);
+    const unfinished = [`migration 20261011180000_x checksum=${sha(crlf)} finished=false`, "table public.a r"];
+    expect(crlfMigrations(unfinished, ref, release, sha).explained).toEqual([]);
+    expect(crlfMigrations([`migration 20261011180000_x checksum=${sha(crlf)} finished=true`], ref, () => crlf, sha).explained).toEqual([]);
+    expect(crlfMigrations([`migration 20261011180000_x checksum=${sha(crlf)} finished=true`], ref, () => null, sha).explained).toEqual([]);
+    const wrongRef = [`migration 20261011180000_x checksum=${sha(Buffer.from("x"))} finished=true`];
+    expect(crlfMigrations([`migration 20261011180000_x checksum=${sha(crlf)} finished=true`], wrongRef, release, sha).explained).toEqual([]);
+    expect(fingerprintFaults(crlfMigrations(other, ref, release, sha).lines, ref)).toHaveLength(2);
+  });
+  it("reads function bodies with CRLF pairs as LF and names the functions that carry them", () => {
+    expect(FINGERPRINT_SQL).toContain(String.raw`E'\r\n', E'\n'`);
+    expect(CRLF_FUNCTIONS_SQL).toContain(String.raw`strpos(pg_get_functiondef(p.oid), E'\r\n') > 0`);
+  });
+});
+

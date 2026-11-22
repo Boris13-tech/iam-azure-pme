@@ -209,7 +209,10 @@ export const FINGERPRINT_SQL = `SELECT coalesce(string_agg(line, chr(10) ORDER B
   UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' owner=' || ${owned("pg_get_userbyid(p.proowner)", "p.pronamespace")}
       || ' definer=' || p.prosecdef::text
       || ' config=' || coalesce(array_to_string(p.proconfig, ';'), '-')
-      || ' definition=' || md5(CASE WHEN p.prokind IN ('f', 'p', 'w') THEN pg_get_functiondef(p.oid) ELSE coalesce(p.prosrc, '') END)
+      -- Read with CRLF pairs as LF: eight migrations reached Production from a Windows checkout in October 2026, before
+      -- SQL was LF everywhere, and their bodies keep CRLF where a reference has LF; the same text otherwise. Which
+      -- functions carry CRLF is reported apart (CRLF_FUNCTIONS_SQL), never silently.
+      || ' definition=' || md5(replace(CASE WHEN p.prokind IN ('f', 'p', 'w') THEN pg_get_functiondef(p.oid) ELSE coalesce(p.prosrc, '') END, E'\\r\\n', E'\\n'))
       || ' public=' || has_function_privilege('public', p.oid, 'EXECUTE')::text || ' acl=' || ${ACL("p.proacl", "p.pronamespace")}
     FROM pg_proc p WHERE p.pronamespace IN ${SCHEMAS}
   -- Rules rewrite what a statement does to a table; views keep theirs in the view line above.
@@ -483,6 +486,37 @@ export const DEFAULT_PRIVILEGES_SQL = `SELECT coalesce(string_agg(DISTINCT entry
       WHERE da.defaclobjtype::text = need.objtype AND da.defaclnamespace = 'public'::regnamespace
         AND da.defaclrole = ${HISTORY_OWNER} AND ${IS_ROLE("a.grantee", "app_user")} AND a.privilege_type = need.privilege)
 ) found`;
+
+/** The functions whose definition holds a CRLF pair: reported by name, since the fingerprint reads them as LF. */
+export const CRLF_FUNCTIONS_SQL = `SELECT coalesce(string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text), '')
+  FROM pg_proc p WHERE p.pronamespace IN ${SCHEMAS} AND p.prokind IN ('f', 'p', 'w')
+    AND strpos(pg_get_functiondef(p.oid), E'\\r\\n') > 0`;
+
+/**
+ * Migrations recorded with the checksum of their release file written with CRLF line endings, where the reference has
+ * the checksum of the file as released (LF): the same text, applied from a Windows checkout before SQL was LF
+ * everywhere (eight migrations of October 2026 in Production). Only that exact pair is accepted: the release file must
+ * be LF only, the reference must hold its checksum, and the copy the checksum of the very same bytes with each LF
+ * written as CRLF. The copy's line is then read as the reference's, and the migration is named in the result.
+ * `release(name)` returns the release's migration.sql as a Buffer, or null.
+ */
+export function crlfMigrations(copy, reference, release, sha256) {
+  const line = /^migration (\S+) checksum=([0-9a-f]+) (finished=\S+)$/;
+  const expected = new Map(reference.map((entry) => line.exec(entry)).filter(Boolean).map((m) => [m[1], m]));
+  const explained = [];
+  const lines = copy.map((entry) => {
+    const found = line.exec(entry);
+    const ref = found && expected.get(found[1]);
+    if (!found || !ref || found[2] === ref[2] || found[3] !== ref[3]) return entry;
+    const file = release(found[1]);
+    if (!file || file.includes(13)) return entry;
+    const crlf = Buffer.from(file.toString("latin1").replace(/\n/g, "\r\n"), "latin1");
+    if (sha256(file) !== ref[2] || sha256(crlf) !== found[2]) return entry;
+    explained.push(found[1]);
+    return ref[0];
+  });
+  return { lines, explained };
+}
 
 /** The lines of the reference missing from the copy, and the copy's lines the reference does not have. */
 export function fingerprintFaults(copy, reference) {

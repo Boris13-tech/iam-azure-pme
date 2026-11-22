@@ -13,12 +13,12 @@
 // change the target; and the one validated URL is what both psql and Prisma receive (Codex F1, review of #195).
 // Counts and verdicts only: no row content is read or printed.
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 // What counts as a fault lives in its own module, so a test can drive each decision to its failing answer instead of
 // reading it in this source (Codex F5, review of #195).
 import { BACKUP_ROLE_SQL, BEFORE_WRITING_SQL, DEFAULT_PRIVILEGES_SQL, EFFECTIVE_SETTINGS_SQL, EXPECTED_EFFECTIVE_SETTINGS, SEARCH_PATH_SQL,MIGRATOR_SQL, PARAMETER_GRANTS_SQL, ROLE_SHAPE_SQL, SESSION_SETTINGS_SQL,
-  SESSION_TIMEOUTS, migratorFault, runnerExpected,EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, cleanEnvironment, fingerprintFaults, gateGrantSql,
+  SESSION_TIMEOUTS, migratorFault, runnerExpected,EXPECTED_OWNER_ONLY, EXPECTED_RUNTIME_ROLE, EXPECTED_TRIGGERS, FINGERPRINT_SQL, CRLF_FUNCTIONS_SQL, cleanEnvironment, crlfMigrations, fingerprintFaults, gateGrantSql,
   gateRevokes, heldRevokedSql, oneTarget, ownerOnlyFault, publicAddress, referenceOf, refusedTarget, sameServer, serverOf, triggerFaults,
   unprotectedFault, validate } from "./g4-post-restore-checks.mjs";
 
@@ -226,11 +226,21 @@ try {
 }
 // A reference left behind is a fault of the run, not a footnote (Gemini 4 Neon finding 5, eighth review).
 check("the reference database was dropped", !created || referenceDropped, !created ? "never created" : referenceDropped ? reference.database : `left on the server: ${dropError}`);
-const copyLines = readOnly(owner.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
+const copyRead = readOnly(owner.url, FINGERPRINT_SQL).split("\n").filter(Boolean);
+// The same text with CRLF line endings is named, not counted as drift (eight migrations of October 2026, applied from a
+// Windows checkout before SQL was LF everywhere): migrations by their exact CRLF checksum, functions read as LF.
+const releaseFile = (name) => { try { return readFileSync(`prisma/migrations/${name}/migration.sql`); } catch { return null; } };
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const crlf = referenceLines ? crlfMigrations(copyRead, referenceLines, releaseFile, sha256) : { lines: copyRead, explained: [] };
+const copyLines = crlf.lines;
+const crlfFunctions = readOnly(owner.url, CRLF_FUNCTIONS_SQL);
+const lineEndings = crlf.explained.length || crlfFunctions
+  ? `; applied with CRLF line endings, same text: ${crlf.explained.length} migrations (${crlf.explained.join(", ") || "none"}), functions: ${crlfFunctions || "none"}`
+  : "";
 const drift = referenceLines ? fingerprintFaults(copyLines, referenceLines) : [`no reference: ${referenceError}`];
 check("schema, grants, policies, triggers and functions are exactly the release's", drift.length === 0,
-  drift.length === 0 ? `${copyLines.length} objects, identical to a database migrated from the same release`
-    : `${drift.length} differences: ${drift.slice(0, 20).join("; ")}${drift.length > 20 ? "; …" : ""}`);
+  drift.length === 0 ? `${copyLines.length} objects, identical to a database migrated from the same release${lineEndings}`
+    : `${drift.length} differences: ${drift.slice(0, 20).join("; ")}${drift.length > 20 ? "; …" : ""}${lineEndings}`);
 
 // psql renders a boolean as true/false, so SQL builds the one line each check compares.
 // Also nothing on the database itself beyond connecting: not its owner, no CREATE, nothing granted to it there directly
