@@ -80,4 +80,8 @@ export const REFUSAL_LABELS: Readonly<Record<string, string>> = Object.freeze({
   SUBJECT_NOT_ACTIVE: "Identité non active", IDENTITY_ACCOUNT_DISABLED: "Compte désactivé",
   RECOVERY_CODE_INVALID: "Code de récupération invalide ou déjà utilisé",
   PROVIDER_CONNECTION_NOT_ACTIVE: "Fournisseur d’identité désactivé ou en quarantaine",
+  // Duplicate keys (resource governance, SoD): 409, never the database constraint name.
+  SCOPE_KEY_TAKEN: "Un périmètre porte déjà cette clé dans cet environnement",
+  ENTITLEMENT_KEY_TAKEN: "Ce droit existe déjà pour ce périmètre et cette action, même s’il a été retiré",
+  SOD_POLICY_KEY_TAKEN: "Une politique de séparation porte déjà ce nom dans cet environnement",
 });
