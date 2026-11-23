@@ -195,7 +195,11 @@ jobs:
               || { echo "::error::$key is not set for Production in the Vercel project: nothing is deployed"; exit 1; }
           done
           unset envs
-          previous="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
+          # What Production serves is the deployment its domain points to, read from the domain's alias: the project's
+          # targets.production names the latest Production deployment, which may never have gone live (2026-11-21: a
+          # cancelled deployment was named there while the domain still served the previous one).
+          served() { api "https://api.vercel.com/v4/aliases/${BASE#https://}?teamId=$TEAM" | jq -r '.deploymentId // empty'; }
+          previous="$(served)"
           [[ -n "$previous" ]] || { echo "::error::cannot read the current Production deployment"; exit 1; }
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
           # Written before the request: from here on, a deployment may exist even if its answer never arrives.
@@ -220,8 +224,14 @@ jobs:
             api -X PATCH "https://api.vercel.com/v12/deployments/$id/cancel?teamId=$TEAM" > /dev/null || echo "::warning::cancel of $id was refused"
             echo "::error::deployment $id not ready after 10 minutes"; exit 1
           fi
-          current="$(api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty')"
-          [[ "$current" == "$id" ]] || { echo "::error::Production serves $current, not $id"; exit 1; }
+          # The domain moves to a ready deployment shortly after it is ready: read it for up to a minute.
+          current=""
+          for i in $(seq 1 7); do
+            current="$(served)" || current=""
+            [[ "$current" == "$id" ]] && break
+            (( i < 7 )) && sleep 10
+          done
+          [[ "$current" == "$id" ]] || { echo "::error::Production serves ${current:-an unreadable deployment}, not $id"; exit 1; }
           echo "Production now serves $id (previous $previous)"
 
       - name: Check Production from outside
@@ -280,7 +290,8 @@ jobs:
             curl -sS --fail-with-body --connect-timeout "$(( limit < 10 ? limit : 10 ))" --max-time "$limit" -H @"$auth" -H "Content-Type: application/json" "$@"
           }
           pause() { local left; left=$(remaining); (( left > 3 )) || return 1; sleep "$(( left - 3 < 10 ? left - 3 : 10 ))"; }
-          production() { api "https://api.vercel.com/v9/projects/$PROJECT?teamId=$TEAM" | jq -r '.targets.production.id // empty'; }
+          # The deployment the Production domain points to (its alias), as in the deploy step: not targets.production.
+          production() { api "https://api.vercel.com/v4/aliases/${BASE#https://}?teamId=$TEAM" | jq -r '.deploymentId // empty'; }
           unresolved=""
           # 1. Every deployment of this attempt: the one whose answer arrived, and any found by this attempt's metadata.
           listed="" ; listing=""
@@ -311,7 +322,14 @@ jobs:
           done
           # 3. Promote the previous deployment; a refused or lost answer is retried once, Production state decides.
           current=""; confirmed=""
+          # Every deployment of this run is finished (step 2): if the domain still points to the previous deployment, the
+          # new one never went live and nothing is promoted (2026-11-21: promoting the live deployment answered 409).
+          if [[ -z "$unresolved" ]] && observed="$(production)" && [[ -n "$observed" ]]; then
+            current="$observed"
+            [[ "$current" == "$PREVIOUS" ]] && { confirmed=1; echo "::warning::the new deployment never went live: Production still serves $PREVIOUS"; }
+          fi
           for attempt in 1 2; do
+            [[ -n "$confirmed" ]] && break
             stop=$deadline
             (( deadline - SECONDS > 3 )) || { echo "::warning::no time left for promotion request $attempt"; break; }
             # The first request and its checks use at most half the time left (and 2 minutes): every request and pause
