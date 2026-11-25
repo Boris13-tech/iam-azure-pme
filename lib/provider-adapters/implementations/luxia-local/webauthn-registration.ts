@@ -21,7 +21,7 @@ export function registrationChallenge(clientDataJSON: string): string | null {
   } catch { return null; }
 }
 
-export function verifyPasskeyRegistration(input: PasskeyRegistration & { expectedChallenge: string; expectedOrigin: string; rpId: string }): { credentialId: string; publicKeyPem: string } {
+export function verifyPasskeyRegistration(input: PasskeyRegistration & { expectedChallenge: string; expectedOrigin: string; rpId: string }): { credentialId: string; publicKeyPem: string; signCount: number; backupEligible: boolean } {
   let client: { type?: unknown; challenge?: unknown; origin?: unknown; crossOrigin?: unknown };
   try { client = JSON.parse(decode(input.clientDataJSON).toString("utf8")); } catch { return fail("REGISTRATION_CLIENT_DATA_INVALID"); }
   if (client.type !== "webauthn.create" || client.challenge !== input.expectedChallenge ||
@@ -34,6 +34,10 @@ export function verifyPasskeyRegistration(input: PasskeyRegistration & { expecte
   if ((flags & 0x01) === 0) fail("REGISTRATION_USER_PRESENCE_REQUIRED");
   if ((flags & 0x04) === 0) fail("REGISTRATION_USER_VERIFICATION_REQUIRED");
   if ((flags & 0x40) === 0) fail("REGISTRATION_CREDENTIAL_DATA_MISSING");
+  // W3C WebAuthn Level 3 §6.1: BS (0x10) must never be set when BE (0x08) is clear.
+  const backupEligible = (flags & 0x08) !== 0;
+  if (!backupEligible && (flags & 0x10) !== 0) fail("REGISTRATION_BACKUP_FLAGS_INVALID");
+  const signCount = data.readUInt32BE(33);
   const idLength = data.readUInt16BE(53);
   if (idLength < 16 || idLength > 1023 || data.length < 55 + idLength) fail("REGISTRATION_AUTH_DATA_INVALID");
   const credentialId = data.subarray(55, 55 + idLength);
@@ -48,7 +52,7 @@ export function verifyPasskeyRegistration(input: PasskeyRegistration & { expecte
   const jwk = key.export({ format: "jwk" }) as { x?: string; y?: string };
   if (jwk.x !== cose.x.toString("base64url") || jwk.y !== cose.y.toString("base64url")) fail("REGISTRATION_PUBLIC_KEY_MISMATCH");
   const publicKeyPem = key.export({ format: "pem", type: "spki" }).toString();
-  return { credentialId: credentialId.toString("base64url"), publicKeyPem };
+  return { credentialId: credentialId.toString("base64url"), publicKeyPem, signCount, backupEligible };
 }
 
 // Minimal CBOR reader for the COSE_Key of an ES256 credential: a map of small integer keys with

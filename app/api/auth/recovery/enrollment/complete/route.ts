@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { completeRecoveryEnrollment, RecoveryError } from "../../../../../../lib/auth/recovery";
 import { getRecoveryContext } from "../../../../../../lib/auth/recovery-session";
+import { verifyMutationOrigin } from "../../../../../../lib/security/csrf-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,9 +13,11 @@ export async function POST(request: Request) {
   try {
     const recovery = await getRecoveryContext();
     if (!recovery) return NextResponse.json({ error: "RECOVERY_SESSION_INVALID" }, { status: 401 });
+    const originCheck = verifyMutationOrigin(request);
+    if (!originCheck.ok) return NextResponse.json({ error: "CSRF_ORIGIN_INVALID" }, { status: 403 });
     const body = await request.json().catch(() => ({})) ?? {};
     const field = (key: string) => typeof body[key] === "string" ? body[key] as string : "";
-    const url = new URL(request.url);
+    const url = new URL(originCheck.expectedOrigin);
     await completeRecoveryEnrollment(recovery, {
       transactionId: body.transactionId, credentialId: field("credentialId"), clientDataJSON: field("clientDataJSON"),
       authenticatorData: field("authenticatorData"), publicKey: field("publicKey"),

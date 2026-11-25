@@ -1,23 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SessionStore } from "../../../lib/auth/session-store";
 import { getEntraLogoutUrl } from "../../../lib/auth/providers/entra";
+import { verifyMutationOrigin } from "../../../lib/security/csrf-origin";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  // 1. Validate Origin
-  const expectedOrigin = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const origin = req.headers.get("origin");
-
-  // In production, require strict origin match. 
-  // For local dev, we might accept no origin (Postman/curl) or strict localhost.
-  if (process.env.NODE_ENV === "production") {
-    if (origin !== expectedOrigin) {
-      return new Response("Forbidden", { status: 403 });
-    }
-  } else if (origin && origin !== expectedOrigin) {
+  // 1. Validate Origin & Fetch-Metadata against canonical app origin (fail-closed in Production).
+  const originCheck = verifyMutationOrigin(req);
+  if (!originCheck.ok) {
     return new Response("Forbidden", { status: 403 });
   }
+  const expectedOrigin = originCheck.expectedOrigin;
 
   const rawToken = req.cookies.get("luxia_session")?.value;
   let session = null;

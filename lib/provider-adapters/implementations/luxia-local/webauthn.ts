@@ -45,8 +45,12 @@ export function verifyPasskeyAssertion(input: {
   if ((authData[32] & 0x01) === 0) fail("PASSKEY_USER_PRESENCE_REQUIRED");
   if (authenticator.userVerificationRequired && (authData[32] & 0x04) === 0)
     fail("PASSKEY_USER_VERIFICATION_REQUIRED");
-  // WebAuthn signature counter: once either side is non-zero it must strictly increase. A counter that
-  // falls back (to zero included) is a possible cloned authenticator and is refused, never stored.
+  // W3C WebAuthn Level 3 §6.1: BS (0x10) cannot be set when BE (0x08) is clear.
+  if ((authData[32] & 0x08) === 0 && (authData[32] & 0x10) !== 0)
+    fail("PASSKEY_BACKUP_FLAGS_INVALID");
+  // WebAuthn signature counter: synced passkeys / authenticators whose counter stays at 0 (0 -> 0) are accepted;
+  // once either side is non-zero it must strictly increase. A counter that falls back (to zero included) is a
+  // possible cloned authenticator and is refused, never stored.
   const counter = authData.readUInt32BE(33);
   if ((counter !== 0 || authenticator.signCount !== 0) && counter <= authenticator.signCount) fail("PASSKEY_REPLAY_DETECTED");
   const signed = Buffer.concat([authData, digest(decode(assertion.clientDataJSON))]);

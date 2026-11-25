@@ -8,6 +8,7 @@ import {
   newReadChangeId,
   recordDeniedAdminAccess,
 } from "./canonical-administration";
+import { verifyMutationOrigin } from "../security/csrf-origin";
 
 export async function requireCanonicalAccess(
   resource: string,
@@ -26,6 +27,10 @@ export async function requireCanonicalAccess(
 }
 
 export function mutationChangeId(request: Request): string {
+  const originCheck = verifyMutationOrigin(request);
+  if (!originCheck.ok) {
+    throw new CanonicalAdminError("CSRF_ORIGIN_INVALID", 403);
+  }
   const value = request.headers.get("x-luxia-change-id")?.trim();
   if (!value || value.length > 128) {
     throw new CanonicalAdminError("X_LUXIA_CHANGE_ID_REQUIRED", 400);

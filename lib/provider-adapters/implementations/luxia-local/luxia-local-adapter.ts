@@ -174,7 +174,7 @@ export class LuxiaLocalAdapter implements ProviderAdapter, AuthenticationProvide
       ...CURRENT_WEBAUTHN_CRYPTO, keyId: id, keyVersion: 1,
       verifierPolicyVersion: 1, hardwareBound: false, userVerificationRequired: true,
       credentialId: passkey.credentialId, publicKey: passkey.publicKeyPem,
-      relyingPartyId: input.relyingPartyId, allowedOrigin: input.allowedOrigin, signCount: 0,
+      relyingPartyId: input.relyingPartyId, allowedOrigin: input.allowedOrigin, signCount: passkey.signCount,
     }, input.enrolledBySubjectId ? { enrollmentAudit: { actorSubjectId: input.enrolledBySubjectId } } : undefined);
     return id;
   }

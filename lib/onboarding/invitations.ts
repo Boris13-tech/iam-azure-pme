@@ -119,7 +119,7 @@ export async function completeAcceptance(input: { token: unknown; principalName:
   const principalName = normalizePrincipalName(input.principalName);
   const challenge = typeof input.clientDataJSON === "string" ? registrationChallenge(input.clientDataJSON) : null;
   if (!principalName || principalName.length < 3 || !challenge) throw new InvitationError("INVALID_REQUEST", 400);
-  let passkey: { credentialId: string; publicKeyPem: string };
+  let passkey: { credentialId: string; publicKeyPem: string; signCount: number };
   try { passkey = verifyPasskeyRegistration({ ...input, expectedChallenge: challenge, expectedOrigin: origin.origin, rpId: origin.rpId }); }
   catch { throw new InvitationError("PASSKEY_REGISTRATION_INVALID", 400); }
   const scope = { organizationId: invitation.organization_id, tenantId: invitation.tenant_id };

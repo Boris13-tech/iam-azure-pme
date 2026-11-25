@@ -56,7 +56,7 @@ export async function completeSignup(input: { code: unknown } & PasskeyRegistrat
   const codeHash = signupCodeHash(input.code);
   const challenge = typeof input.clientDataJSON === "string" ? registrationChallenge(input.clientDataJSON) : null;
   if (!codeHash || !challenge) throw new SignupError("INVALID_REQUEST", 400);
-  let passkey: { credentialId: string; publicKeyPem: string };
+  let passkey: { credentialId: string; publicKeyPem: string; signCount: number };
   try {
     passkey = verifyPasskeyRegistration({ ...input, expectedChallenge: challenge, expectedOrigin: origin.origin, rpId: origin.rpId });
   } catch {
