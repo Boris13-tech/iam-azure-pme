@@ -139,7 +139,7 @@ export default function ReviewConsole() {
             <p className="lx-meta">{DECISIONS[item.decision] ?? item.decision}, {REVIEW_STATES[item.reviewState] ?? item.reviewState}{item.justification ? ` · « ${item.justification} »` : ""}</p>
             {item.decision === "PENDING" && item.reviewerSubjectId === actor && permissions.includes("access_reviews.decide") && selected.status === "OPEN" && <div className="mt-3 lx-stack">
               <div className="lx-field"><label htmlFor={`justification-${item.id}`} className="lx-label">Justification (aucun mot de passe ni secret)</label>
-                <textarea id={`justification-${item.id}`} minLength={3} maxLength={2000} rows={2} className="lx-input" style={{ height: "auto", padding: "10px 14px" }}
+                <textarea id={`justification-${item.id}`} minLength={3} maxLength={2000} rows={2} className="lx-input lx-input--textarea"
                   value={justifications[item.id] ?? ""} onChange={event => setJustifications({ ...justifications, [item.id]: event.target.value })} /></div>
               <div className="flex flex-wrap gap-2">{(["KEEP", "REVOKE"] as const).map(decision => <button key={decision} type="button"
                 disabled={busy || (justifications[item.id] ?? "").trim().length < 3} className={`lx-btn lx-btn--small ${decision === "KEEP" ? "lx-btn--primary" : "lx-btn--secondary"}`}

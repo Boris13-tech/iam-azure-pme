@@ -248,6 +248,7 @@ button, input, select, textarea { font: inherit; }
 .lx-input:hover { border-color: #9ca3af; }
 .lx-input:focus { outline: none; border-color: var(--brand-blue); box-shadow: var(--focus-ring); }
 .lx-input--mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .04em; }
+.lx-input--textarea { height: auto; padding: 10px 14px; }
 .lx-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 46px; padding: 0 18px;
   border-radius: 10px; font-size: var(--fs-base); font-weight: 600; text-decoration: none; cursor: pointer; transition: background-color .15s, border-color .15s, box-shadow .15s; }
 .lx-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -279,6 +280,7 @@ button, input, select, textarea { font: inherit; }
 
 /* Work forms inside panels (dashboard) */
 .lx-form-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 16px; }
+.lx-form-row--divider { border-top: 1px solid var(--border); }
 .lx-form-row .lx-field { flex: 1 1 220px; min-width: 0; }
 .lx-form-row .lx-btn { width: auto; }
 .lx-select { width: 100%; height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface);
