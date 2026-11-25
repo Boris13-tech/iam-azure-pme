@@ -128,7 +128,7 @@ export default function SoDConsole() {
             {p.status === "ACTIVE" ? "Désactiver" : "Activer"}</button>
         </li>)}
       </ul>)}
-      {policies.state === "ok" && policies.data.length > 0 && <form className="lx-form-row" style={{ borderTop: "1px solid var(--border)" }}
+      {policies.state === "ok" && policies.data.length > 0 && <form className="lx-form-row lx-form-row--divider"
         onSubmit={async e => { e.preventDefault(); if (await mutate(`policies/${policyId}/rules`, "POST", { entitlementAId: a, entitlementBId: b }, "Incompatibilité ajoutée.")) { setA(""); setB(""); } }}>
         <div className="lx-field"><label htmlFor="sod-policy" className="lx-label">Politique</label>
           <select id="sod-policy" className="lx-select" required value={policyId} onChange={e => { setPolicy(e.target.value); setA(""); setB(""); }}>
