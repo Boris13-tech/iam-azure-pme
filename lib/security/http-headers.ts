@@ -1,8 +1,12 @@
+import { FEDERATED_CSP_FORM_ACTION_ORIGINS } from "../provider-adapters/csp-origins";
+
 // G2-R03 (F-03): Edge-compatible HTTP security headers and strict nonce-based Content-Security-Policy.
 // - No Node-only ("node:*") imports so middleware.ts runs cleanly in the Edge runtime.
 // - Zero 'unsafe-inline' and zero 'unsafe-eval' in Production script-src and style-src-elem.
 // - Next.js 15 AppRouterAnnouncer assigns two fixed inline cssText strings for screen-reader route announcements;
 //   they are pinned by exact SHA-256 hash under style-src-attr ('unsafe-hashes') rather than opening 'unsafe-inline'.
+// - Referrer-Policy is set to 'same-origin': zero Referer is ever leaked cross-origin, while same-origin HTML
+//   POST forms (such as /auth/logout) preserve the browser Origin header instead of serializing 'Origin: null'.
 
 const NEXT_ROUTE_ANNOUNCER_STYLE_HASHES = [
   "'sha256-/3kWSXHts8LrwfemLzY9W0tOv5I4eLIhrf0pT8cU0WI='",
@@ -39,6 +43,8 @@ export function buildContentSecurityPolicy(options: {
         `style-src-attr 'unsafe-hashes' ${NEXT_ROUTE_ANNOUNCER_STYLE_HASHES.join(" ")}`,
       ];
 
+  const formAction = ["'self'", ...FEDERATED_CSP_FORM_ACTION_ORIGINS].join(" ");
+
   const directives = [
     "default-src 'self'",
     scriptSrc,
@@ -50,8 +56,8 @@ export function buildContentSecurityPolicy(options: {
     "frame-src 'none'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
-    // Chromium & WebKit enforce form-action across 302/303 redirect chains (/auth/login and /auth/logout?federated=true).
-    "form-action 'self' https://login.microsoftonline.com",
+    // Chromium & WebKit enforce form-action across 302/303 redirect chains (/auth/login and federated /auth/logout).
+    `form-action ${formAction}`,
     ...(isHttps ? ["upgrade-insecure-requests"] : []),
   ];
 
@@ -67,7 +73,7 @@ export function buildSecurityHeaders(options: {
     ["Content-Security-Policy", buildContentSecurityPolicy(options)],
     ["X-Content-Type-Options", "nosniff"],
     ["X-Frame-Options", "DENY"],
-    ["Referrer-Policy", "no-referrer"],
+    ["Referrer-Policy", "same-origin"],
     ["Permissions-Policy", PERMISSIONS_POLICY_VALUE],
     ["Cross-Origin-Opener-Policy", "same-origin"],
     ["X-DNS-Prefetch-Control", "off"],

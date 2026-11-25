@@ -36,7 +36,7 @@ test("strict nonce CSP emits zero violations across WebAuthn passkey signup, sig
   expect(csp1).toContain("form-action 'self' https://login.microsoftonline.com");
   expect(headers1["x-content-type-options"]).toBe("nosniff");
   expect(headers1["x-frame-options"]).toBe("DENY");
-  expect(headers1["referrer-policy"]).toBe("no-referrer");
+  expect(headers1["referrer-policy"]).toBe("same-origin");
   expect(headers1["permissions-policy"]).toContain("publickey-credentials-get=(self)");
   expect(headers1["permissions-policy"]).toContain("publickey-credentials-create=(self)");
   expect(headers1["x-powered-by"]).toBeUndefined();
@@ -56,7 +56,7 @@ test("strict nonce CSP emits zero violations across WebAuthn passkey signup, sig
   await signUpThroughUi(page, organization);
   await signInWithPasskey(page, organization.slug, organization.principalName);
   await page.goto("/dashboard/settings");
-  await expect(page.getByRole("heading", { name: "Authentification" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Authentification", exact: true })).toBeVisible();
   await signOut(page);
 
   // Unknown route renders custom 404 without inline style CSP violations.

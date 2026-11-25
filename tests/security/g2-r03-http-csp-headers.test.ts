@@ -58,7 +58,7 @@ describe("G2-R03 (F-03): HTTP security headers and strict nonce-based CSP", () =
     expect(loginRes.headers.get("x-middleware-next")).toBe("1");
     expect(loginRes.headers.get("x-content-type-options")).toBe("nosniff");
     expect(loginRes.headers.get("x-frame-options")).toBe("DENY");
-    expect(loginRes.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(loginRes.headers.get("referrer-policy")).toBe("same-origin");
     expect(loginRes.headers.get("permissions-policy")).toBe(PERMISSIONS_POLICY_VALUE);
     expect(loginRes.headers.get("cross-origin-opener-policy")).toBe("same-origin");
     expect(loginRes.headers.get("x-dns-prefetch-control")).toBe("off");
