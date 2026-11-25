@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isProductionProcess } from "../auth/authorization-mode";
 import { rawPrisma } from "../db/raw-prisma";
 
 // Customer Self-Onboarding v1, requirement 3. Counters live in PostgreSQL (luxia_rate_limit_hit):
@@ -20,11 +21,61 @@ export const RATE_LIMITS = {
 } as const;
 export type RateLimitScope = keyof typeof RATE_LIMITS;
 
-/** Client network key. On Vercel, x-real-ip / x-forwarded-for are set by the platform. */
-export function clientNetworkKey(request: Request): string {
-  const real = request.headers.get("x-real-ip")?.trim();
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return `ip:${real || forwarded || "unknown"}`;
+const SAFE_HEADER_NAME = /^[a-z0-9-]{3,64}$/;
+const SAFE_IP_TOKEN = /^[0-9a-fA-F:.]{2,64}$/;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function cleanAddress(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const candidate = raw.split(",")[0]?.trim() ?? "";
+  return SAFE_IP_TOKEN.test(candidate) ? candidate.toLowerCase() : null;
+}
+
+function isLocalLoopbackApp(env: Readonly<Record<string, string | undefined>>): boolean {
+  if (env.VERCEL_ENV === "production" || env.APP_ENV === "production") return false;
+  const url = env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!url) return false;
+  try {
+    return LOOPBACK_HOSTS.has(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Client network key with explicit proxy trust boundary (G2-R06 / F-07):
+ * 1. On Vercel (VERCEL === "1"): trusts only edge-overwritten `x-vercel-forwarded-for` or `x-real-ip`,
+ *    never arbitrary `x-forwarded-for` hops when edge headers are absent.
+ * 2. In Production outside Vercel: trusts ONLY the single-IP header explicitly declared in
+ *    `LUXIA_TRUSTED_CLIENT_IP_HEADER` (stripped and overwritten by the trusted reverse proxy).
+ *    Without it, spoofable `x-real-ip` and `x-forwarded-for` are ignored and all unverified requests
+ *    share `"ip:untrusted-proxy"` so rate limits cannot be bypassed by header spoofing.
+ * 3. In development, tests and local loopback E2E (`http://localhost:*`): accepts `x-real-ip` / `x-forwarded-for`.
+ */
+export function clientNetworkKey(
+  request: Request,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  if (env.VERCEL === "1") {
+    const vercelIp =
+      cleanAddress(request.headers.get("x-vercel-forwarded-for")) ??
+      cleanAddress(request.headers.get("x-real-ip"));
+    return `ip:${vercelIp ?? "vercel-unknown"}`;
+  }
+
+  if (isProductionProcess(env) && !isLocalLoopbackApp(env)) {
+    const trustedHeader = env.LUXIA_TRUSTED_CLIENT_IP_HEADER?.trim().toLowerCase();
+    if (!trustedHeader || !SAFE_HEADER_NAME.test(trustedHeader) || trustedHeader === "x-forwarded-for") {
+      return "ip:untrusted-proxy";
+    }
+    const proxyIp = cleanAddress(request.headers.get(trustedHeader));
+    return `ip:${proxyIp ?? "untrusted-proxy"}`;
+  }
+
+  const devOrTestIp =
+    cleanAddress(request.headers.get("x-real-ip")) ??
+    cleanAddress(request.headers.get("x-forwarded-for"));
+  return `ip:${devOrTestIp ?? "unknown"}`;
 }
 
 /** True when the call is allowed. Fails closed: any database error counts as limited. */
