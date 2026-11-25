@@ -22,13 +22,20 @@ export const RATE_LIMITS = {
 export type RateLimitScope = keyof typeof RATE_LIMITS;
 
 const SAFE_HEADER_NAME = /^[a-z0-9-]{3,64}$/;
-const SAFE_IP_TOKEN = /^[0-9a-fA-F:.]{2,64}$/;
+const STRICT_IP_TOKEN = /^[0-9a-fA-F:.]{2,64}$/;
+const DEV_TEST_CLIENT_TOKEN = /^[A-Za-z0-9:._-]{2,128}$/;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-function cleanAddress(raw: string | null | undefined): string | null {
+function cleanStrictIp(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const candidate = raw.split(",")[0]?.trim() ?? "";
-  return SAFE_IP_TOKEN.test(candidate) ? candidate.toLowerCase() : null;
+  return STRICT_IP_TOKEN.test(candidate) ? candidate.toLowerCase() : null;
+}
+
+function cleanDevOrTestClientKey(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const candidate = raw.split(",")[0]?.trim() ?? "";
+  return DEV_TEST_CLIENT_TOKEN.test(candidate) ? candidate : null;
 }
 
 function isLocalLoopbackApp(env: Readonly<Record<string, string | undefined>>): boolean {
@@ -50,7 +57,8 @@ function isLocalLoopbackApp(env: Readonly<Record<string, string | undefined>>): 
  *    `LUXIA_TRUSTED_CLIENT_IP_HEADER` (stripped and overwritten by the trusted reverse proxy).
  *    Without it, spoofable `x-real-ip` and `x-forwarded-for` are ignored and all unverified requests
  *    share `"ip:untrusted-proxy"` so rate limits cannot be bypassed by header spoofing.
- * 3. In development, tests and local loopback E2E (`http://localhost:*`): accepts `x-real-ip` / `x-forwarded-for`.
+ * 3. In development, integration tests and local loopback E2E (`http://localhost:*`): accepts bounded
+ *    `x-real-ip` / `x-forwarded-for` tokens (including per-test bucket suffixes such as `198.51.100.1-<run>`).
  */
 export function clientNetworkKey(
   request: Request,
@@ -58,8 +66,8 @@ export function clientNetworkKey(
 ): string {
   if (env.VERCEL === "1") {
     const vercelIp =
-      cleanAddress(request.headers.get("x-vercel-forwarded-for")) ??
-      cleanAddress(request.headers.get("x-real-ip"));
+      cleanStrictIp(request.headers.get("x-vercel-forwarded-for")) ??
+      cleanStrictIp(request.headers.get("x-real-ip"));
     return `ip:${vercelIp ?? "vercel-unknown"}`;
   }
 
@@ -68,14 +76,14 @@ export function clientNetworkKey(
     if (!trustedHeader || !SAFE_HEADER_NAME.test(trustedHeader) || trustedHeader === "x-forwarded-for") {
       return "ip:untrusted-proxy";
     }
-    const proxyIp = cleanAddress(request.headers.get(trustedHeader));
+    const proxyIp = cleanStrictIp(request.headers.get(trustedHeader));
     return `ip:${proxyIp ?? "untrusted-proxy"}`;
   }
 
-  const devOrTestIp =
-    cleanAddress(request.headers.get("x-real-ip")) ??
-    cleanAddress(request.headers.get("x-forwarded-for"));
-  return `ip:${devOrTestIp ?? "unknown"}`;
+  const devOrTestKey =
+    cleanDevOrTestClientKey(request.headers.get("x-real-ip")) ??
+    cleanDevOrTestClientKey(request.headers.get("x-forwarded-for"));
+  return `ip:${devOrTestKey ?? "unknown"}`;
 }
 
 /** True when the call is allowed. Fails closed: any database error counts as limited. */

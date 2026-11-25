@@ -98,5 +98,13 @@ describe("G2-R06 (F-06 & F-07): constant-time provenance token and proxy header 
       headers: { "x-real-ip": "2001:db8:abcd::1" },
     });
     expect(clientNetworkKey(e2eReq, localE2eEnv)).toBe("ip:2001:db8:abcd::1");
+
+    // 5. Integration test per-run suffixed keys (e.g. 198.51.100.1-a1b2c3d4) stay isolated in test mode,
+    //    but are rejected as malformed IP tokens in Production.
+    const testKeyReq = new Request("http://localhost:3000/api/auth/local/begin", {
+      headers: { "x-real-ip": "198.51.100.1-a1b2c3d4" },
+    });
+    expect(clientNetworkKey(testKeyReq, { NODE_ENV: "test" })).toBe("ip:198.51.100.1-a1b2c3d4");
+    expect(clientNetworkKey(testKeyReq, vercelEnv)).toBe("ip:vercel-unknown");
   });
 });
