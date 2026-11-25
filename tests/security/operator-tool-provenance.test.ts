@@ -27,6 +27,7 @@ const NOT_VERSIONED: Record<string, string> = {
   "production-resource-preflight.ts": "read-only inspection",
   "resource-owner-bootstrap.ts": "library of the one-time resource bootstrap, not a command",
   "run-production-resource-bootstrap.ts": "one-time historical bootstrap (PRODUCTION VERIFIED); repository follow-up: record its version before any reuse",
+  "verify-f3-entra-cutover.mjs": "read-only F3 Entra secret cutover preflight inspection; no Production write",
 };
 
 describe("operator commands record the version of the code they ran", () => {
