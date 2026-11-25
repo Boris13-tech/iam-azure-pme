@@ -1,14 +1,18 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { resolveAuthorizationMode } from "@/lib/auth/authorization-gateway";
+import { PROVENANCE_TOKEN_HEADER, provenanceTokenAccepted } from "@/lib/monitoring/provenance-token";
+
+export const dynamic = "force-dynamic";
+
+const NO_STORE = { "Cache-Control": "no-store" };
 
 export async function GET(req: NextRequest) {
-  const expected = process.env.STAGING_PROVENANCE_TOKEN;
-  const provided = req.headers.get("x-luxia-provenance-token");
+  const provided = req.headers.get(PROVENANCE_TOKEN_HEADER);
 
-  if (!expected || provided !== expected) {
+  if (!provenanceTokenAccepted(provided)) {
     return NextResponse.json(
       { error: "Not found" },
-      { status: 404 }
+      { status: 404, headers: NO_STORE }
     );
   }
 
@@ -20,5 +24,5 @@ export async function GET(req: NextRequest) {
       "unknown",
     // The mode the gateway actually applies ("refused" when Production has no valid mode).
     authzMode: resolveAuthorizationMode() ?? "refused"
-  });
+  }, { headers: NO_STORE });
 }
