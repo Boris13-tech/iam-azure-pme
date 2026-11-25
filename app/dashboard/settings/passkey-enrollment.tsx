@@ -15,7 +15,7 @@ export function PasskeyEnrollment() {
       if (!window.isSecureContext || !window.PublicKeyCredential || !navigator.credentials) {
         throw new Error("WEBAUTHN_UNAVAILABLE");
       }
-      const beginResponse = await fetch("/api/auth/local/enrollment/begin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ principalName }) });
+      const beginResponse = await fetch("/api/auth/local/enrollment/begin", { method: "POST", headers: { "Content-Type": "application/json", "x-luxia-change-id": `self:passkey-enroll-begin:${crypto.randomUUID()}` }, body: JSON.stringify({ principalName }) });
       if (!beginResponse.ok) {
         const failure = await beginResponse.json().catch(() => ({ error: "ENROLLMENT_BEGIN_FAILED" }));
         throw new Error(`SERVER_BEGIN:${failure.error ?? "ENROLLMENT_BEGIN_FAILED"}`);
@@ -33,7 +33,7 @@ export function PasskeyEnrollment() {
       const publicKey = attestation.getPublicKey?.();
       const authenticatorData = attestation.getAuthenticatorData?.();
       if (!publicKey || !authenticatorData) throw new Error("PUBLIC_KEY_UNAVAILABLE");
-      const completed = await fetch("/api/auth/local/enrollment/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      const completed = await fetch("/api/auth/local/enrollment/complete", { method: "POST", headers: { "Content-Type": "application/json", "x-luxia-change-id": `self:passkey-enroll-complete:${crypto.randomUUID()}` }, body: JSON.stringify({
         providerConnectionId: begin.providerConnectionId, identityAccountId: begin.identityAccountId,
         transactionId: begin.transactionId, challenge: begin.challenge,
         credentialId: encode(credential.rawId), clientDataJSON: encode(attestation.clientDataJSON),

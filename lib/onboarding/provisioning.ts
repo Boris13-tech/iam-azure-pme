@@ -13,7 +13,7 @@ type Scope = { organizationId: string; tenantId: string };
 /** LUXIA_LOCAL identity with one verified passkey for an existing subject. */
 export async function createPasskeyIdentity(tx: Tx, scope: Scope, input: {
   subjectId: string; connectionId: string; principalName: string;
-  passkey: { credentialId: string; publicKeyPem: string }; rpId: string; origin: string; actorSubjectId: string;
+  passkey: { credentialId: string; publicKeyPem: string; signCount?: number }; rpId: string; origin: string; actorSubjectId: string;
 }) {
   const account = await tx.identityAccount.create({ data: { ...scope, subjectId: input.subjectId, providerConnectionId: input.connectionId, externalObjectId: randomUUID() } });
   await tx.localIdentity.create({ data: { ...scope, identityAccountId: account.id, principalName: input.principalName } });
@@ -25,7 +25,7 @@ export async function createPasskeyIdentity(tx: Tx, scope: Scope, input: {
     // Attestation "none": the hardware cannot be proven, so it is not claimed.
     hardwareBound: false, userVerificationRequired: true,
     credentialId: input.passkey.credentialId, publicKey: input.passkey.publicKeyPem,
-    relyingPartyId: input.rpId, allowedOrigin: input.origin, signCount: 0,
+    relyingPartyId: input.rpId, allowedOrigin: input.origin, signCount: input.passkey.signCount ?? 0,
   } });
   await tx.canonicalAdminAuditEvent.create({ data: { ...scope, actorSubjectId: input.actorSubjectId, targetSubjectId: input.subjectId,
     operation: "LOCAL_AUTHENTICATOR.ENROLL", changeId: `enroll:${authenticatorId}`, result: "SUCCESS", metadata: { type: "PASSKEY" } } });

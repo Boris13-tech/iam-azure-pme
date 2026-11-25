@@ -281,7 +281,7 @@ export async function completeRecoveryEnrollment(context: RecoveryContext, input
   const transactionId = typeof input.transactionId === "string" && UUID.test(input.transactionId) ? input.transactionId : null;
   const challenge = typeof input.clientDataJSON === "string" ? registrationChallenge(input.clientDataJSON) : null;
   if (!transactionId || !challenge) throw registrationInvalid();
-  let passkey: { credentialId: string; publicKeyPem: string };
+  let passkey: { credentialId: string; publicKeyPem: string; signCount: number };
   try { passkey = verifyPasskeyRegistration({ ...input, expectedChallenge: challenge, expectedOrigin: origin.origin, rpId: origin.rpId }); }
   catch { throw registrationInvalid(); }
   try {
@@ -309,7 +309,7 @@ export async function completeRecoveryEnrollment(context: RecoveryContext, input
         // Attestation "none": the hardware cannot be proven, so it is not claimed.
         hardwareBound: false, userVerificationRequired: true,
         credentialId: passkey.credentialId, publicKey: passkey.publicKeyPem,
-        relyingPartyId: origin.rpId, allowedOrigin: origin.origin, signCount: 0, enrolledAt: now,
+        relyingPartyId: origin.rpId, allowedOrigin: origin.origin, signCount: passkey.signCount, enrolledAt: now,
       } });
       const sessionsRevoked = await tx.session.updateMany({ where: { ...own, revokedAt: null }, data: { revokedAt: now } });
       const audit = { ...scope, actorSubjectId: r.subjectId, targetSubjectId: r.subjectId, result: "SUCCESS" as const };

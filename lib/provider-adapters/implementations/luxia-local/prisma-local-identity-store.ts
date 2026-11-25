@@ -134,8 +134,13 @@ export class PrismaLocalIdentityStore implements LocalIdentityStore {
   }
   async advanceAuthenticator(context: ProviderOperationContext, id: string, update: { signCount?: number; lastTotpStep?: number }): Promise<boolean> {
     return withTenantDb(scope(context), async (tx) => {
-      const monotonic = update.signCount !== undefined && update.signCount > 0 ? { signCount: { lt: update.signCount } } :
-        update.lastTotpStep !== undefined ? { OR: [{ lastTotpStep: null }, { lastTotpStep: { lt: update.lastTotpStep } }] } : {};
+      // Zero-counter authenticators (synced passkeys) stay at 0 (WHERE signCount = 0 prevents racing a non-zero
+      // advance back down to 0); non-zero counters must strictly increase (WHERE signCount < next).
+      const monotonic = update.signCount !== undefined
+        ? (update.signCount > 0 ? { signCount: { lt: update.signCount } } : { signCount: 0 })
+        : update.lastTotpStep !== undefined
+          ? { OR: [{ lastTotpStep: null }, { lastTotpStep: { lt: update.lastTotpStep } }] }
+          : {};
       return (await tx.localAuthenticator.updateMany({ where: { id, organizationId: context.organizationId, tenantId: context.tenantId, status: "ACTIVE", ...monotonic },
         data: { ...update, lastUsedAt: new Date() } })).count === 1;
     });

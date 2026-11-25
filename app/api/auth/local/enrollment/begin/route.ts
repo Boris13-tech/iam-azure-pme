@@ -1,15 +1,27 @@
 import { NextResponse } from "next/server";
-import { randomUUID } from "node:crypto";
+import { CanonicalAdminError } from "@/lib/admin/canonical-admin-error";
+import { mutationChangeId } from "@/lib/admin/http";
 import { requireAuth } from "@/lib/auth/require-auth";
+import { requireRecentVerifiedAuthentication } from "@/lib/auth/step-up";
 import { getLuxiaLocalAdapter, localProviderContext } from "@/lib/auth/providers/luxia-local";
 import { withTenantDb } from "@/lib/db/scoped-client";
 import { ProviderAdapterError } from "@/lib/provider-adapters";
+import { verifyMutationOrigin } from "@/lib/security/csrf-origin";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    // 1. Authenticate FULL session first (a RECOVERY or missing session always gets 401).
     const auth = await requireAuth();
+
+    // 2. Enforce explicit Origin + Fetch-Metadata CSRF policy and caller change correlation.
+    const originCheck = verifyMutationOrigin(request);
+    if (!originCheck.ok) {
+      return NextResponse.json({ error: "CSRF_ORIGIN_INVALID" }, { status: 403 });
+    }
+    const changeId = mutationChangeId(request);
+
     const body = await request.json() as { principalName?: string };
     const principalName = body.principalName?.trim().toLowerCase();
     if (!principalName || principalName.length > 254) {
@@ -19,6 +31,9 @@ export async function POST(request: Request) {
     const prepared = await withTenantDb(
       { organizationId: auth.organizationId, tenantId: auth.tenantId },
       async (tx) => {
+        // 3. Step-up: require a verified authentication ceremony within the last 15 minutes.
+        const stepUp = await requireRecentVerifiedAuthentication(tx, auth);
+
         const subject = await tx.subject.findUniqueOrThrow({
           where: { organizationId_tenantId_id: { organizationId: auth.organizationId, tenantId: auth.tenantId, id: auth.subjectId } },
           select: { id: true, name: true },
@@ -45,7 +60,7 @@ export async function POST(request: Request) {
             organizationId: auth.organizationId, tenantId: auth.tenantId, providerConnectionId: connection.id,
           } });
         }
-        return { subject, connection };
+        return { subject, connection, stepUp };
       },
     );
 
@@ -74,6 +89,11 @@ export async function POST(request: Request) {
           select: { id: true },
         });
         if (!locked) return;
+        // Unlocking a brute-force LOCKED local identity requires a fresh FEDERATED_OIDC step-up session,
+        // never a pre-lock local session.
+        if (prepared.stepUp.method !== "FEDERATED_OIDC") {
+          throw new CanonicalAdminError("FEDERATED_STEP_UP_REQUIRED", 403);
+        }
         await tx.localIdentity.update({
           where: { id: locked.id },
           data: { status: "ACTIVE", failedAttempts: 0, lockedUntil: null },
@@ -84,23 +104,27 @@ export async function POST(request: Request) {
           actorSubjectId: auth.subjectId,
           targetSubjectId: auth.subjectId,
           operation: "LOCAL_IDENTITY.RECOVERY_UNLOCK",
-          changeId: `local-recovery:${randomUUID()}`,
+          changeId: `${changeId}:unlock`,
           result: "SUCCESS",
           metadata: { providerConnectionId: prepared.connection.id, reason: "PASSKEY_REENROLLMENT_FROM_FEDERATED_SESSION" },
         } });
       },
     );
     const challenge = await adapter.beginEnrollment(context, identityAccountId);
+    const rpHostname = new URL(originCheck.expectedOrigin).hostname;
     return NextResponse.json({
       providerConnectionId: prepared.connection.id,
       identityAccountId,
       transactionId: challenge.transactionId,
       challenge: challenge.publicChallenge?.challenge,
       expiresAt: challenge.expiresAt,
-      rp: { id: new URL(request.url).hostname, name: "LUXIA Identity" },
+      rp: { id: rpHostname, name: "LUXIA Identity" },
       user: { id: auth.subjectId, name: principalName, displayName: prepared.subject.name },
     });
   } catch (error) {
+    if (error instanceof CanonicalAdminError) {
+      return NextResponse.json({ error: error.code }, { status: error.httpStatus });
+    }
     const message = error instanceof Error ? error.message : "ENROLLMENT_FAILED";
     const status = message === "UNAUTHORIZED" ? 401 : message === "FORBIDDEN" ? 403 : 500;
     const safeCode = error instanceof ProviderAdapterError
