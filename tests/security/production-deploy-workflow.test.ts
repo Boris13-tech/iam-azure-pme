@@ -252,6 +252,20 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(output).not.toContain("never went live");
   }, 30_000);
 
+  // Codex, second review of #202 (P1): READY once, then every alias read fails. The wait must not use up the deadline:
+  // the previous deployment is still promoted, and the run stays unresolved.
+  it.runIf(hasShell)("rollback: failing alias reads after READY leave time to promote the previous deployment", () => {
+    const { status, output, calls } = run("rollback", `case "$url" in ${project("dpl_old")}
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo '{}' ;;
+      *"/v13/deployments/"*) n="$(dirname "$0")/ready"; if [[ -f "$n" ]]; then exit 28; fi; touch "$n"; echo '{"readyState":"READY"}' ;; esac`,
+      { DEPLOYMENT: "dpl_new", ROLLBACK_BUDGET_SECONDS: "30" }, "exit 1", 40_000);
+    expect(status).not.toBe(0);
+    expect(output).toContain("alias assignment has not settled");
+    expect(output).not.toContain("no time left for promotion request 1");
+    expect(calls).toContain("/promote/dpl_old");
+  }, 45_000);
+
   it.runIf(hasShell)("rollback: a ready deployment whose alias was assigned is always followed by a promotion of the previous one", () => {
     // Assigned, and the domain already on dpl_new: promoted back. Assigned while the domain shows dpl_old: still promoted.
     const moved = run("rollback", `case "$url" in ${promotedBack}

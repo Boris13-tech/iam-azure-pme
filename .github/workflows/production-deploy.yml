@@ -324,12 +324,15 @@ jobs:
             # its alias assignment must have settled (assigned, or failed) before anything is decided or promoted.
             if [[ "$state" == "READY" ]]; then
               reached_ready=1; settled=""
-              while (( deadline - SECONDS > 3 )); do
+              # At most a third of the time left, so the promotion below always keeps its turn (Codex, review of #202).
+              stop=$((SECONDS + (deadline - SECONDS) / 3))
+              while (( $(remaining) > 3 )); do
                 if alias_state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" \
                     | jq -r 'if (.aliasError // null) != null then "failed" elif (.aliasAssigned // false) != false then "assigned" else "pending" end')" \
                     && [[ "$alias_state" == "assigned" || "$alias_state" == "failed" ]]; then settled=1; break; fi
                 pause || break
               done
+              stop=$deadline
               [[ -n "$settled" ]] || unresolved="deployment $one is ready but its Production alias assignment has not settled"
             fi
           done
