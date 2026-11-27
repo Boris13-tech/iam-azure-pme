@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// F3 (docs/architecture/F3-SECRET-STORE-DESIGN.md): static guarantees of the secret-store layer.
+// F3 / G2-R02 (docs/architecture/F3-SECRET-STORE-DESIGN.md): static guarantees of the secret-store layer.
 const read = (file: string) => readFileSync(file, "utf8").replace(/\r\n/g, "\n");
 function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
@@ -13,7 +13,7 @@ function files(dir: string): string[] {
 const runtime = [...files("lib"), ...files("app")];
 const STORES = "lib/provider-adapters/infrastructure/secret-stores/";
 
-describe("Secret-store architecture (F3)", () => {
+describe("Secret-store architecture (F3 / G2-R02)", () => {
   it("no vault or identity SDK: the vault is reached through its REST API, so replacing the store never touches the core", () => {
     // @azure/msal-node stays where F1 confined it (the Microsoft Graph client of the Entra adapter); no vault SDK.
     const pkg = JSON.parse(read("package.json")) as { dependencies?: Record<string, string> };
@@ -32,10 +32,19 @@ describe("Secret-store architecture (F3)", () => {
     expect(core.filter(file => /secret-stores|AzureKeyVaultSecretResolver|FederatedWorkloadTokenProvider/.test(read(file)))).toEqual([]);
   });
 
-  it("ratchet: the environment store is built only in the two current composition roots, which F3 rewires to a vault", () => {
-    const builders = runtime.filter(file => /new EnvironmentSecretResolver\(/.test(read(file))).sort();
-    expect(builders).toEqual(["lib/auth/providers/luxia-local.ts", "lib/provider-adapters/implementations/microsoft-entra/runtime.ts"]);
+  it("ratchet: EnvironmentSecretResolver is confined to runtime-resolver (non-Production only) and assertSecretStoreAllowed is wired", () => {
+    const envBuilders = runtime.filter(file => /new EnvironmentSecretResolver\(/.test(read(file))).sort();
+    expect(envBuilders).toEqual([`${STORES}runtime-resolver.ts`]);
+    const roots = runtime.filter(file => /createRuntimeSecretResolver\(/.test(read(file)) && !file.startsWith(STORES)).sort();
+    expect(roots).toEqual([
+      "lib/auth/providers/luxia-local.ts",
+      "lib/provider-adapters/implementations/microsoft-entra/runtime.ts",
+    ]);
+    expect(read(`${STORES}runtime-resolver.ts`)).toContain("assertSecretStoreAllowed(");
     expect(read("lib/provider-adapters/infrastructure/environment-secret-resolver.ts")).toContain(`readonly kind = "environment";`);
     expect(read(`${STORES}runtime-guard.ts`)).toContain(`throw new Error("PRODUCTION_SECRET_STORE_REQUIRED")`);
+
+    const entraConfig = read("lib/provider-adapters/implementations/microsoft-entra/connection-config.ts");
+    expect(entraConfig).not.toMatch(/\bENTRA_AUTH_CLIENT_SECRET\b|\bGRAPH_CLIENT_SECRET\b|\bENTRA_AUTH_CLIENT_ID\b|\bNEXT_PUBLIC_GRAPH_/);
   });
 });
