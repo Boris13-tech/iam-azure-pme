@@ -234,7 +234,7 @@ describe("Production deploy workflow (GOV-001)", () => {
     const { status, output, calls } = run("rollback", `case "$url" in ${project("dpl_old")}
       *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
       *"/promote/"*) echo 'conflict'; exit 22 ;;
-      *) echo '{"readyState":"CANCELED"}' ;; esac`, { DEPLOYMENT: "dpl_new" });
+      *) echo '{"readyState":"CANCELED"}' ;; esac`, { DEPLOYMENT: "dpl_new", ROLLBACK_BUDGET_SECONDS: "30" }); // the read's third of the budget clears the 3 s margin
     expect(status, output).toBe(0);
     expect(output).toContain("the new deployment never went live: Production still serves dpl_old");
     expect(calls).not.toContain("/promote/");
