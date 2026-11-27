@@ -228,5 +228,36 @@ describe("G2-R02 (F-02): Microsoft Entra & Graph per-connection secret isolation
     await expect(readPlatformWorkloadAssertion({ VERCEL: "1", VERCEL_ENV: "production" })).resolves.toBe(
       "spoofed.jwt.token",
     );
+
+    // Non-Production end-to-end check: connection-scoped env:// references emitted by connection-config
+    // resolve cleanly through createRuntimeSecretResolver() -> EnvironmentSecretResolver.
+    const prefix = connectionScopedEnvPrefix("conn-a");
+    const savedOidc = process.env[`${prefix}_AUTH_CLIENT_SECRET`];
+    const savedGraph = process.env[`${prefix}_GRAPH_CLIENT_SECRET`];
+    try {
+      process.env[`${prefix}_AUTH_CLIENT_SECRET`] = "preview-oidc-secret-value";
+      process.env[`${prefix}_GRAPH_CLIENT_SECRET`] = "preview-graph-secret-value";
+      mocks.connectionFindFirst.mockResolvedValueOnce({
+        id: "conn-a",
+        externalScopeId: "11111111-2222-4333-8444-555555555555",
+        status: "ACTIVE",
+      });
+      mocks.secretRefFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      const cfg = await new PrismaMicrosoftEntraConnectionConfigResolver(() => process.env).resolve(CTX_A);
+      const previewResolver = createRuntimeSecretResolver({ env: { VERCEL_ENV: "preview" } });
+      const resolvedOidc = await previewResolver.withSecret(CTX_A, cfg.oidcClientSecret!, async (lease) =>
+        lease.read((bytes) => new TextDecoder().decode(bytes)),
+      );
+      const resolvedGraph = await previewResolver.withSecret(CTX_A, cfg.graphClientSecret!, async (lease) =>
+        lease.read((bytes) => new TextDecoder().decode(bytes)),
+      );
+      expect(resolvedOidc).toBe("preview-oidc-secret-value");
+      expect(resolvedGraph).toBe("preview-graph-secret-value");
+    } finally {
+      if (savedOidc === undefined) delete process.env[`${prefix}_AUTH_CLIENT_SECRET`];
+      else process.env[`${prefix}_AUTH_CLIENT_SECRET`] = savedOidc;
+      if (savedGraph === undefined) delete process.env[`${prefix}_GRAPH_CLIENT_SECRET`];
+      else process.env[`${prefix}_GRAPH_CLIENT_SECRET`] = savedGraph;
+    }
   });
 });
