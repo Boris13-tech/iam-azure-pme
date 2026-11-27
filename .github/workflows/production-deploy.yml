@@ -308,10 +308,14 @@ jobs:
           # 2. Each must be finished (ready, failed or cancelled) before the promotion, or it could still reach Production.
           reached_ready=""
           for one in $ids; do
-            state=""
+            state=""; alias_state=""
+            # Read together from one answer: the state, and whether the Production domain assignment has settled.
+            deployment_view='(.readyState // "") + " " + (if (.aliasError // null) != null then "failed" elif (.aliasAssigned // false) != false then "assigned" else "pending" end)'
             while (( deadline - SECONDS > 3 )); do
               # A failed read keeps the last state actually seen (as for Production); a terminal state ends the wait.
-              if read_state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r '.readyState // empty')" && [[ -n "$read_state" ]]; then state="$read_state"; fi
+              if view="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r "$deployment_view")" && [[ -n "${view%% *}" ]]; then
+                state="${view%% *}"; alias_state="${view##* }"
+              fi
               [[ "$state" == "READY" || "$state" == "ERROR" || "$state" == "CANCELED" ]] && break
               api -X PATCH "https://api.vercel.com/v12/deployments/$one/cancel?teamId=$TEAM" > /dev/null || true
               pause || break
@@ -324,13 +328,15 @@ jobs:
             # its alias assignment must have settled (assigned, or failed) before anything is decided or promoted.
             if [[ "$state" == "READY" ]]; then
               reached_ready=1; settled=""
-              # At most a third of the time left, so the promotion below always keeps its turn (Codex, review of #202).
-              stop=$((SECONDS + (deadline - SECONDS) / 3))
-              while (( $(remaining) > 3 )); do
-                if alias_state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" \
-                    | jq -r 'if (.aliasError // null) != null then "failed" elif (.aliasAssigned // false) != false then "assigned" else "pending" end')" \
-                    && [[ "$alias_state" == "assigned" || "$alias_state" == "failed" ]]; then settled=1; break; fi
+              [[ "$alias_state" == "assigned" || "$alias_state" == "failed" ]] && settled=1
+              # Still pending: wait at most a third of the time left (never less than 6 s within the deadline), so the
+              # promotion below always keeps its turn (Codex, second review of #202).
+              window=$(( (deadline - SECONDS) / 3 )); (( window < 6 )) && window=6
+              stop=$((SECONDS + window))
+              while [[ -z "$settled" ]] && (( $(remaining) > 3 )); do
                 pause || break
+                if view="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" | jq -r "$deployment_view")" \
+                    && [[ "${view##* }" == "assigned" || "${view##* }" == "failed" ]]; then settled=1; fi
               done
               stop=$deadline
               [[ -n "$settled" ]] || unresolved="deployment $one is ready but its Production alias assignment has not settled"
