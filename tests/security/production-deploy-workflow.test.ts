@@ -144,7 +144,10 @@ describe("Production deploy workflow (GOV-001)", () => {
       return { status: result.status, output: result.stdout + result.stderr, calls: read("calls"), out: read("out"), summary: read("summary"), record: read("production-change-record.json") };
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
-  const project = (id: string) => `*"/v9/projects/"*) echo '{"targets":{"production":{"id":"${id}"}}}' ;;`;
+  // What Production serves: the deployment its domain's alias points to (the project's targets.production is not read).
+  const project = (id: string) => `*"/v4/aliases/"*) echo '{"deploymentId":"${id}"}' ;;`;
+  // The domain points to the new deployment until a promotion is requested, then back to the previous one.
+  const promotedBack = `*"/v4/aliases/"*) if grep -q "/promote/" "$(dirname "$0")/calls"; then echo '{"deploymentId":"dpl_old"}'; else echo '{"deploymentId":"dpl_new"}'; fi ;;`;
   // Vercel's environment variables of the project (names and targets only), as the deploy step reads them before sending.
   const vercelEnvs = (envs: unknown = [{ key: "AUTHZ_MODE", target: ["production", "preview"] }, { key: "LUXIA_MONITORING_TOKEN", target: ["production"] },
     { key: "CRON_SECRET", target: "production" }]) => `*"/v10/projects/"*) echo '${JSON.stringify({ envs })}' ;;`;
@@ -199,6 +202,87 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(status).not.toBe(0);
     expect(output).toContain("not in the configured project");
   }, 30_000);
+
+  // 2026-11-21: the project's targets.production named a deployment that never went live while the domain still served
+  // the previous one. What Production serves is read from the domain's alias, never from targets.production.
+  it("what Production serves is read from the domain's alias in both steps, never from targets.production", () => {
+    expect(workflow).not.toContain("targets.production.id");
+    for (const id of ["deploy", "rollback"]) expect(step(deploy, id).run).toContain('/v4/aliases/${BASE#https://}?teamId=$TEAM');
+  });
+
+  const ready = `*"/v13/deployments?"*) echo '{"id":"dpl_new","projectId":"prj"}' ;;
+      *"/v13/deployments/"*) echo '{"readyState":"READY"}' ;;`;
+
+  it.runIf(hasShell)("deploy: passes once the domain points to the new deployment, even if it moves a little after READY", () => {
+    // The first alias read (before sending) and the first after READY still name dpl_old; the next names dpl_new.
+    const alias = `*"/v4/aliases/"*) n="$(dirname "$0")/alias"; c=$(cat "$n" 2>/dev/null || echo 0); echo $((c+1)) > "$n";
+        if (( c < 2 )); then echo '{"deploymentId":"dpl_old"}'; else echo '{"deploymentId":"dpl_new"}'; fi ;;`;
+    const { status, output, out } = run("deploy", `case "$url" in ${alias} ${vercelEnvs()} ${ready} esac`);
+    expect(status, output).toBe(0);
+    expect(out).toContain("previous=dpl_old");
+    expect(output).toContain("Production now serves dpl_new (previous dpl_old)");
+  }, 30_000);
+
+  it.runIf(hasShell)("deploy: a ready deployment the domain never points to fails the run, naming what is served", () => {
+    const { status, output } = run("deploy", `case "$url" in ${project("dpl_old")} ${vercelEnvs()} ${ready} esac`);
+    expect(status).not.toBe(0);
+    expect(output).toContain("Production serves dpl_old, not dpl_new");
+  }, 30_000);
+
+  it.runIf(hasShell)("rollback: when the domain never left the previous deployment, nothing is promoted and the rollback is confirmed", () => {
+    // The 2026-11-21 case: the new deployment was cancelled, the domain stayed on dpl_old; promoting it answered 409.
+    const { status, output, calls } = run("rollback", `case "$url" in ${project("dpl_old")}
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo 'conflict'; exit 22 ;;
+      *) echo '{"readyState":"CANCELED"}' ;; esac`, { DEPLOYMENT: "dpl_new", ROLLBACK_BUDGET_SECONDS: "30" }); // the read's third of the budget clears the 3 s margin
+    expect(status, output).toBe(0);
+    expect(output).toContain("the new deployment never went live: Production still serves dpl_old");
+    expect(calls).not.toContain("/promote/");
+  }, 30_000);
+
+  // Codex, review of #202 (P1): a READY deployment whose alias assignment is still pending can take the domain after the
+  // rollback has looked at it. The shortcut is never taken once a deployment of the run was ready.
+  it.runIf(hasShell)("rollback: a ready deployment whose alias assignment never settles is unresolved, never a confirmed rollback", () => {
+    const { status, output } = run("rollback", `case "$url" in ${project("dpl_old")}
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo '{}' ;;
+      *) echo '{"readyState":"READY","aliasAssigned":false}' ;; esac`, { DEPLOYMENT: "dpl_new" });
+    expect(status).not.toBe(0);
+    expect(output).toContain("ROLLBACK UNRESOLVED: deployment dpl_new is ready but its Production alias assignment has not settled");
+    expect(output).not.toContain("never went live");
+  }, 30_000);
+
+  // Codex, second review of #202 (P1): READY once, then every alias read fails. The wait must not use up the deadline:
+  // the previous deployment is still promoted, and the run stays unresolved.
+  it.runIf(hasShell)("rollback: failing alias reads after READY leave time to promote the previous deployment", () => {
+    const { status, output, calls } = run("rollback", `case "$url" in ${project("dpl_old")}
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo '{}' ;;
+      *"/v13/deployments/"*) n="$(dirname "$0")/ready"; if [[ -f "$n" ]]; then exit 28; fi; touch "$n"; echo '{"readyState":"READY"}' ;; esac`,
+      { DEPLOYMENT: "dpl_new", ROLLBACK_BUDGET_SECONDS: "30" }, "exit 1", 40_000);
+    expect(status).not.toBe(0);
+    expect(output).toContain("alias assignment has not settled");
+    expect(output).not.toContain("no time left for promotion request 1");
+    expect(calls).toContain("/promote/dpl_old");
+  }, 45_000);
+
+  it.runIf(hasShell)("rollback: a ready deployment whose alias was assigned is always followed by a promotion of the previous one", () => {
+    // Assigned, and the domain already on dpl_new: promoted back. Assigned while the domain shows dpl_old: still promoted.
+    const moved = run("rollback", `case "$url" in ${promotedBack}
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo '{}' ;;
+      *) echo '{"readyState":"READY","aliasAssigned":1764000000000}' ;; esac`, { DEPLOYMENT: "dpl_new", ROLLBACK_BUDGET_SECONDS: "30" });
+    expect(moved.status, moved.output).toBe(0);
+    expect(moved.calls).toContain("/promote/dpl_old");
+    expect(moved.output).toContain("rolled back: Production serves dpl_old");
+    const stayed = run("rollback", `case "$url" in ${project("dpl_old")}
+      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
+      *"/promote/"*) echo '{}' ;;
+      *) echo '{"readyState":"READY","aliasError":{"code":"x"}}' ;; esac`, { DEPLOYMENT: "dpl_new", ROLLBACK_BUDGET_SECONDS: "30" });
+    expect(stayed.calls).toContain("/promote/dpl_old");
+    expect(stayed.output).not.toContain("never went live");
+  }, 60_000);
+
 
   // Codex F2, consolidated review of the Release Candidate: missing or invalid monitoring parameters refuse the deploy
   // before anything is sent; afterwards, public pages alone never make a deployment pass.
@@ -290,7 +374,7 @@ describe("Production deploy workflow (GOV-001)", () => {
   });
 
   it.runIf(hasShell)("rollback: finds a deployment whose creation answer was lost, stops it, then confirms Production", () => {
-    const { status, calls } = run("rollback", `case "$url" in ${project("dpl_old")}
+    const { status, calls } = run("rollback", `case "$url" in ${promotedBack}
       *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_lost"}]}' ;;
       *"/cancel"*) echo '{}' ;;
       *"/promote/"*) echo '{}' ;;
@@ -317,7 +401,7 @@ describe("Production deploy workflow (GOV-001)", () => {
   it.runIf(hasShell)("rollback: a slow Production query in the first promotion window cannot take the retry's turn (Codex F2, third pass)", () => {
     // Listing, states and promotion answer at once; every Production query hangs for the whole --max-time it is given.
     const api = `case "$url" in
-      *"/v9/projects/"*) t=30; prev=""; for a in "$@"; do [[ "$prev" == "--max-time" ]] && t="$a"; prev="$a"; done; /bin/sleep "$t"; exit 28 ;;
+      *"/v4/aliases/"*) t=30; prev=""; for a in "$@"; do [[ "$prev" == "--max-time" ]] && t="$a"; prev="$a"; done; /bin/sleep "$t"; exit 28 ;;
       *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
       *"/promote/"*) echo '{}' ;;
       *) echo '{"readyState":"ERROR"}' ;; esac`;
@@ -347,33 +431,34 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(output).toContain("ROLLBACK UNRESOLVED: a deployment was requested but none of this run can be found");
     expect(output).not.toContain("rolled back:");
     expect(calls).toContain("/promote/dpl_old"); // the previous deployment is still promoted, as a best effort
+    expect(output).not.toContain("never went live"); // the domain showing the previous one is not trusted while unresolved
   }, 30_000);
 
   it.runIf(hasShell)("rollback: the deployments of this run cannot be listed: unresolved", () => {
     const { status, output } = run("rollback", `case "$url" in ${project("dpl_old")}
       *"/v6/deployments"*) exit 22 ;;
       *"/promote/"*) echo '{}' ;;
-      *) echo '{"readyState":"READY"}' ;; esac`, { DEPLOYMENT: "dpl_new" });
+      *) echo '{"readyState":"READY","aliasAssigned":true}' ;; esac`, { DEPLOYMENT: "dpl_new" });
     expect(status).not.toBe(0);
     expect(output).toContain("ROLLBACK UNRESOLVED: the deployments of this run could not be listed");
   }, 30_000);
 
   it.runIf(hasShell)("rollback: a lost promotion answer does not stop the run; Production state decides (Codex F2)", () => {
-    const { status, output, calls } = run("rollback", `case "$url" in ${project("dpl_old")}
+    const { status, output, calls } = run("rollback", `case "$url" in ${promotedBack}
       *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
       *"/promote/"*) exit 28 ;;
       *) echo '{"readyState":"ERROR"}' ;; esac`, { DEPLOYMENT: "dpl_new" });
     expect(status).toBe(0);
     expect(output).toContain("promotion request 1 failed or its answer was lost");
     expect(output).toContain("rolled back: Production serves dpl_old");
-    expect(calls.lastIndexOf("/v9/projects/")).toBeGreaterThan(calls.indexOf("/promote/dpl_old"));
+    expect(calls.lastIndexOf("/v4/aliases/")).toBeGreaterThan(calls.indexOf("/promote/dpl_old"));
   }, 30_000);
 
   it.runIf(hasShell)("rollback: an accepted promotion that never takes effect is retried, then reported as not confirmed", () => {
     const { status, output, calls } = run("rollback", `case "$url" in ${project("dpl_new")}
       *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
       *"/promote/"*) echo '{}' ;;
-      *) echo '{"readyState":"READY"}' ;; esac`, { DEPLOYMENT: "dpl_new" });
+      *) echo '{"readyState":"READY","aliasAssigned":true}' ;; esac`, { DEPLOYMENT: "dpl_new" });
     expect(status).not.toBe(0);
     expect(output).toContain("ROLLBACK NOT CONFIRMED: Production last seen serving dpl_new");
     expect(calls.match(/\/promote\/dpl_old/g)).toHaveLength(2);
@@ -382,10 +467,10 @@ describe("Production deploy workflow (GOV-001)", () => {
   it.runIf(hasShell)("rollback: a failed last read keeps the Production state actually seen in the diagnostic (CI of d0c87c0)", () => {
     // Production is read once (still the new deployment), then every read fails: the diagnostic names what was seen.
     const api = `case "$url" in
-      *"/v9/projects/"*) n="$(dirname "$0")/reads"; if [[ -f "$n" ]]; then exit 28; fi; touch "$n"; echo '{"targets":{"production":{"id":"dpl_new"}}}' ;;
+      *"/v4/aliases/"*) n="$(dirname "$0")/reads"; if [[ -f "$n" ]]; then exit 28; fi; touch "$n"; echo '{"deploymentId":"dpl_new"}' ;;
       *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
       *"/promote/"*) echo '{}' ;;
-      *) echo '{"readyState":"READY"}' ;; esac`;
+      *) echo '{"readyState":"READY","aliasAssigned":true}' ;; esac`;
     const { status, output } = run("rollback", api, { DEPLOYMENT: "dpl_new" });
     expect(status).not.toBe(0);
     expect(output).toContain("ROLLBACK NOT CONFIRMED: Production last seen serving dpl_new, not dpl_old");
