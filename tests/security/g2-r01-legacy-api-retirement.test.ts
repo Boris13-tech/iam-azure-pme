@@ -106,4 +106,11 @@ describe("G2-R01 (F-01): retirement of legacy unscoped API routes and internal e
     }
     expect(leaks).toEqual([]);
   });
+
+  it("migrates the staging HTTP smoke harness onto canonical endpoints and asserts 410 on retired routes", () => {
+    const harness = readFileSync(join(root, "scripts/e2e-http.ts"), "utf8");
+    expect(harness).toContain("/api/canonical/subjects");
+    expect(harness).toContain("retiredRes.status === 410");
+    expect(harness).not.toMatch(/apiRolesRes|patchUserRes|deleteUserRes|patchRoleRes/);
+  });
 });

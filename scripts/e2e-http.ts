@@ -1,6 +1,52 @@
-﻿import { PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+import { PrismaClient } from "@prisma/client";
 import { SessionStore } from "../lib/auth/session-store";
 import assert from "assert";
+
+async function ensureSubjectEntitlements(
+  adminPrisma: PrismaClient,
+  scope: { organizationId: string; tenantId: string },
+  subjectId: string,
+) {
+  const keys = ["subjects.read", "subjects.create", "subjects.update"] as const;
+  for (const key of keys) {
+    const [resource, action] = key.split(".");
+    const entitlement =
+      (await adminPrisma.entitlement.findUnique({
+        where: { organizationId_tenantId_key: { ...scope, key } },
+      })) ??
+      (await adminPrisma.entitlement.create({
+        data: {
+          ...scope,
+          key,
+          resource,
+          action,
+          description: `e2e-staging:${key}`,
+        },
+      }));
+
+    const existing = await adminPrisma.assignment.findFirst({
+      where: {
+        ...scope,
+        subjectId,
+        entitlementId: entitlement.id,
+        status: "ACTIVE",
+      },
+    });
+    if (!existing) {
+      await adminPrisma.assignment.create({
+        data: {
+          ...scope,
+          subjectId,
+          entitlementId: entitlement.id,
+          source: "DIRECT",
+          sourceRef: "native-role:LUXIA_ORG_ADMIN:v1",
+          validFrom: new Date(),
+        },
+      });
+    }
+  }
+}
 
 async function run() {
   console.log("Starting E2E HTTP verification (Staging Harness)...");
@@ -15,164 +61,281 @@ async function run() {
 
   const adminPrisma = new PrismaClient({ datasourceUrl: adminDb });
 
-  let org = await adminPrisma.organization.findFirst({ where: { name: "E2E Org" } });
-  if (!org) org = await adminPrisma.organization.create({ data: { name: "E2E Org" } });
-  
-  let tenant = await adminPrisma.tenant.findFirst({ where: { name: "E2E Tenant", organizationId: org.id } });
-  if (!tenant) tenant = await adminPrisma.tenant.create({ data: { name: "E2E Tenant", organizationId: org.id } });
-  
-  let provider = await adminPrisma.providerConnection.findFirst({
-    where: {
-      organizationId: org.id,
-      providerType: "MICROSOFT_ENTRA",
-      externalScopeId: "common"
-    }
-  });
+  try {
+    let org = await adminPrisma.organization.findFirst({ where: { name: "E2E Org" } });
+    if (!org) org = await adminPrisma.organization.create({ data: { name: "E2E Org" } });
 
-  if (!provider) {
-    provider = await adminPrisma.providerConnection.create({
-      data: {
+    let tenant = await adminPrisma.tenant.findFirst({
+      where: { name: "E2E Tenant", organizationId: org.id },
+    });
+    if (!tenant) {
+      tenant = await adminPrisma.tenant.create({
+        data: { name: "E2E Tenant", organizationId: org.id },
+      });
+    }
+
+    let provider = await adminPrisma.providerConnection.findFirst({
+      where: {
         organizationId: org.id,
         providerType: "MICROSOFT_ENTRA",
         externalScopeId: "common",
-        name: "E2E Entra Provider"
-      }
+      },
     });
-  }
 
-  const tenantId = tenant.id;
-  const orgId = org.id;
-  // Sign-in resolves only connections scoped to the organization's tenant.
-  const scope = await adminPrisma.providerConnectionTenantScope.findFirst({ where: { organizationId: orgId, tenantId, providerConnectionId: provider.id } });
-  if (!scope) await adminPrisma.providerConnectionTenantScope.create({ data: { organizationId: orgId, tenantId, providerConnectionId: provider.id } });
+    if (!provider) {
+      provider = await adminPrisma.providerConnection.create({
+        data: {
+          organizationId: org.id,
+          providerType: "MICROSOFT_ENTRA",
+          externalScopeId: "common",
+          name: "E2E Entra Provider",
+        },
+      });
+    }
 
-  let user = await adminPrisma.user.findFirst({ where: { email: "e2e@example.com" }});
-  if (!user) {
-    user = await adminPrisma.user.create({ data: { email: "e2e@example.com", name: "E2E User" }});
-    const subj = await adminPrisma.subject.create({
-      data: {
-        id: user.id,
+    const tenantId = tenant.id;
+    const orgId = org.id;
+    const scope = await adminPrisma.providerConnectionTenantScope.findFirst({
+      where: { organizationId: orgId, tenantId, providerConnectionId: provider.id },
+    });
+    if (!scope) {
+      await adminPrisma.providerConnectionTenantScope.create({
+        data: { organizationId: orgId, tenantId, providerConnectionId: provider.id },
+      });
+    }
+
+    let subject = await adminPrisma.subject.findFirst({
+      where: { organizationId: orgId, tenantId, name: "E2E User" },
+    });
+    if (!subject) {
+      subject = await adminPrisma.subject.create({
+        data: {
+          organizationId: orgId,
+          tenantId,
+          type: "HUMAN",
+          name: "E2E User",
+        },
+      });
+    }
+
+    let idAcc = await adminPrisma.identityAccount.findFirst({
+      where: {
         organizationId: orgId,
         tenantId,
-        type: "HUMAN",
-        name: "E2E User"
-      }
+        subjectId: subject.id,
+      },
     });
-    await adminPrisma.identityAccount.create({ data: { organizationId: orgId, tenantId: tenantId, subjectId: subj.id, providerConnectionId: provider.id, externalObjectId: "oid_123" }});
-  }
-  
-  const idAcc = await adminPrisma.identityAccount.findFirst({
-    where: {
+    if (!idAcc) {
+      idAcc = await adminPrisma.identityAccount.create({
+        data: {
+          organizationId: orgId,
+          tenantId,
+          subjectId: subject.id,
+          providerConnectionId: provider.id,
+          externalObjectId: `oid_${subject.id}`,
+        },
+      });
+    }
+
+    await ensureSubjectEntitlements(adminPrisma, { organizationId: orgId, tenantId }, subject.id);
+
+    // Neighbor organization fixture to verify tenant isolation on canonical mutations.
+    let otherOrg = await adminPrisma.organization.findFirst({ where: { name: "E2E Neighbor Org" } });
+    if (!otherOrg) otherOrg = await adminPrisma.organization.create({ data: { name: "E2E Neighbor Org" } });
+    let otherTenant = await adminPrisma.tenant.findFirst({
+      where: { organizationId: otherOrg.id, name: "E2E Neighbor Tenant" },
+    });
+    if (!otherTenant) {
+      otherTenant = await adminPrisma.tenant.create({
+        data: { organizationId: otherOrg.id, name: "E2E Neighbor Tenant" },
+      });
+    }
+    let otherSubject = await adminPrisma.subject.findFirst({
+      where: { organizationId: otherOrg.id, tenantId: otherTenant.id, name: "Neighbor Subject" },
+    });
+    if (!otherSubject) {
+      otherSubject = await adminPrisma.subject.create({
+        data: {
+          organizationId: otherOrg.id,
+          tenantId: otherTenant.id,
+          type: "HUMAN",
+          name: "Neighbor Subject",
+        },
+      });
+    }
+
+    // Customer Self-Onboarding v1: Microsoft sign-in is resolved on the server from the organization identifier.
+    const { slug } = await adminPrisma.organization.findUniqueOrThrow({
+      where: { id: orgId },
+      select: { slug: true },
+    });
+    const authLoginRes = await fetch(
+      baseUrl + "/auth/login?org=" + encodeURIComponent(slug),
+      { redirect: "manual" },
+    );
+    assert(
+      authLoginRes.status === 302 || authLoginRes.status === 307,
+      "Should redirect, got " + authLoginRes.status,
+    );
+    console.log("/auth/login                     PASS");
+
+    const location = authLoginRes.headers.get("location");
+    assert(location && location.includes("login.microsoftonline.com"), "Should redirect to Entra ID");
+    const url = new URL(location);
+    const state = url.searchParams.get("state");
+    assert(state, "State should be in redirect URL");
+
+    const tx = await adminPrisma.authTransaction.findUnique({
+      where: { stateHash: state },
+    });
+    assert(tx && tx.nonce && tx.codeVerifier, "Nonce and PKCE should be created");
+    console.log("state / nonce / PKCE            PASS");
+
+    const { session, rawToken } = await SessionStore.createSession({
       organizationId: orgId,
       tenantId,
-      subjectId: user.id
-    }
-  });
-  assert(idAcc, "E2E IdentityAccount fixture must exist");
+      subjectId: subject.id,
+      identityAccountId: idAcc.id,
+    });
+    const cookie = "luxia_session=" + rawToken;
 
-  const globalRole = await adminPrisma.role.findFirst({ where: { name: "Administrateur" } });
-  assert(globalRole, "Global role 'Administrateur' must be pre-seeded in Staging environment");
-  
-  const existingUR = await adminPrisma.userRole.findFirst({ where: { userId: user.id, roleId: globalRole.id } });
-  if (!existingUR) {
-      await adminPrisma.userRole.create({ data: { userId: user.id, roleId: globalRole.id } });
-  }
+    const subjectsRes = await fetch(baseUrl + "/api/canonical/subjects", {
+      headers: { Cookie: cookie, Accept: "application/json" },
+    });
+    assert(subjectsRes.status === 200, "Should allow canonical access with valid session cookie");
+    console.log("valid session                   PASS");
 
-  const existingBridge = await adminPrisma.legacyUserBridge.findFirst({ where: { organizationId: orgId, legacyUserId: user.id } });
-  if (!existingBridge) {
-      await adminPrisma.legacyUserBridge.create({ data: { organizationId: orgId, legacyUserId: user.id, subjectId: user.id, status: "VALIDATED" } });
-  }
+    const missingDashRes = await fetch(baseUrl + "/dashboard", {
+      headers: { Cookie: "" },
+      redirect: "manual",
+    });
+    assert(
+      missingDashRes.status === 307 || missingDashRes.status === 302,
+      "Should redirect to login",
+    );
+    console.log("missing cookie redirect         PASS");
 
-  // Customer Self-Onboarding v1: Microsoft sign-in is resolved on the server from the organization identifier.
-  const { slug } = await adminPrisma.organization.findUniqueOrThrow({ where: { id: orgId }, select: { slug: true } });
-  const authLoginRes = await fetch(baseUrl + "/auth/login?org=" + encodeURIComponent(slug), { redirect: "manual" });
-  assert(authLoginRes.status === 302 || authLoginRes.status === 307, "Should redirect, got " + authLoginRes.status);
-  console.log("/auth/login                     PASS");
-  
-  const location = authLoginRes.headers.get("location");
-  assert(location && location.includes("login.microsoftonline.com"), "Should redirect to Entra ID");
-  const url = new URL(location);
-  const state = url.searchParams.get("state");
-  assert(state, "State should be in redirect URL");
-  
-  const tx = await adminPrisma.authTransaction.findUnique({
-    where: { stateHash: state }
-  });
-  assert(tx && tx.nonce && tx.codeVerifier, "Nonce and PKCE should be created");
-  console.log("state / nonce / PKCE            PASS");
+    const invalidTokenRes = await fetch(baseUrl + "/api/canonical/subjects", {
+      headers: { Cookie: "luxia_session=INVALID_RANDOM_TOKEN", Accept: "application/json" },
+    });
+    assert(invalidTokenRes.status === 401, "Should reject invalid random token");
+    console.log("invalid random token -> 401     PASS");
 
-  const { session, rawToken } = await SessionStore.createSession({ organizationId: orgId, tenantId: tenantId, subjectId: user.id, identityAccountId: idAcc.id });
-  const cookie = "luxia_session=" + rawToken;
-  
-  const apiRolesRes = await fetch(baseUrl + "/api/roles", { headers: { Cookie: cookie, Accept: "application/json" } });
-  assert(apiRolesRes.status === 200, "Should allow access with valid session cookie");
-  console.log("valid session                   PASS");
+    const logoutRes = await fetch(baseUrl + "/auth/logout", {
+      method: "POST",
+      headers: { Cookie: cookie, Accept: "application/json", Origin: requestOrigin },
+      redirect: "manual",
+    });
+    assert(
+      logoutRes.status === 200 ||
+        logoutRes.status === 302 ||
+        logoutRes.status === 303 ||
+        logoutRes.status === 307,
+      "Logout should succeed",
+    );
+    const revokedSession = await adminPrisma.session.findUnique({ where: { id: session.id } });
+    assert(revokedSession && revokedSession.revokedAt !== null, "Session should be marked as revoked");
 
-  const missingDashRes = await fetch(baseUrl + "/dashboard", { headers: { Cookie: "" }, redirect: "manual" });
-  assert(missingDashRes.status === 307 || missingDashRes.status === 302, "Should redirect to login");
-  console.log("missing cookie redirect         PASS");
+    const revokedApiRes = await fetch(baseUrl + "/api/canonical/subjects", {
+      headers: { Cookie: cookie, Accept: "application/json" },
+    });
+    assert(revokedApiRes.status === 401, "Should reject revoked token");
+    console.log("revoked token -> 401            PASS");
 
-  const invalidTokenRes = await fetch(baseUrl + "/api/roles", { headers: { Cookie: "luxia_session=INVALID_RANDOM_TOKEN", Accept: "application/json" } });
-  assert(invalidTokenRes.status === 401, "Should reject invalid random token");
-  console.log("invalid random token → 401      PASS");
-
-  const logoutRes = await fetch(baseUrl + "/auth/logout", {
-    method: "POST",
-    headers: { Cookie: cookie, Accept: "application/json", Origin: requestOrigin },
-    redirect: "manual",
-  });
-  assert(logoutRes.status === 200 || logoutRes.status === 302 || logoutRes.status === 303 || logoutRes.status === 307, "Logout should succeed");
-  const revokedSession = await adminPrisma.session.findUnique({ where: { id: session.id } });
-  assert(revokedSession && revokedSession.revokedAt !== null, "Session should be marked as revoked");
-  
-  const revokedApiRes = await fetch(baseUrl + "/api/roles", { headers: { Cookie: cookie, Accept: "application/json" } });
-  assert(revokedApiRes.status === 401, "Should reject revoked token");
-  console.log("revoked token → 401             PASS");
-
-  // Tests nécessitant une session valide pour muter
-  const { session: session2, rawToken: rawToken2 } = await SessionStore.createSession({ organizationId: orgId, tenantId: tenantId, subjectId: user.id, identityAccountId: idAcc.id });
-  const cookie2 = "luxia_session=" + rawToken2;
-
-  const dummyUser = await adminPrisma.user.create({ data: { name: "Dummy " + Date.now(), email: "dummy" + Date.now() + "@x.com" }});
-  await adminPrisma.subject.create({
-    data: {
-      id: dummyUser.id,
+    // Authenticated canonical mutations & cross-organization isolation checks
+    const { session: session2, rawToken: rawToken2 } = await SessionStore.createSession({
       organizationId: orgId,
       tenantId,
-      type: "HUMAN",
-      name: dummyUser.name
+      subjectId: subject.id,
+      identityAccountId: idAcc.id,
+    });
+    const cookie2 = "luxia_session=" + rawToken2;
+
+    const createSubjectRes = await fetch(baseUrl + "/api/canonical/subjects", {
+      method: "POST",
+      headers: {
+        Cookie: cookie2,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Origin: requestOrigin,
+        "x-luxia-change-id": `e2e-create-${randomUUID()}`,
+      },
+      body: JSON.stringify({ name: "Dummy " + Date.now(), type: "HUMAN" }),
+    });
+    assert(createSubjectRes.status === 201, "POST /api/canonical/subjects should succeed");
+    const createdSubject = (await createSubjectRes.json()) as { id: string };
+    console.log("POST canonical/subjects         PASS");
+
+    const patchSubjectRes = await fetch(
+      baseUrl + "/api/canonical/subjects/" + createdSubject.id,
+      {
+        method: "PATCH",
+        headers: {
+          Cookie: cookie2,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Origin: requestOrigin,
+          "x-luxia-change-id": `e2e-patch-${randomUUID()}`,
+        },
+        body: JSON.stringify({ name: "Updated Name", lifecycleState: "RETIRED" }),
+      },
+    );
+    assert(patchSubjectRes.status === 200, "PATCH /api/canonical/subjects/[id] should succeed");
+    console.log("PATCH canonical/subjects/[id]   PASS");
+
+    const crossOrgPatchRes = await fetch(
+      baseUrl + "/api/canonical/subjects/" + otherSubject.id,
+      {
+        method: "PATCH",
+        headers: {
+          Cookie: cookie2,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Origin: requestOrigin,
+          "x-luxia-change-id": `e2e-cross-org-${randomUUID()}`,
+        },
+        body: JSON.stringify({ name: "Cross Org Mutation" }),
+      },
+    );
+    assert(crossOrgPatchRes.status === 404, "Cross-organization subject mutation must be rejected");
+    console.log("cross-org isolation             PASS");
+
+    for (const retiredPath of ["/api/roles", "/api/users"]) {
+      const retiredRes = await fetch(baseUrl + retiredPath, {
+        headers: { Cookie: cookie2, Accept: "application/json" },
+      });
+      assert(retiredRes.status === 410, `${retiredPath} must return 410 Gone`);
     }
-  });
-  await adminPrisma.legacyUserBridge.create({ data: { organizationId: orgId, legacyUserId: dummyUser.id, subjectId: dummyUser.id, status: "VALIDATED" }});
+    console.log("retired legacy routes -> 410    PASS");
 
-  const patchUserRes = await fetch(baseUrl + "/api/users/" + dummyUser.id, { method: "PATCH", headers: { Cookie: cookie2, Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ name: "Updated Name" }) });
-  assert(patchUserRes.status === 200, "PATCH should work");
-  console.log("PATCH users/[id]                PASS");
+    const logoutRes2 = await fetch(baseUrl + "/auth/logout", {
+      method: "POST",
+      headers: { Cookie: cookie2, Accept: "application/json", Origin: requestOrigin },
+      redirect: "manual",
+    });
+    assert(
+      logoutRes2.status === 200 ||
+        logoutRes2.status === 302 ||
+        logoutRes2.status === 303 ||
+        logoutRes2.status === 307,
+      "Second logout should succeed",
+    );
+    const revokedSession2 = await adminPrisma.session.findUnique({ where: { id: session2.id } });
+    assert(revokedSession2 && revokedSession2.revokedAt !== null, "Session should be marked as revoked");
+    console.log("logout -> revokedAt             PASS");
 
-  const deleteUserRes = await fetch(baseUrl + "/api/users/" + dummyUser.id, { method: "DELETE", headers: { Cookie: cookie2, Accept: "application/json" } });
-  assert(deleteUserRes.status === 200, "DELETE should work");
-  console.log("DELETE users/[id]               PASS");
+    const resolved = await SessionStore.getSession(rawToken2);
+    assert(resolved === null, "SessionStore should not resolve revoked session");
+    console.log("token reuse denied              PASS");
 
-  const patchRoleRes = await fetch(baseUrl + "/api/roles/" + globalRole.id, { method: "PATCH", headers: { Cookie: cookie2, Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ name: "Hacked" }) });
-  assert(patchRoleRes.status !== 200, "PATCH global role should be rejected");
-  console.log("global Role mutation denied     PASS");
-
-  const logoutRes2 = await fetch(baseUrl + "/auth/logout", {
-    method: "POST",
-    headers: { Cookie: cookie2, Accept: "application/json", Origin: requestOrigin },
-    redirect: "manual",
-  });
-  assert(logoutRes2.status === 200 || logoutRes2.status === 302 || logoutRes2.status === 303 || logoutRes2.status === 307, "Second logout should succeed");
-  const revokedSession2 = await adminPrisma.session.findUnique({ where: { id: session2.id } });
-  assert(revokedSession2 && revokedSession2.revokedAt !== null, "Session should be marked as revoked");
-  console.log("logout → revokedAt              PASS");
-
-  const resolved = await SessionStore.getSession(rawToken2);
-  assert(resolved === null, "SessionStore should not resolve revoked session");
-  console.log("token reuse denied              PASS");
-
-  console.log("ALL STAGING GATE 0 HTTP TESTS PASSED");
+    console.log("ALL STAGING GATE 0 HTTP TESTS PASSED");
+  } finally {
+    await adminPrisma.$disconnect();
+  }
   process.exit(0);
 }
 
-run().catch(e => { console.error("E2E failed:", e); process.exit(1); });
+run().catch((e) => {
+  console.error("E2E failed:", e);
+  process.exit(1);
+});
