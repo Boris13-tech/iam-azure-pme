@@ -306,6 +306,7 @@ jobs:
           # A creation request was sent, yet no deployment of this attempt is known: it may still appear and go live.
           [[ -n "$ids" ]] || unresolved="${unresolved:-a deployment was requested but none of this run can be found; it may still go live}"
           # 2. Each must be finished (ready, failed or cancelled) before the promotion, or it could still reach Production.
+          reached_ready=""
           for one in $ids; do
             state=""
             while (( deadline - SECONDS > 3 )); do
@@ -319,14 +320,27 @@ jobs:
               if [[ -n "$state" ]]; then unresolved="deployment $one is still $state (last state seen)"
               else unresolved="deployment $one is in an unknown state (never read)"; fi
             fi
+            # A ready deployment may still be given the Production domain after it is ready (Codex, review of #202):
+            # its alias assignment must have settled (assigned, or failed) before anything is decided or promoted.
+            if [[ "$state" == "READY" ]]; then
+              reached_ready=1; settled=""
+              while (( deadline - SECONDS > 3 )); do
+                if alias_state="$(api "https://api.vercel.com/v13/deployments/$one?teamId=$TEAM" \
+                    | jq -r 'if (.aliasError // null) != null then "failed" elif (.aliasAssigned // false) != false then "assigned" else "pending" end')" \
+                    && [[ "$alias_state" == "assigned" || "$alias_state" == "failed" ]]; then settled=1; break; fi
+                pause || break
+              done
+              [[ -n "$settled" ]] || unresolved="deployment $one is ready but its Production alias assignment has not settled"
+            fi
           done
           # 3. Promote the previous deployment; a refused or lost answer is retried once, Production state decides.
           current=""; confirmed=""
-          # Every deployment of this run is finished (step 2): if the domain still points to the previous deployment, the
-          # new one never went live and nothing is promoted (2026-11-21: promoting the live deployment answered 409).
+          # Every deployment of this run failed or was cancelled before it was ready (step 2): if the domain still points
+          # to the previous deployment, nothing of this run can reach Production, and nothing is promoted (2026-11-21:
+          # promoting the live deployment answered 409). Once one was ready, the promotion always runs.
           # This read gets at most a third of the time left, so a slow answer never takes the promotions' turn.
           stop=$((SECONDS + (deadline - SECONDS) / 3))
-          if [[ -z "$unresolved" ]] && observed="$(production)" && [[ -n "$observed" ]]; then
+          if [[ -z "$unresolved" && -z "$reached_ready" ]] && observed="$(production)" && [[ -n "$observed" ]]; then
             current="$observed"
             [[ "$current" == "$PREVIOUS" ]] && { confirmed=1; echo "::warning::the new deployment never went live: Production still serves $PREVIOUS"; }
           fi
