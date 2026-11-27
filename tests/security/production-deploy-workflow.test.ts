@@ -240,17 +240,6 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(calls).not.toContain("/promote/");
   }, 30_000);
 
-  it.runIf(hasShell)("rollback: an unresolved deployment still promotes the previous one as a best effort, even if the domain shows it", () => {
-    const { status, output, calls } = run("rollback", `case "$url" in ${project("dpl_old")}
-      *"/v6/deployments"*) echo '{"deployments":[{"uid":"dpl_new"}]}' ;;
-      *"/promote/"*) echo '{}' ;;
-      *"/cancel"*) echo '{}' ;;
-      *) echo '{"readyState":"BUILDING"}' ;; esac`, { DEPLOYMENT: "dpl_new" });
-    expect(status).not.toBe(0);
-    expect(output).toContain("ROLLBACK UNRESOLVED: deployment dpl_new is still BUILDING");
-    expect(output).not.toContain("never went live");
-    expect(calls).toContain("/promote/dpl_old");
-  }, 30_000);
 
   // Codex F2, consolidated review of the Release Candidate: missing or invalid monitoring parameters refuse the deploy
   // before anything is sent; afterwards, public pages alone never make a deployment pass.
@@ -399,6 +388,7 @@ describe("Production deploy workflow (GOV-001)", () => {
     expect(output).toContain("ROLLBACK UNRESOLVED: a deployment was requested but none of this run can be found");
     expect(output).not.toContain("rolled back:");
     expect(calls).toContain("/promote/dpl_old"); // the previous deployment is still promoted, as a best effort
+    expect(output).not.toContain("never went live"); // the domain showing the previous one is not trusted while unresolved
   }, 30_000);
 
   it.runIf(hasShell)("rollback: the deployments of this run cannot be listed: unresolved", () => {

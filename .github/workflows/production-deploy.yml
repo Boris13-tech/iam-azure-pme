@@ -324,10 +324,13 @@ jobs:
           current=""; confirmed=""
           # Every deployment of this run is finished (step 2): if the domain still points to the previous deployment, the
           # new one never went live and nothing is promoted (2026-11-21: promoting the live deployment answered 409).
+          # This read gets at most a third of the time left, so a slow answer never takes the promotions' turn.
+          stop=$((SECONDS + (deadline - SECONDS) / 3))
           if [[ -z "$unresolved" ]] && observed="$(production)" && [[ -n "$observed" ]]; then
             current="$observed"
             [[ "$current" == "$PREVIOUS" ]] && { confirmed=1; echo "::warning::the new deployment never went live: Production still serves $PREVIOUS"; }
           fi
+          stop=$deadline
           for attempt in 1 2; do
             [[ -n "$confirmed" ]] && break
             stop=$deadline
