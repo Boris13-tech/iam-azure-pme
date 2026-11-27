@@ -11,7 +11,6 @@ const implementationRoot = path.join(
 const oidcCoreRoot = path.join(root, "lib/provider-adapters/implementations/oidc");
 const allowedImplementationImporters = new Set([
   "lib/auth/providers/entra.ts",
-  "lib/graph.ts",
 ]);
 
 describe("Phase 6B Microsoft dependency boundary", () => {
